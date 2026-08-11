@@ -1,6 +1,6 @@
 # 입력 템플릿 (빈 템플릿)
 
-아래를 채워서 seungjinbae.md(ValidatedDecision) 에이전트에 넘깁니다. 예시는 [input-sample.md](input-sample.md)를 참고하세요.
+아래를 채워서 seungjinbae 에이전트(`.claude/agents/validated-decision.md`)에 넘깁니다. 입력 형식 설명과 예시는 [input-sample.md](input-sample.md)를 참고하세요.
 
 ## 리스크 서술
 
@@ -17,3 +17,5 @@
    담당자:
    기한:
    근거 ID:
+
+필드를 비워 둬도 접수는 거부되지 않습니다. 비어 있다는 사실 자체가 반려 사유로 기록됩니다.
