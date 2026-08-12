@@ -4,12 +4,15 @@ import os
 from collections import Counter
 from pathlib import Path
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from agents.evidence_rag.retrieval import embedding_rank
-from agents.structured import parse_structured
+from agents.structured import StructuredModelError, parse_structured
 from contracts import (
     ArtifactStatus,
     ErrorCode,
     EvidencePack,
+    ExploratoryInsight,
     FeedbackBundle,
     Language,
     LanguageInsight,
@@ -30,6 +33,34 @@ ISSUE_TITLES = {
 }
 
 
+class IssueNarrative(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    category: RiskCategory
+    title: str = Field(min_length=1)
+    summary: str = Field(min_length=1)
+    evidence_ids: list[str] = Field(min_length=1)
+
+
+class PersonaNarrative(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: PersonaKind
+    motivations: list[str] = Field(min_length=1)
+    churn_triggers: list[str] = Field(min_length=1)
+    play_constraints: list[str] = Field(min_length=1)
+    payment_sensitivity: str = Field(min_length=1)
+    evidence_ids: list[str] = Field(min_length=1)
+
+
+class EvidenceNarrative(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    issues: list[IssueNarrative]
+    personas: list[PersonaNarrative]
+    exploratory_insights: list[ExploratoryInsight]
+
+
 class EvidenceRagAgent:
     model = os.getenv("OPENAI_RAG_MODEL", "gpt-5.6-luna")
     embedding_model = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
@@ -40,12 +71,11 @@ class EvidenceRagAgent:
         self.client = client
 
     def run(self, bundle: FeedbackBundle) -> EvidencePack:
+        base = self.run_deterministic(bundle)
         if self.use_llm:
             client = self.client
             if client is None:
                 if not os.getenv("OPENAI_API_KEY"):
-                    from agents.structured import StructuredModelError
-
                     raise StructuredModelError(ErrorCode.AUTH_FAILED, "OPENAI_API_KEY is missing")
                 from openai import OpenAI
 
@@ -56,14 +86,75 @@ class EvidenceRagAgent:
                 client=client,
                 model=self.embedding_model,
             )
-            return parse_structured(
+            narrative = parse_structured(
                 model=self.model,
                 prompt_path=self.prompt_path,
-                output_type=EvidencePack,
-                payload=bundle.model_copy(update={"evidence": ranked}),
+                output_type=EvidenceNarrative,
+                payload=base.model_copy(update={"evidence": ranked}),
                 client=client,
             )
+            return self._merge_narrative(base, narrative)
+        return base
+
+    def run_deterministic(self, bundle: FeedbackBundle) -> EvidencePack:
         return self._deterministic(bundle)
+
+    def _merge_narrative(
+        self, base: EvidencePack, narrative: EvidenceNarrative
+    ) -> EvidencePack:
+        issues_by_category = {
+            issue.category: (index, issue) for index, issue in enumerate(base.issues)
+        }
+        personas_by_kind = {
+            persona.kind: (index, persona) for index, persona in enumerate(base.personas)
+        }
+        evidence_ids = {item.evidence_id for item in base.evidence}
+        issues = list(base.issues)
+        personas = list(base.personas)
+
+        for proposal in narrative.issues:
+            official = issues_by_category.get(proposal.category)
+            if official is None or not set(proposal.evidence_ids) <= set(official[1].evidence_ids):
+                self._invalid_narrative_reference()
+            index, issue = official
+            issues[index] = issue.model_copy(
+                update={"title": proposal.title, "summary": proposal.summary}
+            )
+
+        for proposal in narrative.personas:
+            official = personas_by_kind.get(proposal.kind)
+            if official is None or not set(proposal.evidence_ids) <= set(official[1].evidence_ids):
+                self._invalid_narrative_reference()
+            index, persona = official
+            personas[index] = persona.model_copy(
+                update={
+                    "motivations": proposal.motivations,
+                    "churn_triggers": proposal.churn_triggers,
+                    "play_constraints": proposal.play_constraints,
+                    "payment_sensitivity": proposal.payment_sensitivity,
+                }
+            )
+
+        for insight in narrative.exploratory_insights:
+            if not set(insight.evidence_ids) <= evidence_ids:
+                self._invalid_narrative_reference()
+
+        return base.model_copy(
+            update={
+                "issues": issues,
+                "personas": personas,
+                "exploratory_insights": [
+                    *base.exploratory_insights,
+                    *narrative.exploratory_insights,
+                ],
+            }
+        )
+
+    @staticmethod
+    def _invalid_narrative_reference() -> None:
+        raise StructuredModelError(
+            ErrorCode.SCHEMA_INVALID, "LLM narrative references unknown evidence"
+        )
 
     def _deterministic(self, bundle: FeedbackBundle) -> EvidencePack:
         deduplicated = list({item.source_id: item for item in bundle.evidence}.values())

@@ -1,7 +1,13 @@
+from types import SimpleNamespace
+
+import pytest
+
 from agents.audit_strategy import AuditStrategyAgent
 from agents.audit_strategy import agent as audit_module
 from agents.event_redteam import EventRedteamAgent
 from agents.evidence_rag import EvidenceRagAgent
+from agents.evidence_rag import agent as evidence_module
+from agents.structured import StructuredModelError
 from contracts import Decision, LanguageSample, RiskCategory
 
 OFFICIAL_TARGETS = {
@@ -118,3 +124,78 @@ def test_audit_llm_rechecks_semantic_and_closed_policy_risks(monkeypatch, event,
         unknown_policy.risk_id,
     }
     assert decision.priority_revisions == []
+
+
+def test_evidence_llm_enriches_text_without_changing_core(monkeypatch, feedback):
+    deterministic = EvidenceRagAgent().run(feedback)
+    target = deterministic.issues[0]
+
+    def fake_parse_structured(**_kwargs):
+        return evidence_module.EvidenceNarrative(
+            issues=[
+                evidence_module.IssueNarrative(
+                    category=target.category,
+                    title="AI가 정리한 제목",
+                    summary="AI가 근거 범위 안에서 정리한 설명",
+                    evidence_ids=target.evidence_ids[:2],
+                )
+            ],
+            personas=[],
+            exploratory_insights=[],
+        )
+
+    monkeypatch.setattr(evidence_module, "parse_structured", fake_parse_structured)
+    monkeypatch.setattr(evidence_module, "embedding_rank", lambda _q, evidence, **_k: evidence)
+    enriched = EvidenceRagAgent(use_llm=True, client=SimpleNamespace()).run(feedback)
+
+    assert enriched.issues[0].title == "AI가 정리한 제목"
+    assert enriched.issues[0].category == target.category
+    assert enriched.issues[0].evidence_ids == target.evidence_ids
+    assert enriched.issues[0].confidence == target.confidence
+
+
+def test_evidence_llm_rejects_unknown_evidence(monkeypatch, feedback):
+    target = EvidenceRagAgent().run(feedback).issues[0]
+
+    def fake_parse_structured(**_kwargs):
+        return evidence_module.EvidenceNarrative(
+            issues=[
+                evidence_module.IssueNarrative(
+                    category=target.category,
+                    title="제목",
+                    summary="설명",
+                    evidence_ids=["invented-id"],
+                )
+            ],
+            personas=[],
+            exploratory_insights=[],
+        )
+
+    monkeypatch.setattr(evidence_module, "parse_structured", fake_parse_structured)
+    monkeypatch.setattr(evidence_module, "embedding_rank", lambda _q, evidence, **_k: evidence)
+    with pytest.raises(StructuredModelError, match="unknown evidence"):
+        EvidenceRagAgent(use_llm=True, client=SimpleNamespace()).run(feedback)
+
+
+def test_evidence_llm_rejects_evidence_outside_issue(monkeypatch, feedback):
+    target = EvidenceRagAgent().run(feedback).issues[0]
+    unrelated = next(
+        item for item in feedback.evidence if target.category.value not in item.mechanism_tags
+    )
+    narrative = evidence_module.EvidenceNarrative(
+        issues=[
+            evidence_module.IssueNarrative(
+                category=target.category,
+                title="제목",
+                summary="설명",
+                evidence_ids=[unrelated.evidence_id],
+            )
+        ],
+        personas=[],
+        exploratory_insights=[],
+    )
+
+    monkeypatch.setattr(evidence_module, "parse_structured", lambda **_kwargs: narrative)
+    monkeypatch.setattr(evidence_module, "embedding_rank", lambda _q, evidence, **_k: evidence)
+    with pytest.raises(StructuredModelError, match="unknown evidence"):
+        EvidenceRagAgent(use_llm=True, client=SimpleNamespace()).run(feedback)
