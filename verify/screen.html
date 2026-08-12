@@ -160,7 +160,9 @@
 
 <script>
   document.getElementById('run-btn').addEventListener('click', function () {
-    document.getElementById('result').classList.add('visible');
+    var result = document.getElementById('result');
+    result.style.display = 'block';
+    result.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
 </script>
 
