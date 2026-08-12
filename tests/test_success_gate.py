@@ -1,8 +1,9 @@
-from evaluation.verify_success import verify
+import evaluation.verify_success as success_gate
+from orchestrator import EventPreflightOrchestrator
 
 
 def test_explicit_success_gate_passes():
-    report = verify()
+    report = success_gate.verify()
     assert report.passed
     assert report.backtest.detected_count >= 3
     assert report.backtest.evidence_link_rate == 1
@@ -18,3 +19,19 @@ def test_explicit_success_gate_passes():
     assert report.semantic_links_valid
     assert report.event_sequence_valid
     assert len(report.input_snapshot_hash) == 64
+
+
+def test_success_gate_rejects_pending_input_snapshot_hash(monkeypatch):
+    class PendingHashOrchestrator(EventPreflightOrchestrator):
+        def run(self, *args, **kwargs):
+            result = super().run(*args, **kwargs)
+            result.brief = result.brief.model_copy(update={"input_snapshot_hash": "pending"})
+            return result
+
+    monkeypatch.setattr(success_gate, "EventPreflightOrchestrator", PendingHashOrchestrator)
+
+    report = success_gate.verify()
+
+    assert report.input_snapshot_hash == "pending"
+    assert report.reproducible_core
+    assert not report.passed

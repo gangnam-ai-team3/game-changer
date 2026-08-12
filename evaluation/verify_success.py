@@ -108,6 +108,7 @@ def verify() -> SuccessReport:
             reproducible_core,
             semantic_links_valid,
             event_sequence_valid,
+            len(result.brief.input_snapshot_hash) == 64,
             hidden_count >= 3,
             insufficient_decision.decision == Decision.HOLD,
             cutoff_leak_blocked,
