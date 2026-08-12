@@ -37,7 +37,7 @@ class RevisionNarrative(BaseModel):
 class AuditNarrative(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    decision_reason: str = Field(min_length=1)
+    decision_narrative: str = Field(min_length=1)
     revisions: list[RevisionNarrative]
 
 
@@ -180,7 +180,10 @@ class AuditStrategyAgent:
                 )
             )
         return base.model_copy(
-            update={"decision_reason": narrative.decision_reason, "priority_revisions": revisions}
+            update={
+                "decision_narrative": narrative.decision_narrative,
+                "priority_revisions": revisions,
+            }
         )
 
     def to_brief(

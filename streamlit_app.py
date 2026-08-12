@@ -12,7 +12,7 @@ import streamlit as st
 from streamlit.errors import StreamlitSecretNotFoundError
 
 from agents.collector import CollectionOptions
-from contracts import ArtifactStatus, EventBrief, Producer
+from contracts import ArtifactStatus, EventBrief, InputMode, Producer
 from evaluation.backtest import evaluate_black_market
 from evaluation.fixtures import load_demo_event
 from execution import ExecutionEvent, ExecutionState
@@ -146,6 +146,9 @@ def _render_decision(placeholder: Any, result: PipelineResult) -> None:
     placeholder.empty()
     with placeholder.container():
         st.header("3. 의사결정 브리프")
+        st.warning("이 브리프는 자문용이며, 담당자가 검토한 뒤 사람이 최종 결정을 내립니다.")
+        if result.fallback_used or result.analysis_incomplete:
+            st.warning("일부 분석이 결정론적 안전 경로를 사용해 결과가 불완전할 수 있습니다.")
         decision_col, risk_col, evidence_col, language_col = st.columns(4)
         decision_col.metric("최종 판정", brief.decision.value)
         risk_col.metric("상위 위험", len(brief.top_risks))
@@ -204,7 +207,11 @@ def _render_decision(placeholder: Any, result: PipelineResult) -> None:
             with st.expander(label, expanded=False):
                 _render_trace(contract_name, get_artifact(result), result.events)
 
-        if all(item.synthetic for item in brief.evidence):
+        if (
+            result.feedback.input_mode == InputMode.FIXTURE
+            and brief.evidence
+            and all(item.synthetic for item in brief.evidence)
+        ):
             st.subheader("데모 전용 백테스트")
             score = evaluate_black_market(brief)
             st.caption("2026 정답지는 의사결정 브리프가 완성된 뒤에만 읽습니다. 실제 예측이 아닌 회고형 시뮬레이션입니다.")
@@ -347,6 +354,15 @@ if submitted or rerun_fixture_requested:
         _render_decision(pipeline_placeholder, result)
     except (ValueError, PipelineStopped) as exc:
         message = str(exc)
+        store_failure(st.session_state, message)
+        events = st.session_state["execution_events"]
+        if events:
+            _render_running_pipeline(
+                pipeline_placeholder,
+                build_pipeline_view(events, finished=False, error=message),
+            )
+    except Exception:
+        message = "예상하지 못한 오류로 실행을 중단했습니다."
         store_failure(st.session_state, message)
         events = st.session_state["execution_events"]
         if events:

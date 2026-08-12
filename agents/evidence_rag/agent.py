@@ -171,7 +171,9 @@ class EvidenceRagAgent:
         on_event: Callable[[str, str, dict], None] | None = None,
     ) -> EvidencePack:
         notify = on_event or (lambda _node, _message, _metrics: None)
-        deduplicated = list({item.source_id: item for item in bundle.evidence}.values())
+        deduplicated = list(
+            {(item.source, item.source_id): item for item in bundle.evidence}.values()
+        )
         notify(
             "deduplicated",
             "중복 근거를 제거했습니다.",

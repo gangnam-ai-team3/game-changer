@@ -306,6 +306,16 @@ class EventPreflightOrchestrator:
             except (ValidationError, ContractViolation) as exc:
                 emit(name, "agent", ExecutionState.FAILED, str(exc))
                 raise PipelineStopped(f"{name}: SCHEMA_INVALID: {exc}") from exc
+            except Exception as exc:
+                error_type = type(exc).__name__
+                emit(
+                    name,
+                    "agent",
+                    ExecutionState.FAILED,
+                    f"예상하지 못한 {error_type} 오류로 실행을 중단했습니다.",
+                    {"error_type": error_type},
+                )
+                raise PipelineStopped(f"{name}: unexpected {error_type}") from exc
         raise AssertionError("unreachable")
 
     def _deterministic_stage(
@@ -348,6 +358,16 @@ class EventPreflightOrchestrator:
         except (ValidationError, ContractViolation) as exc:
             emit(name, "agent", ExecutionState.FAILED, str(exc))
             raise PipelineStopped(f"{name}: SCHEMA_INVALID: {exc}") from exc
+        except Exception as exc:
+            error_type = type(exc).__name__
+            emit(
+                name,
+                "agent",
+                ExecutionState.FAILED,
+                f"예상하지 못한 {error_type} 오류로 실행을 중단했습니다.",
+                {"error_type": error_type},
+            )
+            raise PipelineStopped(f"{name}: unexpected {error_type}") from exc
         emit(name, "agent", ExecutionState.COMPLETE, "결정론적 안전 경로를 완료했습니다.")
         return checked
 
@@ -399,6 +419,19 @@ def _input_snapshot_hash(event: EventBrief, feedback: FeedbackBundle) -> str:
         }
         for item in sorted(feedback.evidence, key=lambda item: item.evidence_id)
     ]
-    payload = {"event": event_body, "input_mode": feedback.input_mode.value, "evidence": evidence}
+    samples = [
+        {
+            "language": sample.language.value,
+            "general_count": sample.general_count,
+            "mechanism_count": sample.mechanism_count,
+        }
+        for sample in sorted(feedback.samples, key=lambda sample: sample.language.value)
+    ]
+    payload = {
+        "event": event_body,
+        "input_mode": feedback.input_mode.value,
+        "samples": samples,
+        "evidence": evidence,
+    }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode()).hexdigest()

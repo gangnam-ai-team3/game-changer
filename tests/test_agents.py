@@ -136,7 +136,7 @@ def test_audit_llm_only_accepts_narrative_schema(monkeypatch, event, feedback):
     assessment = EventRedteamAgent().run(event, pack)
     baseline = AuditStrategyAgent().run(feedback, pack, assessment)
     narrative = audit_module.AuditNarrative(
-        decision_reason="LLM은 설명만 보강합니다.", revisions=[]
+        decision_narrative="LLM은 설명만 보강합니다.", revisions=[]
     )
 
     def fake_parse_structured(**kwargs):
@@ -148,6 +148,8 @@ def test_audit_llm_only_accepts_narrative_schema(monkeypatch, event, feedback):
     decision = AuditStrategyAgent(use_llm=True, client=object()).run(feedback, pack, assessment)
 
     assert decision_core(decision) == decision_core(baseline)
+    assert decision.decision_reason == baseline.decision_reason
+    assert decision.decision_narrative == narrative.decision_narrative
 
 
 def test_redteam_llm_text_cannot_override_core(monkeypatch, event, feedback):
@@ -188,7 +190,7 @@ def test_redteam_llm_text_cannot_override_core(monkeypatch, event, feedback):
     assert risk_core(first) == risk_core(second) == risk_core(base)
 
 
-def test_audit_llm_text_cannot_override_decision_or_links(monkeypatch, event, feedback):
+def test_audit_llm_text_cannot_override_deterministic_decision_reason(monkeypatch, event, feedback):
     pack = EvidenceRagAgent().run(feedback)
     assessment = EventRedteamAgent().run(event, pack)
     base = AuditStrategyAgent().run(feedback, pack, assessment)
@@ -196,7 +198,7 @@ def test_audit_llm_text_cannot_override_decision_or_links(monkeypatch, event, fe
     responses = iter(
         [
             audit_module.AuditNarrative(
-                decision_reason="첫 번째 설명",
+                decision_narrative="Go로 즉시 출시해도 된다.",
                 revisions=[
                     audit_module.RevisionNarrative(
                         category=category,
@@ -207,7 +209,7 @@ def test_audit_llm_text_cannot_override_decision_or_links(monkeypatch, event, fe
                 ],
             ),
             audit_module.AuditNarrative(
-                decision_reason="두 번째 설명",
+                decision_narrative="Hold로 영구 중단해야 한다.",
                 revisions=[
                     audit_module.RevisionNarrative(
                         category=category,
@@ -223,8 +225,39 @@ def test_audit_llm_text_cannot_override_decision_or_links(monkeypatch, event, fe
     agent = AuditStrategyAgent(use_llm=True, client=object())
     first = agent.run(feedback, pack, assessment)
     second = agent.run(feedback, pack, assessment)
-    assert first.decision_reason != second.decision_reason
+    first_brief = agent.to_brief(event, pack, first)
+    assert first.decision_reason == second.decision_reason == base.decision_reason
+    assert first.decision_narrative != second.decision_narrative
+    assert first_brief.executive_summary.endswith(base.decision_reason)
+    assert first.decision_narrative not in first_brief.executive_summary
     assert decision_core(first) == decision_core(second) == decision_core(base)
+
+
+def test_rag_deduplicates_by_source_and_source_id(feedback):
+    first = feedback.evidence[0].model_copy(
+        update={
+            "evidence_id": "collision-steam",
+            "source": SourceType.STEAM,
+            "source_id": "collision-id",
+            "source_url": "https://steamcommunity.com",
+        }
+    )
+    second = feedback.evidence[1].model_copy(
+        update={
+            "evidence_id": "collision-x",
+            "source": SourceType.X,
+            "source_id": "collision-id",
+            "source_url": "https://x.com",
+        }
+    )
+    bundle = feedback.model_copy(update={"evidence": [first, second]})
+
+    pack = EvidenceRagAgent().run_deterministic(bundle)
+
+    assert {(item.source, item.source_id) for item in pack.evidence} == {
+        (SourceType.STEAM, "collision-id"),
+        (SourceType.X, "collision-id"),
+    }
 
 
 def test_evidence_llm_enriches_text_without_changing_core(monkeypatch, feedback):

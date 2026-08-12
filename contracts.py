@@ -314,6 +314,7 @@ class RevisionAction(BaseModel):
 class ValidatedDecision(Artifact):
     decision: Decision
     decision_reason: str = Field(min_length=1)
+    decision_narrative: str | None = Field(default=None, min_length=1)
     validated_risks: list[RiskItem]
     rejected_risks: list[RejectedRisk]
     priority_revisions: list[RevisionAction]

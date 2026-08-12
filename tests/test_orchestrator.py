@@ -142,6 +142,29 @@ def test_input_snapshot_hash_changes_when_normalized_input_changes(event):
     assert first.brief.input_snapshot_hash != second.brief.input_snapshot_hash
 
 
+def test_sample_counts_change_snapshot_hash_and_can_change_decision(event):
+    baseline = EventPreflightOrchestrator().run(event, CollectionOptions())
+    changed_samples = [
+        sample.model_copy(update={"general_count": 0, "mechanism_count": 0})
+        if index < 3
+        else sample
+        for index, sample in enumerate(baseline.feedback.samples)
+    ]
+
+    class ChangedSampleCollector:
+        def run(self, _event, _options, on_event=None):
+            return baseline.feedback.model_copy(update={"samples": changed_samples})
+
+    changed = EventPreflightOrchestrator(collector=ChangedSampleCollector()).run(
+        event, CollectionOptions()
+    )
+
+    assert changed.feedback.evidence == baseline.feedback.evidence
+    assert changed.brief.input_snapshot_hash != baseline.brief.input_snapshot_hash
+    assert baseline.brief.decision == Decision.REVISE
+    assert changed.brief.decision == Decision.HOLD
+
+
 def test_success_events_include_internal_nodes_in_pipeline_order(event):
     result = EventPreflightOrchestrator().run(event, CollectionOptions())
     assert [item.agent for item in result.events[:4]] == list(AGENT_ORDER)
@@ -175,5 +198,64 @@ def test_failure_event_never_starts_downstream_agents(event):
         )
     assert not any(
         item.agent in {"event_redteam", "audit_strategy"} and item.state == ExecutionState.RUNNING
+        for item in events
+    )
+
+
+def test_unexpected_stage_exception_records_safe_failure_and_stops_downstream(event):
+    class BrokenRag(EvidenceRagAgent):
+        def run(self, _bundle, on_event=None):
+            raise TypeError("username alice must not escape")
+
+    events = []
+    with pytest.raises(PipelineStopped) as error:
+        EventPreflightOrchestrator(evidence_rag=BrokenRag()).run(
+            event,
+            CollectionOptions(),
+            on_event=events.append,
+        )
+
+    assert isinstance(error.value.__cause__, TypeError)
+    failed = next(
+        item
+        for item in events
+        if item.agent == "evidence_rag_personas" and item.state == ExecutionState.FAILED
+    )
+    assert failed.metrics == {"error_type": "TypeError"}
+    assert "alice" not in failed.message
+    assert not any(
+        item.agent in {"event_redteam", "audit_strategy"}
+        and item.state == ExecutionState.RUNNING
+        for item in events
+    )
+
+
+def test_unexpected_deterministic_exception_records_safe_failure_and_stops_downstream(event):
+    class BrokenFallbackRag(EvidenceRagAgent):
+        def run(self, _bundle, on_event=None):
+            raise StructuredModelError(ErrorCode.LLM_REFUSAL, "refused")
+
+        def run_deterministic(self, _bundle, on_event=None):
+            raise RuntimeError("raw internal detail must not escape")
+
+    events = []
+    with pytest.raises(PipelineStopped) as error:
+        EventPreflightOrchestrator(evidence_rag=BrokenFallbackRag()).run(
+            event,
+            CollectionOptions(),
+            on_event=events.append,
+        )
+
+    assert isinstance(error.value.__cause__, RuntimeError)
+    failed = [
+        item
+        for item in events
+        if item.agent == "evidence_rag_personas" and item.state == ExecutionState.FAILED
+    ][-1]
+    assert failed.metrics == {"error_type": "RuntimeError"}
+    assert "raw internal detail" not in failed.message
+    assert not any(
+        item.agent in {"event_redteam", "audit_strategy"}
+        and item.state == ExecutionState.RUNNING
         for item in events
     )
