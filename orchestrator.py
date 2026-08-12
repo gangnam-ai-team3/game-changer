@@ -17,9 +17,11 @@ from contracts import (
     Artifact,
     ArtifactStatus,
     DecisionBrief,
+    ErrorCode,
     EventBrief,
     EvidencePack,
     FeedbackBundle,
+    InputMode,
     Producer,
     RiskAssessment,
     ValidatedDecision,
@@ -40,6 +42,8 @@ class PipelineResult:
     risks: RiskAssessment
     validated: ValidatedDecision
     brief: DecisionBrief
+    fallback_used: bool = False
+    analysis_incomplete: bool = False
 
 
 class EventPreflightOrchestrator:
@@ -69,6 +73,8 @@ class EventPreflightOrchestrator:
             raise PipelineStopped("EventBrief producer must be user")
         options = options or CollectionOptions()
         notify = on_stage or (lambda _stage, _status, _message: None)
+        fallback_used = False
+        analysis_incomplete = False
 
         feedback = self._stage(
             "collection",
@@ -80,41 +86,118 @@ class EventPreflightOrchestrator:
             notify,
         )
         self._write(feedback, log_path)
-        evidence = self._stage(
-            "evidence_rag_personas",
-            lambda: self.evidence_rag.run(feedback),
-            EvidencePack,
-            Producer.EVIDENCE_RAG,
-            event.run_id,
-            {feedback.ref},
-            notify,
-        )
+        try:
+            evidence = self._stage(
+                "evidence_rag_personas",
+                lambda: self.evidence_rag.run(feedback),
+                EvidencePack,
+                Producer.EVIDENCE_RAG,
+                event.run_id,
+                {feedback.ref},
+                notify,
+            )
+        except StructuredModelError:
+            fallback_used = True
+            analysis_incomplete = feedback.input_mode != InputMode.FIXTURE
+            evidence = self._deterministic_stage(
+                "evidence_rag_personas",
+                feedback,
+                output_type=EvidencePack,
+                producer=Producer.EVIDENCE_RAG,
+                run_id=event.run_id,
+                required_refs={feedback.ref},
+                notify=notify,
+            )
         self._write(evidence, log_path)
-        risks = self._stage(
-            "event_redteam",
-            lambda: self.redteam.run(event, evidence),
-            RiskAssessment,
-            Producer.EVENT_REDTEAM,
-            event.run_id,
-            {event.ref, evidence.ref},
-            notify,
-        )
+        if analysis_incomplete:
+            risks = self._deterministic_stage(
+                "event_redteam",
+                event,
+                evidence,
+                output_type=RiskAssessment,
+                producer=Producer.EVENT_REDTEAM,
+                run_id=event.run_id,
+                required_refs={event.ref, evidence.ref},
+                notify=notify,
+            )
+        else:
+            try:
+                risks = self._stage(
+                    "event_redteam",
+                    lambda: self.redteam.run(event, evidence),
+                    RiskAssessment,
+                    Producer.EVENT_REDTEAM,
+                    event.run_id,
+                    {event.ref, evidence.ref},
+                    notify,
+                )
+            except StructuredModelError:
+                fallback_used = True
+                analysis_incomplete = feedback.input_mode != InputMode.FIXTURE
+                risks = self._deterministic_stage(
+                    "event_redteam",
+                    event,
+                    evidence,
+                    output_type=RiskAssessment,
+                    producer=Producer.EVENT_REDTEAM,
+                    run_id=event.run_id,
+                    required_refs={event.ref, evidence.ref},
+                    notify=notify,
+                )
         self._write(risks, log_path)
-        validated = self._stage(
-            "audit_strategy",
-            lambda: self.audit.run(feedback, evidence, risks),
-            ValidatedDecision,
-            Producer.AUDIT_STRATEGY,
-            event.run_id,
-            {feedback.ref, evidence.ref, risks.ref},
-            notify,
-        )
+        if analysis_incomplete:
+            validated = self._deterministic_stage(
+                "audit_strategy",
+                feedback,
+                evidence,
+                risks,
+                output_type=ValidatedDecision,
+                producer=Producer.AUDIT_STRATEGY,
+                run_id=event.run_id,
+                required_refs={feedback.ref, evidence.ref, risks.ref},
+                notify=notify,
+                analysis_incomplete=True,
+            )
+        else:
+            try:
+                validated = self._stage(
+                    "audit_strategy",
+                    lambda: self.audit.run(feedback, evidence, risks),
+                    ValidatedDecision,
+                    Producer.AUDIT_STRATEGY,
+                    event.run_id,
+                    {feedback.ref, evidence.ref, risks.ref},
+                    notify,
+                )
+            except StructuredModelError:
+                fallback_used = True
+                analysis_incomplete = feedback.input_mode != InputMode.FIXTURE
+                validated = self._deterministic_stage(
+                    "audit_strategy",
+                    feedback,
+                    evidence,
+                    risks,
+                    output_type=ValidatedDecision,
+                    producer=Producer.AUDIT_STRATEGY,
+                    run_id=event.run_id,
+                    required_refs={feedback.ref, evidence.ref, risks.ref},
+                    notify=notify,
+                    analysis_incomplete=analysis_incomplete,
+                )
         self._write(validated, log_path)
         brief = self.audit.to_brief(event, evidence, validated)
         self._check(brief, DecisionBrief, Producer.ORCHESTRATOR, event.run_id, {event.ref, evidence.ref, validated.ref})
         self._write(brief, log_path)
         notify("decision_brief", "complete", brief.decision.value)
-        return PipelineResult(feedback, evidence, risks, validated, brief)
+        return PipelineResult(
+            feedback,
+            evidence,
+            risks,
+            validated,
+            brief,
+            fallback_used=fallback_used,
+            analysis_incomplete=analysis_incomplete,
+        )
 
     def _stage(
         self,
@@ -136,16 +219,50 @@ class EventPreflightOrchestrator:
                 notify(name, "complete", f"attempt {attempt + 1}")
                 return checked
             except StructuredModelError as exc:
-                if exc.code.value not in {"SCHEMA_INVALID", "LLM_REFUSAL"} or attempt == 1:
+                if exc.code in {ErrorCode.SCHEMA_INVALID, ErrorCode.LLM_REFUSAL}:
+                    if attempt == 0:
+                        notify(name, "retrying", "schema/refusal validation failed")
+                        continue
                     notify(name, "failed", f"{exc.code.value}: {exc}")
-                    raise PipelineStopped(f"{name}: {exc.code.value}: {exc}") from exc
+                    raise
+                notify(name, "failed", f"{exc.code.value}: {exc}")
+                raise PipelineStopped(f"{name}: {exc.code.value}: {exc}") from exc
             except (ValidationError, ContractViolation) as exc:
-                if attempt == 1:
-                    notify(name, "failed", str(exc))
-                    raise PipelineStopped(f"{name}: SCHEMA_INVALID: {exc}") from exc
-            if attempt == 0:
-                notify(name, "retrying", "schema/refusal validation failed")
+                notify(name, "failed", str(exc))
+                raise PipelineStopped(f"{name}: SCHEMA_INVALID: {exc}") from exc
         raise AssertionError("unreachable")
+
+    def _deterministic_stage(
+        self,
+        name: str,
+        *args,
+        output_type: type[T],
+        producer: Producer,
+        run_id: str,
+        required_refs: set[str],
+        notify: StageCallback,
+        analysis_incomplete: bool = False,
+    ) -> T:
+        try:
+            if name == "evidence_rag_personas":
+                result = self.evidence_rag.run_deterministic(*args)
+            elif name == "event_redteam":
+                result = self.redteam.run_deterministic(*args)
+            elif name == "audit_strategy":
+                result = self.audit.run_deterministic(
+                    *args,
+                    analysis_incomplete=analysis_incomplete,
+                )
+            else:
+                raise ValueError(f"unknown deterministic stage: {name}")
+            checked = self._check(result, output_type, producer, run_id, required_refs)
+            if checked.status == ArtifactStatus.FAILED:
+                raise PipelineStopped(f"{name} returned failed status")
+        except (ValidationError, ContractViolation) as exc:
+            notify(name, "failed", str(exc))
+            raise PipelineStopped(f"{name}: SCHEMA_INVALID: {exc}") from exc
+        notify(name, "complete", "deterministic fallback")
+        return checked
 
     @staticmethod
     def _check(

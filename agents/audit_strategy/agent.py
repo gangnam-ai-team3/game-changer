@@ -71,6 +71,8 @@ class AuditStrategyAgent:
         bundle: FeedbackBundle,
         pack: EvidencePack,
         assessment: RiskAssessment,
+        *,
+        analysis_incomplete: bool = False,
     ) -> ValidatedDecision:
         evidence_by_id = {item.evidence_id: item for item in pack.evidence}
         validated = []
@@ -92,7 +94,11 @@ class AuditStrategyAgent:
             else:
                 validated.append(risk)
 
-        decision, reason = decide(bundle.samples, validated)
+        decision, reason = decide(
+            bundle.samples,
+            validated,
+            analysis_incomplete=analysis_incomplete,
+        )
 
         revisions = []
         for priority, risk in enumerate(validated, start=1):

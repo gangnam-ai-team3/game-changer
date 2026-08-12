@@ -42,8 +42,10 @@ def parse_structured[T: BaseModel](
             reasoning={"effort": "low"},
             store=False,
         )
-    except Exception as exc:  # SDK exceptions differ by installed version.
+        if response.output_parsed is None:
+            raise StructuredModelError(ErrorCode.LLM_REFUSAL, "model returned no parsed output")
+        return output_type.model_validate(response.output_parsed)
+    except StructuredModelError:
+        raise
+    except Exception as exc:  # SDK and Pydantic exceptions differ by installed version.
         raise StructuredModelError(ErrorCode.SCHEMA_INVALID, str(exc)) from exc
-    if response.output_parsed is None:
-        raise StructuredModelError(ErrorCode.LLM_REFUSAL, "model returned no parsed output")
-    return output_type.model_validate(response.output_parsed)
