@@ -1,0 +1,18 @@
+[project]
+name = "event-preflight"
+version = "0.1.0"
+description = "Evidence-backed global game event preflight"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "openai>=1.55,<3",
+  "pydantic>=2.10,<3",
+  "streamlit>=1.40,<2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10"]
+
+[tool.pytest.ini_options]
+addopts = "-q -p no:cacheprovider"
+pythonpath = ["."]
+testpaths = ["tests"]

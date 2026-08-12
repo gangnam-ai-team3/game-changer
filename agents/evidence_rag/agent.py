@@ -1,0 +1,205 @@
+from __future__ import annotations
+
+import os
+from collections import Counter
+from pathlib import Path
+
+from agents.evidence_rag.retrieval import embedding_rank
+from agents.structured import parse_structured
+from contracts import (
+    ArtifactStatus,
+    ErrorCode,
+    EvidencePack,
+    FeedbackBundle,
+    Language,
+    LanguageInsight,
+    MechanismIssue,
+    Persona,
+    PersonaKind,
+    PipelineError,
+    Producer,
+    RiskCategory,
+)
+
+ISSUE_TITLES = {
+    RiskCategory.DOUBLE_GACHA: "2단계 확률 구조",
+    RiskCategory.FRAGMENTED_FLOW: "분절된 구매·제작 흐름",
+    RiskCategory.OPAQUE_PROGRESS: "불명확한 확정 진행 경로",
+    RiskCategory.RANDOM_BONUS: "확률형 보너스 편차",
+    RiskCategory.EXPIRING_CURRENCY: "이벤트 재화 만료 손실",
+}
+
+
+class EvidenceRagAgent:
+    model = os.getenv("OPENAI_RAG_MODEL", "gpt-5.6-luna")
+    embedding_model = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
+    prompt_path = Path(__file__).with_name("prompt.md")
+
+    def __init__(self, use_llm: bool = False, client=None) -> None:
+        self.use_llm = use_llm
+        self.client = client
+
+    def run(self, bundle: FeedbackBundle) -> EvidencePack:
+        if self.use_llm:
+            client = self.client
+            if client is None:
+                if not os.getenv("OPENAI_API_KEY"):
+                    from agents.structured import StructuredModelError
+
+                    raise StructuredModelError(ErrorCode.AUTH_FAILED, "OPENAI_API_KEY is missing")
+                from openai import OpenAI
+
+                client = OpenAI()
+            ranked = embedding_rank(
+                "event reward probability guarantee progression payment expiration fairness",
+                bundle.evidence,
+                client=client,
+                model=self.embedding_model,
+            )
+            return parse_structured(
+                model=self.model,
+                prompt_path=self.prompt_path,
+                output_type=EvidencePack,
+                payload=bundle.model_copy(update={"evidence": ranked}),
+                client=client,
+            )
+        return self._deterministic(bundle)
+
+    def _deterministic(self, bundle: FeedbackBundle) -> EvidencePack:
+        deduplicated = list({item.source_id: item for item in bundle.evidence}.values())
+        issues: list[MechanismIssue] = []
+        for category, title in ISSUE_TITLES.items():
+            matching = [item for item in deduplicated if category.value in item.mechanism_tags]
+            if matching:
+                issues.append(
+                    MechanismIssue(
+                        issue_id=f"issue-{category.value}",
+                        category=category,
+                        title=title,
+                        summary=f"{len(matching)}개 비식별 근거에서 반복 확인됨.",
+                        evidence_ids=[item.evidence_id for item in matching],
+                        confidence=sum(item.relevance for item in matching) / len(matching),
+                    )
+                )
+
+        samples = {sample.language: sample for sample in bundle.samples}
+        language_insights: list[LanguageInsight] = []
+        for language in Language:
+            items = [item for item in deduplicated if item.language == language]
+            sample = samples.get(language)
+            if sample and sample.sufficient:
+                top_tags = [tag for tag, _ in Counter(tag for item in items for tag in item.mechanism_tags).most_common(3)]
+                language_insights.append(
+                    LanguageInsight(
+                        language=language,
+                        conclusion=f"상위 메커니즘 우려: {', '.join(top_tags)}",
+                        evidence_ids=[item.evidence_id for item in items],
+                        confidence=_average_relevance(items),
+                    )
+                )
+            else:
+                language_insights.append(
+                    LanguageInsight(
+                        language=language,
+                        conclusion=None,
+                        hidden_reason="일반 100건·메커니즘 15건 최소 기준 미달",
+                        evidence_ids=[item.evidence_id for item in items],
+                        confidence=0,
+                    )
+                )
+
+        errors = list(bundle.errors)
+        personas = self._personas(deduplicated, language_insights)
+        if len(deduplicated) < 15:
+            errors.append(
+                PipelineError(
+                    code=ErrorCode.INSUFFICIENT_EVIDENCE,
+                    message="behavioral personas require at least 15 evidence items",
+                )
+            )
+
+        return EvidencePack(
+            run_id=bundle.run_id,
+            status=ArtifactStatus.PARTIAL if errors else ArtifactStatus.COMPLETE,
+            producer=Producer.EVIDENCE_RAG,
+            input_refs=[bundle.ref],
+            errors=errors,
+            issues=issues,
+            language_insights=language_insights,
+            evidence=deduplicated,
+            personas=personas,
+        )
+
+    def _personas(self, evidence, insights: list[LanguageInsight]) -> list[Persona]:
+        if len(evidence) < 15:
+            return []
+        language_differences = {
+            insight.language: (
+                insight.conclusion or "표본 기준 미달로 언어권 고유 차이를 판단하지 않음"
+            )
+            for insight in insights
+        }
+        specs = (
+            (
+                PersonaKind.TIME_CONSTRAINED,
+                "시간 제약형 캐주얼·복귀 유저",
+                ["짧은 시간 안에 명확한 진척"],
+                ["복잡한 동선", "재화 만료"],
+                ["일일 플레이 시간이 짧거나 불규칙함"],
+                "시간 절약 가치가 분명할 때만 지불",
+                {"fragmented_flow", "opaque_progress", "expiring_currency"},
+            ),
+            (
+                PersonaKind.VALUE_SEEKING,
+                "보상 효율형 무·소과금 유저",
+                ["예측 가능한 보상 효율"],
+                ["중첩 확률", "지출 대비 결과 편차"],
+                ["무료·저가 경로를 우선함"],
+                "확정 가치와 상한에 매우 민감",
+                {"double_gacha", "opaque_progress", "random_bonus"},
+            ),
+            (
+                PersonaKind.COLLECTOR,
+                "수집·고관여 소비자",
+                ["원하는 스킨의 완성 가능한 수집 경로"],
+                ["천장 부재", "분절된 제작 흐름"],
+                ["목표 보상에는 반복 참여 가능"],
+                "목표 획득 경로가 투명하면 지불 의향이 높음",
+                {"double_gacha", "fragmented_flow", "opaque_progress", "random_bonus"},
+            ),
+            (
+                PersonaKind.CORE_GAMEPLAY,
+                "전투 경험 우선 코어 유저",
+                ["전투 흐름을 방해하지 않는 보상"],
+                ["과도한 상점 동선", "반복 미션 압박"],
+                ["전투 플레이가 주 목적"],
+                "전투와 무관한 확률 소비에는 민감",
+                {"fragmented_flow", "expiring_currency"},
+            ),
+        )
+        personas: list[Persona] = []
+        for kind, label, motivations, churn, constraints, sensitivity, tags in specs:
+            selected = [item for item in evidence if tags.intersection(item.mechanism_tags)]
+            selected_ids = [item.evidence_id for item in selected]
+            if len(selected_ids) < 15:
+                selected_ids.extend(
+                    item.evidence_id for item in evidence if item.evidence_id not in selected_ids
+                )
+            personas.append(
+                Persona(
+                    kind=kind,
+                    label=label,
+                    motivations=motivations,
+                    churn_triggers=churn,
+                    play_constraints=constraints,
+                    payment_sensitivity=sensitivity,
+                    language_differences=language_differences,
+                    evidence_ids=selected_ids[:15],
+                    confidence=_average_relevance(selected[:15] or evidence[:15]),
+                )
+            )
+        return personas
+
+
+def _average_relevance(items) -> float:
+    return sum(item.relevance for item in items) / len(items) if items else 0
