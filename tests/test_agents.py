@@ -1,15 +1,19 @@
+from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
 
 from agents.audit_strategy import AuditStrategyAgent
 from agents.audit_strategy import agent as audit_module
+from agents.collector import CollectionOptions, CollectorAgent
+from agents.collector.agent import _summarize_without_persisting_raw
 from agents.event_redteam import EventRedteamAgent
 from agents.event_redteam import agent as redteam_module
 from agents.evidence_rag import EvidenceRagAgent
 from agents.evidence_rag import agent as evidence_module
 from agents.structured import StructuredModelError
-from contracts import Decision, LanguageSample, RiskCategory
+from connectors import RawFeedback
+from contracts import Decision, InputMode, Language, LanguageSample, RiskCategory, SourceType
 
 OFFICIAL_TARGETS = {
     RiskCategory.DOUBLE_GACHA,
@@ -296,3 +300,48 @@ def test_evidence_llm_rejects_evidence_outside_issue(monkeypatch, feedback):
     monkeypatch.setattr(evidence_module, "embedding_rank", lambda _q, evidence, **_k: evidence)
     with pytest.raises(StructuredModelError, match="unknown evidence"):
         EvidenceRagAgent(use_llm=True, client=SimpleNamespace()).run(feedback)
+
+
+def test_collector_never_loads_fixture_in_live_mode(monkeypatch, event):
+    monkeypatch.setattr(
+        "agents.collector.agent.load_feedback_fixture",
+        lambda _event: (_ for _ in ()).throw(AssertionError("fixture must not load")),
+    )
+
+    class FakeSteam:
+        def fetch_reviews(self, _app_id, language, cutoff_at, limit=100):
+            return [
+                RawFeedback(
+                    source=SourceType.STEAM,
+                    source_url="https://steamcommunity.com/app/578080/reviews/",
+                    source_id=f"anonymous-{language.value}",
+                    language=language,
+                    observed_at=cutoff_at - timedelta(days=1),
+                    text="double gacha is confusing",
+                )
+            ]
+
+    bundle = CollectorAgent(steam=FakeSteam()).run(
+        event,
+        CollectionOptions(use_fixture=False, steam_app_id=578080),
+    )
+    assert bundle.input_mode == InputMode.LIVE
+    assert bundle.evidence
+    assert all(not item.synthetic for item in bundle.evidence)
+
+
+def test_live_evidence_ids_do_not_depend_on_api_order(event):
+    items = [
+        RawFeedback(
+            source=SourceType.STEAM,
+            source_url="https://steamcommunity.com/app/578080/reviews/",
+            source_id=f"anonymous-{index}",
+            language=Language.ENGLISH,
+            observed_at=event.cutoff_at - timedelta(days=index + 1),
+            text="double gacha is confusing",
+        )
+        for index in range(2)
+    ]
+    forward = _summarize_without_persisting_raw(items)
+    backward = _summarize_without_persisting_raw(list(reversed(items)))
+    assert {item.evidence_id for item in forward} == {item.evidence_id for item in backward}

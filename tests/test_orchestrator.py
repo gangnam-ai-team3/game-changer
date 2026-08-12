@@ -5,6 +5,7 @@ import pytest
 from agents.collector import CollectionOptions, CollectorAgent
 from agents.evidence_rag import EvidenceRagAgent
 from agents.structured import StructuredModelError
+from connectors import ConnectorError
 from contracts import Decision, ErrorCode, InputMode, Producer
 from evaluation.backtest import evaluate_black_market
 from evaluation.fixtures import load_demo_event
@@ -108,6 +109,22 @@ def test_live_llm_failure_returns_hold_without_loading_fixture(event):
     assert result.brief.decision == Decision.HOLD
     assert result.analysis_incomplete is True
     assert result.brief.evidence == []
+
+
+def test_fixture_run_still_succeeds_after_live_collection_failure(event):
+    class FailingSteam:
+        def fetch_reviews(self, *_args, **_kwargs):
+            raise ConnectorError(ErrorCode.SOURCE_UNAVAILABLE, "network down")
+
+    orchestrator = EventPreflightOrchestrator(collector=CollectorAgent(steam=FailingSteam()))
+    with pytest.raises(PipelineStopped):
+        orchestrator.run(
+            event,
+            CollectionOptions(use_fixture=False, steam_app_id=578080),
+        )
+    recovered = orchestrator.run(event, CollectionOptions(use_fixture=True))
+    assert recovered.brief.decision == Decision.REVISE
+    assert all(item.synthetic for item in recovered.feedback.evidence)
 
 
 def test_same_fixture_produces_same_core_outcome_across_run_ids():

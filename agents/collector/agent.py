@@ -231,13 +231,18 @@ class CollectorAgent:
 
 def _summarize_without_persisting_raw(items: list[RawFeedback]) -> list[EvidenceItem]:
     results: list[EvidenceItem] = []
-    for index, item in enumerate(items):
+    seen_ids: set[tuple[SourceType, str]] = set()
+    for item in items:
+        source_key = (item.source, item.source_id)
+        if source_key in seen_ids:
+            continue
+        seen_ids.add(source_key)
         tags = _mechanism_tags(item.text)
         if not tags:
             continue
         results.append(
             EvidenceItem(
-                evidence_id=f"live-{item.source.value}-{item.source_id}-{index}",
+                evidence_id=f"live-{item.source.value}-{item.source_id}",
                 source=item.source,
                 source_url=item.source_url,
                 source_id=item.source_id,

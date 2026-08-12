@@ -18,3 +18,11 @@ uv run streamlit run streamlit_app.py
 
 실시간 연결은 `.streamlit/secrets.toml.example`을 참고해 로컬 secrets를 설정합니다.
 실제 secrets와 커뮤니티 원문은 Git에 추가하지 않습니다.
+
+### 실시간 갱신 확인
+
+`uv run python scripts/smoke_steam.py --app-id 578080 --language en --limit 10`
+
+이 명령은 Steam의 현재 리뷰를 메모리에서 읽고 비식별화 여부만 확인합니다. 원문과
+사용자 식별자는 저장하지 않습니다. 네트워크 장애 시 저장된 검증 데이터 시연은
+계속 사용할 수 있습니다.
