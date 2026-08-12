@@ -104,6 +104,8 @@ class Artifact(BaseModel):
 
     run_id: str = Field(min_length=1)
     schema_version: Literal["1.0"] = SCHEMA_VERSION
+    policy_version: str = "1.0"
+    input_snapshot_hash: str = Field(default="pending", pattern=r"^(pending|[0-9a-f]{64})$")
     status: ArtifactStatus = ArtifactStatus.COMPLETE
     producer: Producer
     input_refs: list[str] = Field(default_factory=list)

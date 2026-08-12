@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -26,6 +27,7 @@ from contracts import (
     RiskAssessment,
     ValidatedDecision,
 )
+from policy import POLICY_VERSION
 
 T = TypeVar("T", bound=Artifact)
 StageCallback = Callable[[str, str, str], None]
@@ -85,6 +87,17 @@ class EventPreflightOrchestrator:
             {event.ref},
             notify,
         )
+        reproducibility_metadata = {
+            "policy_version": POLICY_VERSION,
+            "input_snapshot_hash": _input_snapshot_hash(event, feedback),
+        }
+        feedback = self._check(
+            feedback.model_copy(update=reproducibility_metadata),
+            FeedbackBundle,
+            Producer.COLLECTOR,
+            event.run_id,
+            {event.ref},
+        )
         self._write(feedback, log_path)
         try:
             evidence = self._stage(
@@ -95,6 +108,7 @@ class EventPreflightOrchestrator:
                 event.run_id,
                 {feedback.ref},
                 notify,
+                reproducibility_metadata,
             )
         except StructuredModelError:
             fallback_used = True
@@ -107,6 +121,7 @@ class EventPreflightOrchestrator:
                 run_id=event.run_id,
                 required_refs={feedback.ref},
                 notify=notify,
+                reproducibility_metadata=reproducibility_metadata,
             )
         self._write(evidence, log_path)
         if analysis_incomplete:
@@ -119,6 +134,7 @@ class EventPreflightOrchestrator:
                 run_id=event.run_id,
                 required_refs={event.ref, evidence.ref},
                 notify=notify,
+                reproducibility_metadata=reproducibility_metadata,
             )
         else:
             try:
@@ -130,6 +146,7 @@ class EventPreflightOrchestrator:
                     event.run_id,
                     {event.ref, evidence.ref},
                     notify,
+                    reproducibility_metadata,
                 )
             except StructuredModelError:
                 fallback_used = True
@@ -143,6 +160,7 @@ class EventPreflightOrchestrator:
                     run_id=event.run_id,
                     required_refs={event.ref, evidence.ref},
                     notify=notify,
+                    reproducibility_metadata=reproducibility_metadata,
                 )
         self._write(risks, log_path)
         if analysis_incomplete:
@@ -157,6 +175,7 @@ class EventPreflightOrchestrator:
                 required_refs={feedback.ref, evidence.ref, risks.ref},
                 notify=notify,
                 analysis_incomplete=True,
+                reproducibility_metadata=reproducibility_metadata,
             )
         else:
             try:
@@ -168,6 +187,7 @@ class EventPreflightOrchestrator:
                     event.run_id,
                     {feedback.ref, evidence.ref, risks.ref},
                     notify,
+                    reproducibility_metadata,
                 )
             except StructuredModelError:
                 fallback_used = True
@@ -183,9 +203,12 @@ class EventPreflightOrchestrator:
                     required_refs={feedback.ref, evidence.ref, risks.ref},
                     notify=notify,
                     analysis_incomplete=analysis_incomplete,
+                    reproducibility_metadata=reproducibility_metadata,
                 )
         self._write(validated, log_path)
-        brief = self.audit.to_brief(event, evidence, validated)
+        brief = self.audit.to_brief(event, evidence, validated).model_copy(
+            update=reproducibility_metadata
+        )
         self._check(brief, DecisionBrief, Producer.ORCHESTRATOR, event.run_id, {event.ref, evidence.ref, validated.ref})
         self._write(brief, log_path)
         notify("decision_brief", "complete", brief.decision.value)
@@ -208,11 +231,14 @@ class EventPreflightOrchestrator:
         run_id: str,
         required_refs: set[str],
         notify: StageCallback,
+        reproducibility_metadata: dict[str, str] | None = None,
     ) -> T:
         notify(name, "running", "started")
         for attempt in range(2):
             try:
                 result = call()
+                if reproducibility_metadata:
+                    result = result.model_copy(update=reproducibility_metadata)
                 checked = self._check(result, output_type, producer, run_id, required_refs)
                 if checked.status == ArtifactStatus.FAILED:
                     raise PipelineStopped(f"{name} returned failed status")
@@ -242,6 +268,7 @@ class EventPreflightOrchestrator:
         required_refs: set[str],
         notify: StageCallback,
         analysis_incomplete: bool = False,
+        reproducibility_metadata: dict[str, str] | None = None,
     ) -> T:
         try:
             if name == "evidence_rag_personas":
@@ -255,6 +282,8 @@ class EventPreflightOrchestrator:
                 )
             else:
                 raise ValueError(f"unknown deterministic stage: {name}")
+            if reproducibility_metadata:
+                result = result.model_copy(update=reproducibility_metadata)
             checked = self._check(result, output_type, producer, run_id, required_refs)
             if checked.status == ArtifactStatus.FAILED:
                 raise PipelineStopped(f"{name} returned failed status")
@@ -292,3 +321,26 @@ class EventPreflightOrchestrator:
 
 class ContractViolation(ValueError):
     pass
+
+
+def _input_snapshot_hash(event: EventBrief, feedback: FeedbackBundle) -> str:
+    event_body = event.model_dump(
+        mode="json",
+        exclude={"run_id", "producer", "input_refs", "status", "errors", "input_snapshot_hash"},
+    )
+    evidence = [
+        {
+            "evidence_id": item.evidence_id,
+            "source": item.source.value,
+            "source_id": item.source_id,
+            "language": item.language.value,
+            "observed_at": item.observed_at.isoformat(),
+            "summary": item.summary,
+            "mechanism_tags": sorted(item.mechanism_tags),
+            "relevance": item.relevance,
+        }
+        for item in sorted(feedback.evidence, key=lambda item: item.evidence_id)
+    ]
+    payload = {"event": event_body, "input_mode": feedback.input_mode.value, "evidence": evidence}
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode()).hexdigest()

@@ -7,7 +7,27 @@ from agents.evidence_rag import EvidenceRagAgent
 from agents.structured import StructuredModelError
 from contracts import Decision, ErrorCode, InputMode, Producer
 from evaluation.backtest import evaluate_black_market
+from evaluation.fixtures import load_demo_event
 from orchestrator import EventPreflightOrchestrator, PipelineStopped
+
+
+def core_outcome(result):
+    return (
+        result.brief.decision,
+        tuple(
+            (risk.category, risk.severity, tuple(sorted(risk.evidence_ids)))
+            for risk in result.brief.top_risks
+        ),
+        tuple(risk.risk_id for risk in result.validated.validated_risks),
+        tuple(risk.risk_id for risk in result.validated.rejected_risks),
+        tuple(
+            (tuple(action.addresses_risk_ids), action.priority)
+            for action in result.brief.revision_plan
+        ),
+        result.brief.schema_version,
+        result.brief.policy_version,
+        result.brief.input_snapshot_hash,
+    )
 
 
 def test_fixed_data_end_to_end_passes_in_under_five_minutes(event):
@@ -74,3 +94,18 @@ def test_live_llm_failure_returns_hold_without_loading_fixture(event):
     assert result.brief.decision == Decision.HOLD
     assert result.analysis_incomplete is True
     assert result.brief.evidence == []
+
+
+def test_same_fixture_produces_same_core_outcome_across_run_ids():
+    first_event = load_demo_event("first-run")
+    second_event = load_demo_event("second-run")
+    first = EventPreflightOrchestrator().run(first_event, CollectionOptions())
+    second = EventPreflightOrchestrator().run(second_event, CollectionOptions())
+    assert core_outcome(first) == core_outcome(second)
+
+
+def test_input_snapshot_hash_changes_when_normalized_input_changes(event):
+    first = EventPreflightOrchestrator().run(event, CollectionOptions())
+    changed = event.model_copy(update={"goal": f"{event.goal} 변경"})
+    second = EventPreflightOrchestrator().run(changed, CollectionOptions())
+    assert first.brief.input_snapshot_hash != second.brief.input_snapshot_hash

@@ -14,3 +14,6 @@ def test_explicit_success_gate_passes():
     assert report.insufficient_languages_decision.value == "Hold"
     assert report.cutoff_leak_blocked
     assert report.event_goal_aligned
+    assert report.reproducible_core
+    assert report.semantic_links_valid
+    assert len(report.input_snapshot_hash) == 64
