@@ -35,7 +35,7 @@ class AuditStrategyAgent:
         assessment: RiskAssessment,
     ) -> ValidatedDecision:
         if self.use_llm:
-            return parse_structured(
+            proposal = parse_structured(
                 model=self.model,
                 prompt_path=self.prompt_path,
                 output_type=ValidatedDecision,
@@ -46,6 +46,7 @@ class AuditStrategyAgent:
                 },
                 client=self.client,
             )
+            assessment = assessment.model_copy(update={"risks": proposal.validated_risks})
 
         evidence_by_id = {item.evidence_id: item for item in pack.evidence}
         validated = []
