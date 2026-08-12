@@ -1,0 +1,677 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>근거 감시와 개선 전략</title>
+<style>
+  :root {
+    --font-display: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+    --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-mono: ui-monospace, "SFMono-Regular", "Cascadia Code", Consolas, "Liberation Mono", monospace;
+    --paper: #efeee8;
+    --paper-raised: #f7f6f1;
+    --ink: #1b1f1d;
+    --ink-soft: #5b6058;
+    --ink-faint: #86897f;
+    --accent: #2b4c46;
+    --accent-soft: #dbe6e2;
+    --pass: #2f6b45;
+    --pass-soft: #dcead9;
+    --reject: #a23325;
+    --reject-soft: #f3ddd6;
+    --line: #cfc9ba;
+    --line-strong: #b6ae99;
+    --shadow: 0 1px 0 rgba(27, 31, 29, 0.05);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #141715;
+      --paper-raised: #1b1f1c;
+      --ink: #e9e6dc;
+      --ink-soft: #9a9c8f;
+      --ink-faint: #6d6f64;
+      --accent: #7fb5a9;
+      --accent-soft: #223330;
+      --pass: #63bd85;
+      --pass-soft: #1f3327;
+      --reject: #e58a72;
+      --reject-soft: #3a241e;
+      --line: #33362f;
+      --line-strong: #454838;
+      --shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #141715;
+    --paper-raised: #1b1f1c;
+    --ink: #e9e6dc;
+    --ink-soft: #9a9c8f;
+    --ink-faint: #6d6f64;
+    --accent: #7fb5a9;
+    --accent-soft: #223330;
+    --pass: #63bd85;
+    --pass-soft: #1f3327;
+    --reject: #e58a72;
+    --reject-soft: #3a241e;
+    --line: #33362f;
+    --line-strong: #454838;
+    --shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection { background: var(--accent-soft); color: var(--accent); }
+
+  a { color: var(--accent); }
+
+  .wrap {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 48px 24px 96px;
+  }
+
+  /* ---- Masthead ---- */
+
+  .masthead {
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 20px;
+    margin-bottom: 28px;
+  }
+
+  .pipeline {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    letter-spacing: 0.03em;
+    color: var(--ink-faint);
+    text-transform: uppercase;
+    margin-bottom: 14px;
+  }
+  .pipeline .sep { color: var(--line-strong); }
+  .pipeline .current {
+    color: var(--accent);
+    font-weight: 500;
+    background: var(--accent-soft);
+    padding: 2px 7px;
+    border-radius: 3px;
+  }
+
+  h1 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: clamp(28px, 4.4vw, 38px);
+    line-height: 1.12;
+    letter-spacing: -0.01em;
+    margin: 0 0 6px;
+    text-wrap: balance;
+  }
+
+  .subtitle {
+    font-size: 16px;
+    color: var(--ink-soft);
+    max-width: 62ch;
+  }
+
+  .role-quote {
+    margin-top: 18px;
+    padding: 12px 16px;
+    border-left: 3px solid var(--accent);
+    background: var(--paper-raised);
+    font-family: var(--font-display);
+    font-style: italic;
+    font-size: 14.5px;
+    color: var(--ink);
+  }
+
+  /* ---- Sections ---- */
+
+  section { margin-bottom: 36px; }
+
+  .section-label {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-bottom: 12px;
+  }
+  .section-label::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--line);
+  }
+
+  label {
+    display: block;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--ink-soft);
+    margin-bottom: 5px;
+  }
+
+  textarea, input, select {
+    width: 100%;
+    font-family: var(--font-body);
+    font-size: 14px;
+    color: var(--ink);
+    background: var(--paper-raised);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 9px 11px;
+  }
+  input[data-mono], textarea[data-mono] {
+    font-family: var(--font-mono);
+    font-size: 13px;
+  }
+  textarea { resize: vertical; line-height: 1.5; }
+
+  textarea:focus, input:focus, select:focus, button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  .field-help {
+    font-size: 11.5px;
+    color: var(--ink-faint);
+    margin-top: 4px;
+  }
+
+  /* ---- Item cards ---- */
+
+  .items { display: flex; flex-direction: column; gap: 12px; }
+
+  .item-card {
+    background: var(--paper-raised);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 16px;
+    position: relative;
+  }
+
+  .item-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  .item-num {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--ink-faint);
+  }
+  .item-remove {
+    background: none;
+    border: none;
+    color: var(--ink-faint);
+    font-size: 12px;
+    font-family: var(--font-mono);
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+  .item-remove:hover { color: var(--reject); background: var(--reject-soft); }
+
+  .item-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .item-grid .full { grid-column: 1 / -1; }
+
+  @media (max-width: 560px) {
+    .item-grid { grid-template-columns: 1fr; }
+  }
+
+  .add-item {
+    align-self: flex-start;
+    background: transparent;
+    border: 1px dashed var(--line-strong);
+    color: var(--ink-soft);
+    font-family: var(--font-body);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 9px 14px;
+    border-radius: 5px;
+    cursor: pointer;
+    margin-top: 12px;
+  }
+  .add-item:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ---- Action ---- */
+
+  .action-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-top: 22px;
+    flex-wrap: wrap;
+  }
+
+  .judge-btn {
+    background: var(--ink);
+    color: var(--paper);
+    border: none;
+    font-family: var(--font-body);
+    font-weight: 600;
+    font-size: 14.5px;
+    padding: 12px 22px;
+    border-radius: 5px;
+    cursor: pointer;
+    letter-spacing: 0.01em;
+  }
+  .judge-btn:hover { background: var(--accent); }
+
+  .scope-note {
+    font-size: 12px;
+    color: var(--ink-faint);
+    max-width: 46ch;
+    line-height: 1.5;
+  }
+
+  /* ---- Results ---- */
+
+  #results { display: none; }
+  #results.visible { display: block; }
+
+  .verdict-bar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 18px 20px;
+    border-radius: 6px;
+    margin-bottom: 18px;
+    border: 1px solid var(--line);
+    background: var(--paper-raised);
+  }
+
+  .stamp {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 22px;
+    letter-spacing: 0.02em;
+    padding: 6px 16px;
+    border: 3px solid currentColor;
+    border-radius: 4px;
+    transform: rotate(-3deg);
+    white-space: nowrap;
+  }
+  .stamp.go { color: var(--pass); }
+  .stamp.revise { color: #b8860f; }
+  .stamp.hold { color: var(--reject); }
+
+  .verdict-copy { font-size: 13.5px; color: var(--ink-soft); line-height: 1.6; }
+  .verdict-copy strong { color: var(--ink); }
+
+  .table-scroll {
+    overflow-x: auto;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 640px;
+    font-size: 13.5px;
+  }
+
+  thead th {
+    text-align: left;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    background: var(--paper-raised);
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--line-strong);
+    white-space: nowrap;
+  }
+
+  tbody td {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+
+  td.num { font-family: var(--font-mono); color: var(--ink-faint); }
+  td.owner, td.due { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+  td.reason { color: var(--ink-soft); max-width: 34ch; }
+
+  .chip {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    font-weight: 500;
+    padding: 3px 9px;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+  .chip.pass { color: var(--pass); background: var(--pass-soft); }
+  .chip.reject { color: var(--reject); background: var(--reject-soft); }
+
+  .summary-line {
+    margin-top: 14px;
+    font-size: 13.5px;
+    color: var(--ink-soft);
+  }
+  .summary-line strong { color: var(--ink); font-weight: 600; }
+
+  footer {
+    margin-top: 56px;
+    padding-top: 18px;
+    border-top: 1px solid var(--line);
+    font-size: 11.5px;
+    color: var(--ink-faint);
+    font-family: var(--font-mono);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="masthead">
+    <div class="pipeline">
+      <span>수집</span><span class="sep">→</span>
+      <span>근거 구조화</span><span class="sep">→</span>
+      <span>레드팀 검토</span><span class="sep">→</span>
+      <span class="current">감시와 개선전략</span><span class="sep">→</span>
+      <span>조립</span>
+    </div>
+    <h1>근거 감시와 개선 전략</h1>
+    <p class="subtitle">입력한 항목의 근거 존재 여부를 담당자·기한·근거 건수·언어권 기준으로 확인합니다. 결과 자리에는 판단(통과/반려와 사유)만 표시하며, 수정안이나 대안은 제시하지 않습니다.</p>
+    <p class="role-quote">"당신은 근거를 감사하는 사람이지, 기획을 다시 쓰는 사람이 아닙니다."</p>
+  </div>
+
+  <section>
+    <div class="section-label">리스크 서술</div>
+    <label for="risk-narrative">이번 업데이트의 핵심 리스크 (3~6문장)</label>
+    <textarea id="risk-narrative" rows="4"></textarea>
+  </section>
+
+  <section>
+    <div class="section-label">근거 존재 확인 — 검증·개선 항목</div>
+    <div class="items" id="items"></div>
+    <button type="button" class="add-item" id="add-item">+ 항목 추가</button>
+  </section>
+
+  <div class="action-row">
+    <button type="button" class="judge-btn" id="judge-btn">판정 실행</button>
+    <p class="scope-note">담당자·기한 형식·근거 건수·언어권 수는 이 화면에서 바로 판정합니다. 근거 ID의 실제 존재 여부와 VOC-기획 구조 일치 여부는 앞 단계 원본 데이터 대조가 필요해 이 화면에서는 재현하지 않습니다.</p>
+  </div>
+
+  <section id="results">
+    <div class="section-label">판정 결과</div>
+    <div class="verdict-bar">
+      <div class="stamp" id="verdict-stamp">GO</div>
+      <div class="verdict-copy" id="verdict-copy"></div>
+    </div>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>항목</th>
+            <th>담당자</th>
+            <th>기한</th>
+            <th>판정</th>
+            <th>사유</th>
+          </tr>
+        </thead>
+        <tbody id="result-body"></tbody>
+      </table>
+    </div>
+    <p class="summary-line" id="summary-line"></p>
+  </section>
+
+  <footer>seungjinbae / validated-decision — 참고용 콘솔. 실제 서브에이전트 정의는 .claude/agents/validated-decision.md</footer>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var GRADES = ["Critical", "High", "Medium", "Low"];
+
+  var sampleItems = [
+    {
+      name: "확률 표기를 상점 첫 화면에 노출",
+      owner: "정아현",
+      due: "2026/08/25",
+      evidence: "VOC-1021, VOC-1022, VOC-1024, VOC-1026, VOC-1027, VOC-1029, VOC-1030, VOC-1031, VOC-1033, VOC-1034, VOC-1035, VOC-1036, VOC-1037, VOC-1038, VOC-1039, VOC-1040, VOC-1041",
+      langs: 3,
+      grade: "High"
+    },
+    {
+      name: "한정 아이템 중복 보호 장치 추가",
+      owner: "",
+      due: "2026/09/01",
+      evidence: "VOC-1077",
+      langs: 1,
+      grade: "Medium"
+    },
+    {
+      name: "주간 참여 조건 완화",
+      owner: "유주심",
+      due: "",
+      evidence: "VOC-1090, VOC-1091",
+      langs: 1,
+      grade: "Low"
+    },
+    {
+      name: "번들 가격 구간 재조정",
+      owner: "승진배",
+      due: "2026/08/30",
+      evidence: "VOC-1102, VOC-1103, VOC-1104",
+      langs: 1,
+      grade: "Medium"
+    }
+  ];
+
+  var sampleNarrative = "이번 업데이트는 확률형 아이템의 확률 표기 위치를 상점 첫 화면으로 옮기고, 한정 아이템 구매 시 중복 보호 장치를 새로 추가하며, 주간 참여 조건을 완화하고, 번들 가격 구간을 재조정합니다. 확률 표기 변경은 고지 의무에 민감한 플레이어 모델(신규 결제 플레이어)에게 신뢰 마찰을 줄이는 방향이지만, 표기 위치 이동 자체가 기존 구매 플레이어에게는 익숙한 동선을 깨는 마찰이 될 수 있습니다. 중복 보호 장치는 한정 아이템을 반복 결제하던 플레이어 모델과 직접 충돌합니다. 주간 참여 조건 완화와 번들 가격 재조정은 라이트 유저의 이탈 마찰을 낮추는 것이 목적입니다.";
+
+  var itemsEl = document.getElementById("items");
+  var itemCount = 0;
+
+  function evidenceCount(text) {
+    var parts = text.split(",").map(function (s) { return s.trim(); }).filter(Boolean);
+    return parts.length;
+  }
+
+  function makeItemCard(data) {
+    itemCount += 1;
+    var n = itemCount;
+    var card = document.createElement("div");
+    card.className = "item-card";
+    card.dataset.itemId = n;
+
+    var gradeOptions = GRADES.map(function (g) {
+      var sel = data && data.grade === g ? " selected" : "";
+      return '<option value="' + g + '"' + sel + ">" + g + "</option>";
+    }).join("");
+
+    card.innerHTML =
+      '<div class="item-head">' +
+        '<span class="item-num">항목 ' + n + '</span>' +
+        '<button type="button" class="item-remove" data-remove>삭제</button>' +
+      '</div>' +
+      '<div class="item-grid">' +
+        '<div class="full">' +
+          '<label>항목명</label>' +
+          '<input type="text" data-field="name" value="' + (data ? escapeAttr(data.name) : "") + '">' +
+        '</div>' +
+        '<div>' +
+          '<label>담당자</label>' +
+          '<input type="text" data-field="owner" value="' + (data ? escapeAttr(data.owner) : "") + '" placeholder="비우면 반려">' +
+        '</div>' +
+        '<div>' +
+          '<label>기한</label>' +
+          '<input type="text" data-mono data-field="due" value="' + (data ? escapeAttr(data.due) : "") + '" placeholder="yyyy/mm/dd">' +
+        '</div>' +
+        '<div>' +
+          '<label>리스크 등급</label>' +
+          '<select data-field="grade">' + gradeOptions + '</select>' +
+        '</div>' +
+        '<div>' +
+          '<label>확보된 언어권 수</label>' +
+          '<input type="number" data-mono min="0" data-field="langs" value="' + (data ? data.langs : 0) + '">' +
+        '</div>' +
+        '<div class="full">' +
+          '<label>근거 ID 목록 (쉼표로 구분)</label>' +
+          '<textarea data-mono data-field="evidence" rows="2">' + (data ? escapeHtml(data.evidence) : "") + '</textarea>' +
+          '<p class="field-help" data-count></p>' +
+        '</div>' +
+      '</div>';
+
+    card.querySelector("[data-remove]").addEventListener("click", function () {
+      card.remove();
+    });
+
+    var evidenceField = card.querySelector('[data-field="evidence"]');
+    var countHelp = card.querySelector("[data-count]");
+    function updateCount() {
+      countHelp.textContent = evidenceCount(evidenceField.value) + "건 입력됨 (15건 이상 필요)";
+    }
+    evidenceField.addEventListener("input", updateCount);
+    updateCount();
+
+    return card;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c];
+    });
+  }
+  function escapeAttr(s) {
+    return escapeHtml(s).replace(/"/g, "&quot;");
+  }
+
+  document.getElementById("add-item").addEventListener("click", function () {
+    itemsEl.appendChild(makeItemCard(null));
+  });
+
+  document.getElementById("risk-narrative").value = sampleNarrative;
+  sampleItems.forEach(function (it) {
+    itemsEl.appendChild(makeItemCard(it));
+  });
+
+  var DATE_RE = /^\d{4}\/\d{2}\/\d{2}$/;
+
+  function judgeItem(data) {
+    var owner = data.owner.trim();
+    if (!owner || owner === "미정" || /^TBD$/i.test(owner)) {
+      return { verdict: "반려", reason: "담당자가 비어 있음" };
+    }
+    if (!data.due || !DATE_RE.test(data.due.trim())) {
+      return { verdict: "반려", reason: "기한이 없거나 yyyy/mm/dd 형식이 아님" };
+    }
+    var count = evidenceCount(data.evidence);
+    if (count === 0) {
+      return { verdict: "반려", reason: "근거 ID가 없음" };
+    }
+    if (count < 15) {
+      return { verdict: "반려", reason: "근거 " + count + "건으로 15건 기준 미달" };
+    }
+    if (data.langs < 3) {
+      return { verdict: "반려", reason: "언어권 " + data.langs + "개로 3개 기준 미달" };
+    }
+    return { verdict: "통과", reason: "근거 " + count + "건·언어권 " + data.langs + "개로 표본 기준 충족" };
+  }
+
+  document.getElementById("judge-btn").addEventListener("click", function () {
+    var cards = Array.prototype.slice.call(itemsEl.querySelectorAll(".item-card"));
+    var results = cards.map(function (card, idx) {
+      var data = {
+        name: card.querySelector('[data-field="name"]').value.trim() || "(항목명 없음)",
+        owner: card.querySelector('[data-field="owner"]').value,
+        due: card.querySelector('[data-field="due"]').value,
+        evidence: card.querySelector('[data-field="evidence"]').value,
+        langs: parseInt(card.querySelector('[data-field="langs"]').value, 10) || 0,
+        grade: card.querySelector('[data-field="grade"]').value
+      };
+      var j = judgeItem(data);
+      return { idx: idx + 1, data: data, verdict: j.verdict, reason: j.reason };
+    });
+
+    var body = document.getElementById("result-body");
+    body.innerHTML = "";
+    results.forEach(function (r) {
+      var tr = document.createElement("tr");
+      var chipClass = r.verdict === "통과" ? "pass" : "reject";
+      tr.innerHTML =
+        '<td class="num">' + r.idx + '</td>' +
+        '<td>' + escapeHtml(r.data.name) + '</td>' +
+        '<td class="owner">' + (escapeHtml(r.data.owner.trim()) || "—") + '</td>' +
+        '<td class="due">' + (escapeHtml(r.data.due.trim()) || "—") + '</td>' +
+        '<td><span class="chip ' + chipClass + '">' + r.verdict + '</span></td>' +
+        '<td class="reason">' + escapeHtml(r.reason) + '</td>';
+      body.appendChild(tr);
+    });
+
+    var passed = results.filter(function (r) { return r.verdict === "통과"; });
+    var rejected = results.length - passed.length;
+    var hasCritical = passed.some(function (r) { return r.data.grade === "Critical"; });
+    var hasHigh = passed.some(function (r) { return r.data.grade === "High"; });
+
+    var verdict, verdictReason;
+    if (passed.length === 0) {
+      verdict = "hold";
+      verdictReason = "통과 항목이 없어 비교 가능한 구조를 세울 수 없음";
+    } else if (hasCritical) {
+      verdict = "hold";
+      verdictReason = "통과 항목 중 Critical 등급이 있음";
+    } else if (hasHigh) {
+      verdict = "revise";
+      verdictReason = "통과 항목 중 High 등급이 있어 조정이 필요함";
+    } else {
+      verdict = "go";
+      verdictReason = "필요한 표본이 채워졌고 High 이상 리스크가 없음";
+    }
+
+    var stampEl = document.getElementById("verdict-stamp");
+    var labelMap = { go: "GO", revise: "REVISE", hold: "HOLD" };
+    stampEl.textContent = labelMap[verdict];
+    stampEl.className = "stamp " + verdict;
+
+    document.getElementById("verdict-copy").innerHTML =
+      "<strong>" + results.length + "건 중 " + passed.length + "건 통과, " + rejected + "건 반려.</strong><br>" +
+      verdictReason + ".";
+
+    document.getElementById("summary-line").textContent =
+      rejected > 0
+        ? "반려 " + rejected + "건이 모두 해소될 때까지 다음 단계로 넘기지 않습니다."
+        : "모든 항목이 통과했습니다.";
+
+    document.getElementById("results").classList.add("visible");
+    document.getElementById("results").scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+})();
+</script>
+</body>
+</html>
