@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -53,8 +54,9 @@ class AuditStrategyAgent:
         bundle: FeedbackBundle,
         pack: EvidencePack,
         assessment: RiskAssessment,
+        on_event: Callable[[str, str, dict], None] | None = None,
     ) -> ValidatedDecision:
-        base = self.run_deterministic(bundle, pack, assessment)
+        base = self.run_deterministic(bundle, pack, assessment, on_event=on_event)
         if self.use_llm:
             narrative = parse_structured(
                 model=self.model,
@@ -73,8 +75,15 @@ class AuditStrategyAgent:
         assessment: RiskAssessment,
         *,
         analysis_incomplete: bool = False,
+        on_event: Callable[[str, str, dict], None] | None = None,
     ) -> ValidatedDecision:
+        notify = on_event or (lambda _node, _message, _metrics: None)
         evidence_by_id = {item.evidence_id: item for item in pack.evidence}
+        notify(
+            "evidence_checked",
+            "위험 근거의 존재와 메커니즘 연결을 확인했습니다.",
+            {"evidence": len(evidence_by_id)},
+        )
         validated = []
         rejected = []
         for risk in assessment.risks:
@@ -94,10 +103,26 @@ class AuditStrategyAgent:
             else:
                 validated.append(risk)
 
+        notify(
+            "risks_validated",
+            "위험을 정책 기준으로 검증했습니다.",
+            {"validated": len(validated), "rejected": len(rejected)},
+        )
+
         decision, reason = decide(
             bundle.samples,
             validated,
             analysis_incomplete=analysis_incomplete,
+        )
+        notify(
+            "sample_gate_applied",
+            "언어권 표본 기준을 판단에 적용했습니다.",
+            {"analysis_incomplete": analysis_incomplete},
+        )
+        notify(
+            "decision_fixed",
+            "의사결정 상태를 확정했습니다.",
+            {"decision": decision.value},
         )
 
         revisions = []
@@ -112,7 +137,7 @@ class AuditStrategyAgent:
                     addresses_risk_ids=[risk.risk_id],
                 )
             )
-        return ValidatedDecision(
+        result = ValidatedDecision(
             run_id=assessment.run_id,
             status=ArtifactStatus.PARTIAL if assessment.errors else ArtifactStatus.COMPLETE,
             producer=Producer.AUDIT_STRATEGY,
@@ -124,6 +149,12 @@ class AuditStrategyAgent:
             rejected_risks=rejected,
             priority_revisions=revisions,
         )
+        notify(
+            "revisions_built",
+            "우선 수정안을 구성했습니다.",
+            {"revisions": len(revisions)},
+        )
+        return result
 
     @staticmethod
     def _merge_narrative(

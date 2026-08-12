@@ -137,14 +137,14 @@ if submitted:
         )
         st.header("2. 수집 → RAG·페르소나 → 레드팀 → 감사")
         with st.status("고정 파이프라인 실행 중", expanded=True) as status:
-            def progress(stage: str, state: str, message: str) -> None:
+            def progress(item) -> None:
                 icons = {"running": "⏳", "complete": "✅", "retrying": "↻", "failed": "❌"}
-                st.write(f"{icons[state]} `{stage}` — {message}")
+                st.write(f"{icons.get(item.state.value, '•')} `{item.agent}` — {item.message}")
 
             result = EventPreflightOrchestrator(use_llm=use_llm).run(
                 event,
                 options,
-                on_stage=progress,
+                on_event=progress,
                 log_path=Path(".data/runs") / f"{run_id}.jsonl",
             )
             status.update(label="사전검증 완료", state="complete", expanded=False)

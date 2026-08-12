@@ -27,10 +27,10 @@ from contracts import (
     RiskAssessment,
     ValidatedDecision,
 )
+from execution import AGENT_ORDER, EventCallback, ExecutionEvent, ExecutionState
 from policy import POLICY_VERSION
 
 T = TypeVar("T", bound=Artifact)
-StageCallback = Callable[[str, str, str], None]
 
 
 class PipelineStopped(RuntimeError):
@@ -44,6 +44,7 @@ class PipelineResult:
     risks: RiskAssessment
     validated: ValidatedDecision
     brief: DecisionBrief
+    events: list[ExecutionEvent]
     fallback_used: bool = False
     analysis_incomplete: bool = False
 
@@ -68,24 +69,52 @@ class EventPreflightOrchestrator:
         event: EventBrief,
         options: CollectionOptions | None = None,
         *,
-        on_stage: StageCallback | None = None,
+        on_event: EventCallback | None = None,
         log_path: Path | None = None,
     ) -> PipelineResult:
         if event.producer != Producer.USER:
             raise PipelineStopped("EventBrief producer must be user")
         options = options or CollectionOptions()
-        notify = on_stage or (lambda _stage, _status, _message: None)
+        events: list[ExecutionEvent] = []
+
+        def emit(
+            agent: str,
+            node: str,
+            state: ExecutionState,
+            message: str,
+            metrics: dict[str, int | float | str | bool] | None = None,
+        ) -> None:
+            item = ExecutionEvent(
+                sequence=len(events),
+                agent=agent,
+                node=node,
+                state=state,
+                message=message,
+                metrics=metrics or {},
+            )
+            events.append(item)
+            if on_event is not None:
+                on_event(item)
+            self._write(item, log_path)
+
+        def agent_events(agent: str) -> Callable[[str, str, dict], None]:
+            return lambda node, message, metrics: emit(
+                agent, node, ExecutionState.RUNNING, message, metrics
+            )
+
+        for agent in AGENT_ORDER:
+            emit(agent, "queued", ExecutionState.WAITING, "실행 대기 중입니다.")
         fallback_used = False
         analysis_incomplete = False
 
         feedback = self._stage(
             "collection",
-            lambda: self.collector.run(event, options),
+            lambda: self.collector.run(event, options, on_event=agent_events("collection")),
             FeedbackBundle,
             Producer.COLLECTOR,
             event.run_id,
             {event.ref},
-            notify,
+            emit,
         )
         reproducibility_metadata = {
             "policy_version": POLICY_VERSION,
@@ -102,12 +131,14 @@ class EventPreflightOrchestrator:
         try:
             evidence = self._stage(
                 "evidence_rag_personas",
-                lambda: self.evidence_rag.run(feedback),
+                lambda: self.evidence_rag.run(
+                    feedback, on_event=agent_events("evidence_rag_personas")
+                ),
                 EvidencePack,
                 Producer.EVIDENCE_RAG,
                 event.run_id,
                 {feedback.ref},
-                notify,
+                emit,
                 reproducibility_metadata,
             )
         except StructuredModelError:
@@ -120,7 +151,8 @@ class EventPreflightOrchestrator:
                 producer=Producer.EVIDENCE_RAG,
                 run_id=event.run_id,
                 required_refs={feedback.ref},
-                notify=notify,
+                emit=emit,
+                on_event=agent_events("evidence_rag_personas"),
                 reproducibility_metadata=reproducibility_metadata,
             )
         self._write(evidence, log_path)
@@ -133,19 +165,22 @@ class EventPreflightOrchestrator:
                 producer=Producer.EVENT_REDTEAM,
                 run_id=event.run_id,
                 required_refs={event.ref, evidence.ref},
-                notify=notify,
+                emit=emit,
+                on_event=agent_events("event_redteam"),
                 reproducibility_metadata=reproducibility_metadata,
             )
         else:
             try:
                 risks = self._stage(
                     "event_redteam",
-                    lambda: self.redteam.run(event, evidence),
+                    lambda: self.redteam.run(
+                        event, evidence, on_event=agent_events("event_redteam")
+                    ),
                     RiskAssessment,
                     Producer.EVENT_REDTEAM,
                     event.run_id,
                     {event.ref, evidence.ref},
-                    notify,
+                    emit,
                     reproducibility_metadata,
                 )
             except StructuredModelError:
@@ -159,7 +194,8 @@ class EventPreflightOrchestrator:
                     producer=Producer.EVENT_REDTEAM,
                     run_id=event.run_id,
                     required_refs={event.ref, evidence.ref},
-                    notify=notify,
+                    emit=emit,
+                    on_event=agent_events("event_redteam"),
                     reproducibility_metadata=reproducibility_metadata,
                 )
         self._write(risks, log_path)
@@ -173,7 +209,8 @@ class EventPreflightOrchestrator:
                 producer=Producer.AUDIT_STRATEGY,
                 run_id=event.run_id,
                 required_refs={feedback.ref, evidence.ref, risks.ref},
-                notify=notify,
+                emit=emit,
+                on_event=agent_events("audit_strategy"),
                 analysis_incomplete=True,
                 reproducibility_metadata=reproducibility_metadata,
             )
@@ -181,12 +218,14 @@ class EventPreflightOrchestrator:
             try:
                 validated = self._stage(
                     "audit_strategy",
-                    lambda: self.audit.run(feedback, evidence, risks),
+                    lambda: self.audit.run(
+                        feedback, evidence, risks, on_event=agent_events("audit_strategy")
+                    ),
                     ValidatedDecision,
                     Producer.AUDIT_STRATEGY,
                     event.run_id,
                     {feedback.ref, evidence.ref, risks.ref},
-                    notify,
+                    emit,
                     reproducibility_metadata,
                 )
             except StructuredModelError:
@@ -201,7 +240,8 @@ class EventPreflightOrchestrator:
                     producer=Producer.AUDIT_STRATEGY,
                     run_id=event.run_id,
                     required_refs={feedback.ref, evidence.ref, risks.ref},
-                    notify=notify,
+                    emit=emit,
+                    on_event=agent_events("audit_strategy"),
                     analysis_incomplete=analysis_incomplete,
                     reproducibility_metadata=reproducibility_metadata,
                 )
@@ -211,13 +251,13 @@ class EventPreflightOrchestrator:
         )
         self._check(brief, DecisionBrief, Producer.ORCHESTRATOR, event.run_id, {event.ref, evidence.ref, validated.ref})
         self._write(brief, log_path)
-        notify("decision_brief", "complete", brief.decision.value)
         return PipelineResult(
             feedback,
             evidence,
             risks,
             validated,
             brief,
+            events,
             fallback_used=fallback_used,
             analysis_incomplete=analysis_incomplete,
         )
@@ -230,10 +270,12 @@ class EventPreflightOrchestrator:
         producer: Producer,
         run_id: str,
         required_refs: set[str],
-        notify: StageCallback,
+        emit: Callable[
+            [str, str, ExecutionState, str, dict[str, int | float | str | bool] | None], None
+        ],
         reproducibility_metadata: dict[str, str] | None = None,
     ) -> T:
-        notify(name, "running", "started")
+        emit(name, "agent", ExecutionState.RUNNING, "실행을 시작했습니다.")
         for attempt in range(2):
             try:
                 result = call()
@@ -242,19 +284,27 @@ class EventPreflightOrchestrator:
                 checked = self._check(result, output_type, producer, run_id, required_refs)
                 if checked.status == ArtifactStatus.FAILED:
                     raise PipelineStopped(f"{name} returned failed status")
-                notify(name, "complete", f"attempt {attempt + 1}")
+                emit(name, "agent", ExecutionState.COMPLETE, f"시도 {attempt + 1}회로 완료했습니다.")
                 return checked
+            except PipelineStopped as exc:
+                emit(name, "agent", ExecutionState.FAILED, str(exc))
+                raise
             except StructuredModelError as exc:
                 if exc.code in {ErrorCode.SCHEMA_INVALID, ErrorCode.LLM_REFUSAL}:
                     if attempt == 0:
-                        notify(name, "retrying", "schema/refusal validation failed")
+                        emit(
+                            name,
+                            "agent",
+                            ExecutionState.RETRYING,
+                            "구조화 출력 검증을 다시 시도합니다.",
+                        )
                         continue
-                    notify(name, "failed", f"{exc.code.value}: {exc}")
+                    emit(name, "agent", ExecutionState.FAILED, f"{exc.code.value}: {exc}")
                     raise
-                notify(name, "failed", f"{exc.code.value}: {exc}")
+                emit(name, "agent", ExecutionState.FAILED, f"{exc.code.value}: {exc}")
                 raise PipelineStopped(f"{name}: {exc.code.value}: {exc}") from exc
             except (ValidationError, ContractViolation) as exc:
-                notify(name, "failed", str(exc))
+                emit(name, "agent", ExecutionState.FAILED, str(exc))
                 raise PipelineStopped(f"{name}: SCHEMA_INVALID: {exc}") from exc
         raise AssertionError("unreachable")
 
@@ -266,19 +316,24 @@ class EventPreflightOrchestrator:
         producer: Producer,
         run_id: str,
         required_refs: set[str],
-        notify: StageCallback,
+        emit: Callable[
+            [str, str, ExecutionState, str, dict[str, int | float | str | bool] | None], None
+        ],
+        on_event: Callable[[str, str, dict], None],
         analysis_incomplete: bool = False,
         reproducibility_metadata: dict[str, str] | None = None,
     ) -> T:
+        emit(name, "agent", ExecutionState.RUNNING, "결정론적 안전 경로를 시작했습니다.")
         try:
             if name == "evidence_rag_personas":
-                result = self.evidence_rag.run_deterministic(*args)
+                result = self.evidence_rag.run_deterministic(*args, on_event=on_event)
             elif name == "event_redteam":
-                result = self.redteam.run_deterministic(*args)
+                result = self.redteam.run_deterministic(*args, on_event=on_event)
             elif name == "audit_strategy":
                 result = self.audit.run_deterministic(
                     *args,
                     analysis_incomplete=analysis_incomplete,
+                    on_event=on_event,
                 )
             else:
                 raise ValueError(f"unknown deterministic stage: {name}")
@@ -287,10 +342,13 @@ class EventPreflightOrchestrator:
             checked = self._check(result, output_type, producer, run_id, required_refs)
             if checked.status == ArtifactStatus.FAILED:
                 raise PipelineStopped(f"{name} returned failed status")
+        except PipelineStopped as exc:
+            emit(name, "agent", ExecutionState.FAILED, str(exc))
+            raise
         except (ValidationError, ContractViolation) as exc:
-            notify(name, "failed", str(exc))
+            emit(name, "agent", ExecutionState.FAILED, str(exc))
             raise PipelineStopped(f"{name}: SCHEMA_INVALID: {exc}") from exc
-        notify(name, "complete", "deterministic fallback")
+        emit(name, "agent", ExecutionState.COMPLETE, "결정론적 안전 경로를 완료했습니다.")
         return checked
 
     @staticmethod
@@ -311,7 +369,7 @@ class EventPreflightOrchestrator:
         return checked
 
     @staticmethod
-    def _write(artifact: Artifact, log_path: Path | None) -> None:
+    def _write(artifact: Artifact | ExecutionEvent, log_path: Path | None) -> None:
         if log_path is None:
             return
         log_path.parent.mkdir(parents=True, exist_ok=True)

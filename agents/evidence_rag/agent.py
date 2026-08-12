@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from collections import Counter
 from pathlib import Path
 
@@ -70,8 +71,12 @@ class EvidenceRagAgent:
         self.use_llm = use_llm
         self.client = client
 
-    def run(self, bundle: FeedbackBundle) -> EvidencePack:
-        base = self.run_deterministic(bundle)
+    def run(
+        self,
+        bundle: FeedbackBundle,
+        on_event: Callable[[str, str, dict], None] | None = None,
+    ) -> EvidencePack:
+        base = self.run_deterministic(bundle, on_event=on_event)
         if self.use_llm:
             client = self.client
             if client is None:
@@ -96,8 +101,12 @@ class EvidenceRagAgent:
             return self._merge_narrative(base, narrative)
         return base
 
-    def run_deterministic(self, bundle: FeedbackBundle) -> EvidencePack:
-        return self._deterministic(bundle)
+    def run_deterministic(
+        self,
+        bundle: FeedbackBundle,
+        on_event: Callable[[str, str, dict], None] | None = None,
+    ) -> EvidencePack:
+        return self._deterministic(bundle, on_event=on_event)
 
     def _merge_narrative(
         self, base: EvidencePack, narrative: EvidenceNarrative
@@ -156,8 +165,18 @@ class EvidenceRagAgent:
             ErrorCode.SCHEMA_INVALID, "LLM narrative references unknown evidence"
         )
 
-    def _deterministic(self, bundle: FeedbackBundle) -> EvidencePack:
+    def _deterministic(
+        self,
+        bundle: FeedbackBundle,
+        on_event: Callable[[str, str, dict], None] | None = None,
+    ) -> EvidencePack:
+        notify = on_event or (lambda _node, _message, _metrics: None)
         deduplicated = list({item.source_id: item for item in bundle.evidence}.values())
+        notify(
+            "deduplicated",
+            "중복 근거를 제거했습니다.",
+            {"evidence": len(deduplicated)},
+        )
         issues: list[MechanismIssue] = []
         for category, title in ISSUE_TITLES.items():
             matching = [item for item in deduplicated if category.value in item.mechanism_tags]
@@ -172,6 +191,12 @@ class EvidenceRagAgent:
                         confidence=sum(item.relevance for item in matching) / len(matching),
                     )
                 )
+
+        notify(
+            "issues_grouped",
+            "메커니즘별 근거를 묶었습니다.",
+            {"issues": len(issues)},
+        )
 
         samples = {sample.language: sample for sample in bundle.samples}
         language_insights: list[LanguageInsight] = []
@@ -199,6 +224,11 @@ class EvidenceRagAgent:
                     )
                 )
 
+        notify(
+            "language_gate_checked",
+            "언어권별 표본 기준을 확인했습니다.",
+            {"visible": sum(item.conclusion is not None for item in language_insights)},
+        )
         errors = list(bundle.errors)
         personas = self._personas(deduplicated, language_insights)
         if len(deduplicated) < 15:
@@ -209,7 +239,12 @@ class EvidenceRagAgent:
                 )
             )
 
-        return EvidencePack(
+        notify(
+            "personas_built",
+            "근거 기반 페르소나를 만들었습니다.",
+            {"personas": len(personas)},
+        )
+        result = EvidencePack(
             run_id=bundle.run_id,
             status=ArtifactStatus.PARTIAL if errors else ArtifactStatus.COMPLETE,
             producer=Producer.EVIDENCE_RAG,
@@ -220,6 +255,12 @@ class EvidenceRagAgent:
             evidence=deduplicated,
             personas=personas,
         )
+        notify(
+            "pack_ready",
+            "EvidencePack 계약을 통과했습니다.",
+            {"evidence": len(deduplicated)},
+        )
+        return result
 
     def _personas(self, evidence, insights: list[LanguageInsight]) -> list[Persona]:
         if len(evidence) < 15:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -56,15 +57,52 @@ class CollectorAgent:
         self.steam = steam or SteamClient()
         self.x_client = x_client or XClient(os.getenv("X_BEARER_TOKEN"), ProjectBudget(cap_usd=10))
 
-    def run(self, event: EventBrief, options: CollectionOptions) -> FeedbackBundle:
+    def run(
+        self,
+        event: EventBrief,
+        options: CollectionOptions,
+        on_event: Callable[[str, str, dict], None] | None = None,
+    ) -> FeedbackBundle:
+        notify = on_event or (lambda _node, _message, _metrics: None)
         if options.use_fixture:
             bundle = load_feedback_fixture(event)
-            return bundle.model_copy(update={"input_refs": [event.ref]})
+            result = bundle.model_copy(update={"input_refs": [event.ref]})
+            notify(
+                "source_selected",
+                "저장된 검증 데이터를 선택했습니다.",
+                {"input_mode": options.input_mode.value},
+            )
+            notify(
+                "cutoff_checked",
+                "기준 시점 이후 자료를 제외했습니다.",
+                {"remaining": len(result.evidence)},
+            )
+            notify(
+                "anonymized",
+                "원문을 저장하지 않고 비식별 근거를 만들었습니다.",
+                {"evidence": len(result.evidence)},
+            )
+            notify(
+                "samples_counted",
+                "언어권별 표본을 집계했습니다.",
+                {"insufficient": sum(not item.sufficient for item in result.samples)},
+            )
+            notify(
+                "bundle_ready",
+                "FeedbackBundle 계약을 통과했습니다.",
+                {"evidence": len(result.evidence)},
+            )
+            return result
 
         evidence: list[EvidenceItem] = []
         search_log: list[SearchRecord] = []
         errors: list[PipelineError] = []
         general_counts = {language: 0 for language in SUPPORTED_LANGUAGES}
+        notify(
+            "source_selected",
+            "승인된 입력 소스를 선택했습니다.",
+            {"input_mode": options.input_mode.value},
+        )
 
         if options.imported_csv:
             try:
@@ -115,6 +153,17 @@ class CollectorAgent:
             general_counts[language] += len(raw)
             evidence.extend(_summarize_without_persisting_raw(raw))
 
+        notify(
+            "cutoff_checked",
+            "기준 시점 이후 자료를 제외했습니다.",
+            {"remaining": len(evidence)},
+        )
+        notify(
+            "anonymized",
+            "원문을 저장하지 않고 비식별 근거를 만들었습니다.",
+            {"evidence": len(evidence)},
+        )
+
         samples = [
             LanguageSample(
                 language=language,
@@ -132,6 +181,12 @@ class CollectorAgent:
                     )
                 )
 
+        notify(
+            "samples_counted",
+            "언어권별 표본을 집계했습니다.",
+            {"insufficient": sum(not item.sufficient for item in samples)},
+        )
+
         status = ArtifactStatus.PARTIAL if errors else ArtifactStatus.COMPLETE
         fatal_codes = {
             ErrorCode.AUTH_FAILED,
@@ -141,7 +196,7 @@ class CollectorAgent:
         }
         if not evidence and any(error.code in fatal_codes for error in errors):
             status = ArtifactStatus.FAILED
-        return FeedbackBundle(
+        result = FeedbackBundle(
             run_id=event.run_id,
             status=status,
             producer=Producer.COLLECTOR,
@@ -153,6 +208,12 @@ class CollectorAgent:
             samples=samples,
             evidence=evidence,
         )
+        notify(
+            "bundle_ready",
+            "FeedbackBundle 계약을 통과했습니다.",
+            {"evidence": len(evidence)},
+        )
+        return result
 
     def _collect_steam(
         self,

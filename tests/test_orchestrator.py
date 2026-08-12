@@ -8,6 +8,7 @@ from agents.structured import StructuredModelError
 from contracts import Decision, ErrorCode, InputMode, Producer
 from evaluation.backtest import evaluate_black_market
 from evaluation.fixtures import load_demo_event
+from execution import AGENT_ORDER, ExecutionState
 from orchestrator import EventPreflightOrchestrator, PipelineStopped
 
 
@@ -50,7 +51,7 @@ def test_fixture_llm_refusal_retries_once_then_uses_deterministic_fallback(event
             super().__init__()
             self.calls = 0
 
-        def run(self, _bundle):
+        def run(self, _bundle, on_event=None):
             self.calls += 1
             raise StructuredModelError(ErrorCode.LLM_REFUSAL, "refused")
 
@@ -59,6 +60,10 @@ def test_fixture_llm_refusal_retries_once_then_uses_deterministic_fallback(event
     assert rag.calls == 2
     assert result.brief.decision == Decision.REVISE
     assert result.fallback_used is True
+    states = [item.state for item in result.events if item.agent == "evidence_rag_personas"]
+    assert ExecutionState.RETRYING in states
+    assert ExecutionState.FAILED in states
+    assert ExecutionState.COMPLETE in states
 
 
 def test_contract_violation_stops_without_retry_or_fallback(event):
@@ -67,19 +72,28 @@ def test_contract_violation_stops_without_retry_or_fallback(event):
             super().__init__()
             self.calls = 0
 
-        def run(self, bundle):
+        def run(self, bundle, on_event=None):
             self.calls += 1
             return self.run_deterministic(bundle).model_copy(update={"producer": Producer.COLLECTOR})
 
     broken = BrokenRag()
+    events = []
     with pytest.raises(PipelineStopped, match="SCHEMA_INVALID"):
-        EventPreflightOrchestrator(evidence_rag=broken).run(event, CollectionOptions())
+        EventPreflightOrchestrator(evidence_rag=broken).run(
+            event,
+            CollectionOptions(),
+            on_event=events.append,
+        )
     assert broken.calls == 1
+    assert any(
+        item.agent == "evidence_rag_personas" and item.state == ExecutionState.FAILED
+        for item in events
+    )
 
 
 def test_live_llm_failure_returns_hold_without_loading_fixture(event):
     class RefusingRag(EvidenceRagAgent):
-        def run(self, _bundle):
+        def run(self, _bundle, on_event=None):
             raise StructuredModelError(ErrorCode.LLM_REFUSAL, "refused")
 
     class FakeSteam:
@@ -109,3 +123,40 @@ def test_input_snapshot_hash_changes_when_normalized_input_changes(event):
     changed = event.model_copy(update={"goal": f"{event.goal} 변경"})
     second = EventPreflightOrchestrator().run(changed, CollectionOptions())
     assert first.brief.input_snapshot_hash != second.brief.input_snapshot_hash
+
+
+def test_success_events_include_internal_nodes_in_pipeline_order(event):
+    result = EventPreflightOrchestrator().run(event, CollectionOptions())
+    assert [item.agent for item in result.events[:4]] == list(AGENT_ORDER)
+    assert all(item.state == ExecutionState.WAITING for item in result.events[:4])
+    completed = [item.agent for item in result.events if item.state == ExecutionState.COMPLETE]
+    assert completed[:4] == list(AGENT_ORDER)
+    required_nodes = {
+        "collection": ["source_selected", "cutoff_checked", "anonymized", "samples_counted", "bundle_ready"],
+        "evidence_rag_personas": ["deduplicated", "issues_grouped", "language_gate_checked", "personas_built", "pack_ready"],
+        "event_redteam": ["event_reviewed", "failure_paths_built", "impact_linked", "risks_graded", "assessment_ready"],
+        "audit_strategy": ["evidence_checked", "risks_validated", "sample_gate_applied", "decision_fixed", "revisions_built"],
+    }
+    for agent, nodes in required_nodes.items():
+        observed = [item.node for item in result.events if item.agent == agent]
+        positions = [observed.index(node) for node in nodes]
+        assert positions == sorted(positions)
+
+
+def test_failure_event_never_starts_downstream_agents(event):
+    class BrokenRag(EvidenceRagAgent):
+        def run(self, bundle, on_event=None):
+            result = self.run_deterministic(bundle)
+            return result.model_copy(update={"producer": Producer.COLLECTOR})
+
+    events = []
+    with pytest.raises(PipelineStopped):
+        EventPreflightOrchestrator(evidence_rag=BrokenRag()).run(
+            event,
+            CollectionOptions(),
+            on_event=events.append,
+        )
+    assert not any(
+        item.agent in {"event_redteam", "audit_strategy"} and item.state == ExecutionState.RUNNING
+        for item in events
+    )
