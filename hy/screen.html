@@ -1,0 +1,431 @@
+<meta charset="UTF-8">
+<title>데이터 수집 - 연습용 화면</title>
+<style>
+  * { box-sizing: border-box; }
+
+  :root {
+    --bg: #FAFAF9;
+    --surface: #FFFFFF;
+    --text: #18181B;
+    --text-secondary: #71717A;
+    --border: #E4E4E7;
+    --accent: #6D5DFB;
+    --accent-surface: #F4F3FF;
+  }
+
+  html, body {
+    background: var(--bg);
+  }
+
+  body {
+    color: var(--text);
+    font-family: "Pretendard", "SUIT", "Noto Sans KR", "Inter", -apple-system,
+      "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+    margin: 0;
+    padding: 0;
+  }
+
+  .page {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 72px 24px 120px;
+  }
+
+  .notice {
+    color: var(--text-secondary);
+    font-size: 13px;
+    letter-spacing: 0.01em;
+    padding-left: 14px;
+    border-left: 2px solid var(--border);
+    margin-bottom: 40px;
+  }
+
+  h1.title {
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--text);
+    margin: 0 0 24px;
+  }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 40px;
+  }
+
+  .field {
+    margin-bottom: 20px;
+  }
+  .field:last-of-type {
+    margin-bottom: 0;
+  }
+
+  label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 10px;
+    letter-spacing: 0.01em;
+  }
+
+  textarea,
+  input[type="number"],
+  input[type="datetime-local"],
+  select {
+    font-family: inherit;
+    font-size: 15px;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 12px;
+    transition: border-color 0.15s ease;
+  }
+  textarea:focus,
+  input[type="number"]:focus,
+  input[type="datetime-local"]:focus,
+  select:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  textarea {
+    width: 100%;
+    height: 42px;
+    min-height: 42px;
+    line-height: 1.6;
+    resize: none;
+    overflow-y: hidden;
+  }
+  textarea::placeholder {
+    color: #A1A1AA;
+  }
+
+  .period-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .period-row input[type="datetime-local"] {
+    flex: 1;
+    min-width: 0;
+    color-scheme: light;
+  }
+  .period-sep {
+    color: var(--text-secondary);
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+
+  .amount-row {
+    display: flex;
+    gap: 8px;
+  }
+  .amount-row input[type="number"] {
+    flex: 1;
+    min-width: 0;
+  }
+  .amount-row select {
+    flex-shrink: 0;
+    width: 100px;
+    cursor: pointer;
+  }
+
+  .fx-note {
+    margin-top: 8px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    min-height: 18px;
+  }
+
+  button#collect-btn {
+    display: inline-block;
+    margin-top: 36px;
+    padding: 11px 22px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #ffffff;
+    background: var(--accent);
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: opacity 0.15s ease;
+  }
+  button#collect-btn:hover {
+    opacity: 0.88;
+  }
+  button#collect-btn:active {
+    opacity: 0.78;
+  }
+
+  #result-section {
+    display: none;
+    margin-top: 16px;
+  }
+  #result-section .panel {
+    padding: 40px;
+  }
+  #result-section h2.result-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    letter-spacing: 0.02em;
+    margin: 0 0 24px;
+    text-transform: uppercase;
+  }
+
+  .result-body h1 {
+    font-size: 21px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: var(--text);
+    margin: 0 0 16px;
+  }
+  .result-body h2 {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text);
+    margin: 40px 0 14px;
+  }
+  .result-body h2:first-of-type {
+    margin-top: 32px;
+  }
+  .result-body h3 {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 24px 0 8px;
+  }
+  .result-body p {
+    color: var(--text);
+    margin: 8px 0;
+    line-height: 1.75;
+  }
+  .result-body code {
+    font-size: 0.92em;
+    background: var(--accent-surface);
+    color: var(--accent);
+    padding: 1px 6px;
+    border-radius: 5px;
+  }
+  .result-body ul {
+    margin: 8px 0;
+    padding-left: 20px;
+  }
+  .result-body li {
+    margin: 6px 0;
+    line-height: 1.7;
+  }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 4px 0 8px;
+    font-size: 14px;
+  }
+  th, td {
+    border-bottom: 1px solid var(--border);
+    padding: 11px 14px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    color: var(--text-secondary);
+    font-weight: 600;
+    font-size: 12.5px;
+    letter-spacing: 0.02em;
+    border-bottom: 1px solid var(--border);
+    border-top: 1px solid var(--border);
+  }
+  tbody tr:last-child td {
+    border-bottom: none;
+  }
+  .table-wrap {
+    overflow-x: auto;
+    margin: 4px 0 28px;
+  }
+</style>
+
+<div class="page">
+
+  <div class="notice">연습용 화면 - 아직 실제로 처리하지 않고, 미리 넣어둔 결과를 보여줍니다</div>
+
+  <h1 class="title">데이터 수집</h1>
+
+  <div class="panel">
+    <div class="field">
+      <label for="game-name">게임이름</label>
+      <textarea id="game-name" rows="1" placeholder="게임이름을 붙여넣으세요"></textarea>
+    </div>
+
+    <div class="field">
+      <label for="event-keyword">이벤트 키워드</label>
+      <textarea id="event-keyword" rows="1" placeholder="이벤트 키워드를 붙여넣으세요"></textarea>
+    </div>
+
+    <div class="field">
+      <label for="collect-period-start">게시물 등록기간(데이터 수집기간)</label>
+      <div class="period-row">
+        <input type="datetime-local" id="collect-period-start">
+        <span class="period-sep">~</span>
+        <input type="datetime-local" id="collect-period-end">
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="cost-limit">상한 비용</label>
+      <div class="amount-row">
+        <input type="number" id="cost-limit" placeholder="상한 비용을 입력하세요" min="0" step="any">
+        <select id="currency-select">
+          <option value="USD" selected>USD</option>
+          <option value="KRW">KRW</option>
+          <option value="JPY">JPY</option>
+          <option value="EUR">EUR</option>
+          <option value="CNY">CNY</option>
+        </select>
+      </div>
+      <div class="fx-note" id="fx-note"></div>
+    </div>
+
+    <button id="collect-btn">[데이터 수집]</button>
+  </div>
+
+  <div id="result-section">
+    <div class="panel">
+      <h2 class="result-title">결과</h2>
+      <div class="result-body">
+
+<h1>피드백 번들 (테스트 실행 결과)</h1>
+
+<p><code>ai/input-sample.md</code>의 더미 데이터를 재료로 <code>hy</code> 에이전트의 7단계 게이트를 적용한 결과입니다. 실제 스팀/X API 호출은 하지 않았고, 입력 파일에 이미 담긴 더미 원본을 승인/반려 로직으로만 처리했습니다(로직 검증용 실행).</p>
+
+<ul>
+  <li>대상 게임: 가상게임A</li>
+  <li>이벤트ID/키워드: patch_v2.3_weapon_balance / "무기 밸런스"</li>
+  <li>수집 기간(컷오프): 2026-08-01 ~ 2026-08-07</li>
+  <li>승인된 출처: steam.com/app/999999/reviews, x.com(#가상게임A)</li>
+  <li>언어권별 최소 표본 기준: 3건(테스트 축소값)</li>
+  <li>API 비용 상한: $50/실행 — 이번 실행에서는 초과 없음(별도 초과 시나리오는 input-sample.md 3번 항목 참고, 이번 결과에 미포함)</li>
+</ul>
+
+<h2>언어권별 표본 수</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>언어권</th><th>표본 수</th><th>상태</th></tr></thead>
+  <tbody>
+    <tr><td>한국어</td><td>3</td><td>충족</td></tr>
+    <tr><td>영어</td><td>3</td><td>충족</td></tr>
+    <tr><td>일본어</td><td>1</td><td>부족</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>비식별 VOC 목록</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>근거ID</th><th>출처URL</th><th>요약</th><th>중복 카운트</th></tr></thead>
+  <tbody>
+    <tr><td>VOC-0001</td><td>steam.com/app/999999/reviews/1</td><td>무기 밸런스 패치 이후 근거리 무기가 약해졌다는 의견(동일/유사 표현 반복 포함)</td><td>3</td></tr>
+    <tr><td>VOC-0002</td><td>x.com/.../status/1</td><td>밸런스 패치는 나쁘지 않으나 특정 무기만 과하게 강하다는 의견</td><td>1</td></tr>
+    <tr><td>VOC-0003</td><td>steam.com/app/999999/reviews/2</td><td>패치 이후 근접 무기가 약해졌다는 의견(영어권)</td><td>1</td></tr>
+    <tr><td>VOC-0004</td><td>x.com/.../status/4</td><td>밸런스 패치에 대한 불만(동일 작성자 반복 게시, 대표 1건 채택)</td><td>3</td></tr>
+    <tr><td>VOC-0005</td><td>steam.com/app/999999/reviews/5</td><td>무기 밸런스 조정 후 근접무기가 약해진 것 같다는 의견(일본어권)</td><td>1</td></tr>
+    <tr><td>VOC-0006</td><td>steam.com/app/999999/reviews/6</td><td>밸런스 패치로 원거리 무기가 과해졌다는 의견(영어권)</td><td>1</td></tr>
+    <tr><td>VOC-0007</td><td>steam.com/app/999999/reviews/7</td><td>신규 무기 밸런스 불만, 근접무기 너프가 과하다는 의견(영어권)</td><td>1</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>검색 기록</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>실행시각</th><th>출처</th><th>질의/필터</th><th>결과 수(원본 건수)</th></tr></thead>
+  <tbody>
+    <tr><td>테스트 실행</td><td>ai/input-sample.md (더미)</td><td>대상게임=가상게임A, 이벤트=patch_v2.3_weapon_balance, 기간=2026-08-01~2026-08-07</td><td>16건(raw_001~raw_016)</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>수집 오류 목록</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>오류코드</th><th>출처</th><th>내용</th><th>재시도 가능 여부</th></tr></thead>
+  <tbody>
+    <tr><td>ERR-RATE-429</td><td>X</td><td>API 레이트리밋으로 수집 실패(raw_013)</td><td>가능</td></tr>
+    <tr><td>ERR-AUTH-01</td><td>X</td><td>인증 만료로 수집 실패(raw_014)</td><td>불가</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>성별·연령대</h2>
+<ul>
+  <li>한국어권: 있음 — 출처: 가상게임A 공식 8월 설문 결과. 연령대 10대 12%, 20대 41%, 30대 33%, 40대 이상 14%. 성별: 미공개(설문 미응답 다수)</li>
+  <li>영어권, 일본어권: 미보유(집계 통계 없음)</li>
+</ul>
+
+<h2>게이트 판정 로그 (참고 — 반려 내역)</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>원본ID</th><th>게이트</th><th>판정</th><th>사유</th></tr></thead>
+  <tbody>
+    <tr><td>raw_004</td><td>1. 출처 확인</td><td>반려</td><td>미승인 출처(unofficial_blog)</td></tr>
+    <tr><td>raw_005</td><td>2. 기간/이벤트 매칭</td><td>반려</td><td>컷오프 범위 밖(2026-07-20)</td></tr>
+    <tr><td>raw_006</td><td>2. 기간/이벤트 매칭</td><td>반려</td><td>같은 기간이나 이벤트 불일치(신규 캐릭터 스킨)</td></tr>
+    <tr><td>raw_007</td><td>3. 중복 판정</td><td>병합</td><td>raw_001과 해시 완전일치 → VOC-0001에 병합</td></tr>
+    <tr><td>raw_008</td><td>3. 중복 판정</td><td>병합</td><td>raw_001과 유사도 90%+ → VOC-0001에 병합</td></tr>
+    <tr><td>raw_010</td><td>3. 중복 판정</td><td>병합</td><td>raw_009와 작성자ID+시간창 일치 → VOC-0004에 병합</td></tr>
+    <tr><td>raw_011</td><td>3. 중복 판정</td><td>병합</td><td>raw_009와 작성자ID+시간창 일치 → VOC-0004에 병합</td></tr>
+    <tr><td>raw_013</td><td>6. 수집 오류</td><td>오류(재시도 가능)</td><td>API 레이트리밋</td></tr>
+    <tr><td>raw_014</td><td>6. 수집 오류</td><td>오류(재시도 불가)</td><td>인증 만료</td></tr>
+    <tr><td>(전체)</td><td>5. 언어권 표본 기준</td><td>일부 부족</td><td>일본어권 1건 &lt; 기준 3건</td></tr>
+    <tr><td>(전체)</td><td>7. 비용 상한</td><td>통과</td><td>이번 실행은 상한 이내</td></tr>
+  </tbody>
+</table>
+</div>
+
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  document.getElementById('collect-btn').addEventListener('click', function () {
+    document.getElementById('result-section').style.display = 'block';
+    document.getElementById('result-section').scrollIntoView({ behavior: 'smooth' });
+  });
+
+  function autoGrow(el) {
+    el.style.height = 'auto';
+    el.style.height = el.scrollHeight + 'px';
+  }
+  ['game-name', 'event-keyword'].forEach(function (id) {
+    var el = document.getElementById(id);
+    el.addEventListener('input', function () { autoGrow(el); });
+  });
+
+  // 고정 환율(예시값, 오프라인 파일이라 실시간 환율을 받아오지 않음) — 1단위당 원화
+  var FX_RATES_TO_KRW = { USD: 1380, JPY: 9.2, EUR: 1490, CNY: 190 };
+  var costInput = document.getElementById('cost-limit');
+  var currencySelect = document.getElementById('currency-select');
+  var fxNote = document.getElementById('fx-note');
+
+  function updateFxNote() {
+    var currency = currencySelect.value;
+    var amount = parseFloat(costInput.value);
+    if (currency === 'KRW' || costInput.value.trim() === '' || isNaN(amount)) {
+      fxNote.textContent = '';
+      return;
+    }
+    var rate = FX_RATES_TO_KRW[currency];
+    var krw = Math.round(amount * rate);
+    fxNote.textContent = '약 ' + krw.toLocaleString('ko-KR') + '원 (고정 환율 1 ' + currency + ' = ' + rate.toLocaleString('ko-KR') + '원 기준, 예시 값)';
+  }
+  costInput.addEventListener('input', updateFxNote);
+  currencySelect.addEventListener('change', updateFxNote);
+</script>
