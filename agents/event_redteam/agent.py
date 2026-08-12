@@ -8,51 +8,11 @@ from contracts import (
     ArtifactStatus,
     EventBrief,
     EvidencePack,
-    PersonaKind,
     Producer,
     RiskAssessment,
-    RiskCategory,
     RiskItem,
-    Severity,
 )
-
-RISK_SPECS = {
-    RiskCategory.DOUBLE_GACHA: (
-        "중첩 확률로 최종 가치 판단 불가",
-        Severity.HIGH,
-        [PersonaKind.VALUE_SEEKING, PersonaKind.COLLECTOR],
-        "1차 상자 결과 뒤 2차 확률 보상까지 거치며 목표 보상의 실질 확률과 비용 상한이 흐려진다.",
-        "Loot Cache와 Prime Parcel을 단일 직접 보상 구조로 합칠 수 있는가?",
-    ),
-    RiskCategory.FRAGMENTED_FLOW: (
-        "구매·개봉·제작 흐름 분절",
-        Severity.HIGH,
-        [PersonaKind.TIME_CONSTRAINED, PersonaKind.COLLECTOR, PersonaKind.CORE_GAMEPLAY],
-        "여러 화면을 오가며 재화와 진행 상태를 추적해야 해 참여 오류와 이탈이 늘어난다.",
-        "구매, 보상 확인, 제작, 진행 추적을 한 화면에 통합할 수 있는가?",
-    ),
-    RiskCategory.OPAQUE_PROGRESS: (
-        "목표 보상까지 확정 진행 경로 부재",
-        Severity.HIGH,
-        [PersonaKind.TIME_CONSTRAINED, PersonaKind.VALUE_SEEKING, PersonaKind.COLLECTOR],
-        "지출·플레이를 반복해도 남은 비용과 횟수를 알 수 없어 통제감을 잃는다.",
-        "개봉 횟수별 마일스톤과 최종 보장 상한을 공개할 수 있는가?",
-    ),
-    RiskCategory.RANDOM_BONUS: (
-        "같은 지출의 보너스 편차",
-        Severity.HIGH,
-        [PersonaKind.VALUE_SEEKING, PersonaKind.COLLECTOR],
-        "확률형 보너스가 같은 지출의 진행량을 갈라 공정성 반발을 만든다.",
-        "확률형 보너스를 고정 토큰 또는 마일스톤 보상으로 바꿀 수 있는가?",
-    ),
-    RiskCategory.EXPIRING_CURRENCY: (
-        "이벤트 재화 만료에 따른 손실 압박",
-        Severity.MEDIUM,
-        [PersonaKind.TIME_CONSTRAINED, PersonaKind.VALUE_SEEKING],
-        "남은 재화가 환불·전환 없이 삭제되어 일정이 불규칙한 이용자가 손실을 떠안는다.",
-        "만료 유예 기간이나 잔여 재화 자동 전환을 제공할 수 있는가?",
-    ),
-}
+from policy import RISK_SPECS
 
 
 class EventRedteamAgent:

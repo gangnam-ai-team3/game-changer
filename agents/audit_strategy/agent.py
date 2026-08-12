@@ -4,9 +4,9 @@ import os
 from pathlib import Path
 
 from agents.structured import parse_structured
+from policy import MIN_RISK_CONFIDENCE, REVISION_SPECS, decide
 from contracts import (
     ArtifactStatus,
-    Decision,
     DecisionBrief,
     EventBrief,
     EvidencePack,
@@ -16,39 +16,9 @@ from contracts import (
     RejectedRisk,
     RevisionAction,
     RiskAssessment,
-    RiskCategory,
     Severity,
     ValidatedDecision,
 )
-
-REVISION_SPECS = {
-    RiskCategory.DOUBLE_GACHA: (
-        "2단계 확률 제거",
-        "Loot Cache와 Prime Parcel을 단일 Cargo 직접 보상 구조로 통합한다.",
-        "모든 목표 보상의 단일 단계 확률과 최대 획득 비용을 화면에서 확인 가능",
-    ),
-    RiskCategory.FRAGMENTED_FLOW: (
-        "이벤트 허브 통합",
-        "구매, 개봉, 획득 보상, 토큰, 제작 진행을 한 Supply Bay 화면에 모은다.",
-        "목표 보상 제작까지 필요한 핵심 동작을 한 화면에서 완료",
-    ),
-    RiskCategory.OPAQUE_PROGRESS: (
-        "확정 마일스톤 추가",
-        "개봉 횟수별 토큰·재료·최종 보상 마일스톤을 사전에 공개한다.",
-        "모든 유료 경로에 보이는 진행도와 고정 상한 존재",
-    ),
-    RiskCategory.RANDOM_BONUS: (
-        "보너스 결정성 강화",
-        "확률형 보너스 일부를 개봉당 고정 토큰과 누적 마일스톤으로 교체한다.",
-        "동일 지출의 최소 진행량 편차 0",
-    ),
-    RiskCategory.EXPIRING_CURRENCY: (
-        "잔여 재화 보호",
-        "종료 후 유예 기간과 잔여 토큰의 상시 재화 자동 전환을 제공한다.",
-        "미사용 유료 기원 재화의 무보상 삭제 0건",
-    ),
-}
-
 
 class AuditStrategyAgent:
     model = os.getenv("OPENAI_AUDIT_MODEL", "gpt-5.6-terra")
@@ -89,29 +59,12 @@ class AuditStrategyAgent:
                         reason=f"존재하지 않는 근거 ID 참조: {', '.join(sorted(unknown))}",
                     )
                 )
-            elif risk.confidence < 0.5:
+            elif risk.confidence < MIN_RISK_CONFIDENCE:
                 rejected.append(RejectedRisk(risk_id=risk.risk_id, reason="근거 신뢰도 0.5 미만"))
             else:
                 validated.append(risk)
 
-        insufficient = sum(not sample.sufficient for sample in bundle.samples)
-        has_critical = any(risk.severity == Severity.CRITICAL for risk in validated)
-        has_high = any(risk.severity == Severity.HIGH for risk in validated)
-        if has_critical:
-            decision = Decision.HOLD
-            reason = "검증된 Critical 위험이 있어 출시 판단을 보류한다."
-        elif insufficient >= 3:
-            decision = Decision.HOLD
-            reason = "세 언어권 이상이 최소 표본에 미달해 판단 근거가 부족하다."
-        elif has_high:
-            decision = Decision.REVISE
-            reason = "검증된 High 위험을 수정한 뒤 재검토해야 한다."
-        elif insufficient:
-            decision = Decision.REVISE
-            reason = "일부 언어권 표본을 보강한 뒤 출시 판단을 갱신해야 한다."
-        else:
-            decision = Decision.GO
-            reason = "필수 표본을 충족했고 High 이상 검증 위험이 없다."
+        decision, reason = decide(bundle.samples, validated)
 
         revisions = []
         for priority, risk in enumerate(validated, start=1):
