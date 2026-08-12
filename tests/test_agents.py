@@ -62,6 +62,23 @@ def test_audit_returns_revise_and_rejects_unknown_evidence(event, feedback):
     assert decision.rejected_risks[0].risk_id == first.risk_id
 
 
+def test_audit_does_not_emit_evidence_checked_before_malformed_evidence_fails(event, feedback):
+    pack = EvidenceRagAgent().run(feedback)
+    assessment = EventRedteamAgent().run(event, pack)
+    malformed = assessment.risks[0].model_copy(update={"evidence_ids": None})
+    events = []
+
+    with pytest.raises(TypeError):
+        AuditStrategyAgent().run_deterministic(
+            feedback,
+            pack,
+            assessment.model_copy(update={"risks": [malformed]}),
+            on_event=lambda node, _message, _metrics: events.append(node),
+        )
+
+    assert "evidence_checked" not in events
+
+
 def test_three_insufficient_languages_force_hold(event, feedback):
     samples = [
         LanguageSample(

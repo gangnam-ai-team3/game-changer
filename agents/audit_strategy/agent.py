@@ -79,11 +79,6 @@ class AuditStrategyAgent:
     ) -> ValidatedDecision:
         notify = on_event or (lambda _node, _message, _metrics: None)
         evidence_by_id = {item.evidence_id: item for item in pack.evidence}
-        notify(
-            "evidence_checked",
-            "위험 근거의 존재와 메커니즘 연결을 확인했습니다.",
-            {"evidence": len(evidence_by_id)},
-        )
         validated = []
         rejected = []
         for risk in assessment.risks:
@@ -103,6 +98,11 @@ class AuditStrategyAgent:
             else:
                 validated.append(risk)
 
+        notify(
+            "evidence_checked",
+            "위험 근거의 존재와 메커니즘 연결을 확인했습니다.",
+            {"evidence": len(evidence_by_id)},
+        )
         notify(
             "risks_validated",
             "위험을 정책 기준으로 검증했습니다.",
