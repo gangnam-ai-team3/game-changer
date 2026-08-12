@@ -5,6 +5,7 @@ import pytest
 from agents.audit_strategy import AuditStrategyAgent
 from agents.audit_strategy import agent as audit_module
 from agents.event_redteam import EventRedteamAgent
+from agents.event_redteam import agent as redteam_module
 from agents.evidence_rag import EvidenceRagAgent
 from agents.evidence_rag import agent as evidence_module
 from agents.structured import StructuredModelError
@@ -16,6 +17,25 @@ OFFICIAL_TARGETS = {
     RiskCategory.OPAQUE_PROGRESS,
     RiskCategory.RANDOM_BONUS,
 }
+
+
+def risk_core(assessment):
+    return [
+        (risk.category, risk.severity, tuple(risk.evidence_ids), tuple(risk.affected_personas))
+        for risk in assessment.risks
+    ]
+
+
+def decision_core(decision):
+    return (
+        decision.decision,
+        tuple(risk.risk_id for risk in decision.validated_risks),
+        tuple(risk.risk_id for risk in decision.rejected_risks),
+        tuple(
+            (tuple(action.addresses_risk_ids), action.priority)
+            for action in decision.priority_revisions
+        ),
+    )
 
 
 def test_rag_builds_four_grounded_personas(feedback):
@@ -90,40 +110,100 @@ def test_audit_rejects_risk_outside_closed_policy(event, feedback):
     assert decision.rejected_risks[0].risk_id == "risk-fairness"
 
 
-def test_audit_llm_rechecks_semantic_and_closed_policy_risks(monkeypatch, event, feedback):
+def test_audit_llm_only_accepts_narrative_schema(monkeypatch, event, feedback):
     pack = EvidenceRagAgent().run(feedback)
     assessment = EventRedteamAgent().run(event, pack)
     baseline = AuditStrategyAgent().run(feedback, pack, assessment)
-    target = assessment.risks[0]
-    unrelated = next(item for item in pack.evidence if target.category.value not in item.mechanism_tags)
-    wrong_tag = target.model_copy(update={"risk_id": "risk-wrong-tag", "evidence_ids": [unrelated.evidence_id]})
-    unknown_policy = target.model_copy(
-        update={"risk_id": "risk-fairness", "category": RiskCategory.FAIRNESS}
+    narrative = audit_module.AuditNarrative(
+        decision_reason="LLM은 설명만 보강합니다.", revisions=[]
     )
-    payload = baseline.model_dump()
-    payload["validated_risks"] = [wrong_tag.model_dump(), unknown_policy.model_dump()]
-    payload["rejected_risks"] = []
-    payload["priority_revisions"] = [
-        {
-            **payload["priority_revisions"][0],
-            "addresses_risk_ids": [wrong_tag.risk_id],
-        },
-        {
-            **payload["priority_revisions"][1],
-            "addresses_risk_ids": [unknown_policy.risk_id],
-        },
-    ]
-    proposal = baseline.__class__.model_validate(payload)
-    monkeypatch.setattr(audit_module, "parse_structured", lambda **_kwargs: proposal)
+
+    def fake_parse_structured(**kwargs):
+        assert kwargs["output_type"] is audit_module.AuditNarrative
+        return narrative
+
+    monkeypatch.setattr(audit_module, "parse_structured", fake_parse_structured)
 
     decision = AuditStrategyAgent(use_llm=True, client=object()).run(feedback, pack, assessment)
 
-    assert decision.validated_risks == []
-    assert {item.risk_id for item in decision.rejected_risks} == {
-        wrong_tag.risk_id,
-        unknown_policy.risk_id,
-    }
-    assert decision.priority_revisions == []
+    assert decision_core(decision) == decision_core(baseline)
+
+
+def test_redteam_llm_text_cannot_override_core(monkeypatch, event, feedback):
+    pack = EvidenceRagAgent().run(feedback)
+    base = EventRedteamAgent().run(event, pack)
+    target = base.risks[0]
+    responses = iter(
+        [
+            redteam_module.RedteamNarrative(
+                risks=[
+                    redteam_module.RiskNarrative(
+                        category=target.category,
+                        title="첫 번째 설명",
+                        failure_path="첫 번째 실패 경로",
+                        revision_question="첫 번째 질문",
+                        evidence_ids=target.evidence_ids[:1],
+                    )
+                ]
+            ),
+            redteam_module.RedteamNarrative(
+                risks=[
+                    redteam_module.RiskNarrative(
+                        category=target.category,
+                        title="두 번째 설명",
+                        failure_path="두 번째 실패 경로",
+                        revision_question="두 번째 질문",
+                        evidence_ids=target.evidence_ids[-1:],
+                    )
+                ]
+            ),
+        ]
+    )
+    monkeypatch.setattr(redteam_module, "parse_structured", lambda **_kwargs: next(responses))
+    agent = EventRedteamAgent(use_llm=True, client=object())
+    first = agent.run(event, pack)
+    second = agent.run(event, pack)
+    assert first.risks[0].title != second.risks[0].title
+    assert risk_core(first) == risk_core(second) == risk_core(base)
+
+
+def test_audit_llm_text_cannot_override_decision_or_links(monkeypatch, event, feedback):
+    pack = EvidenceRagAgent().run(feedback)
+    assessment = EventRedteamAgent().run(event, pack)
+    base = AuditStrategyAgent().run(feedback, pack, assessment)
+    category = base.validated_risks[0].category
+    responses = iter(
+        [
+            audit_module.AuditNarrative(
+                decision_reason="첫 번째 설명",
+                revisions=[
+                    audit_module.RevisionNarrative(
+                        category=category,
+                        title="첫 수정안",
+                        change="첫 변경 문장",
+                        success_metric="첫 지표 문장",
+                    )
+                ],
+            ),
+            audit_module.AuditNarrative(
+                decision_reason="두 번째 설명",
+                revisions=[
+                    audit_module.RevisionNarrative(
+                        category=category,
+                        title="둘째 수정안",
+                        change="둘째 변경 문장",
+                        success_metric="둘째 지표 문장",
+                    )
+                ],
+            ),
+        ]
+    )
+    monkeypatch.setattr(audit_module, "parse_structured", lambda **_kwargs: next(responses))
+    agent = AuditStrategyAgent(use_llm=True, client=object())
+    first = agent.run(feedback, pack, assessment)
+    second = agent.run(feedback, pack, assessment)
+    assert first.decision_reason != second.decision_reason
+    assert decision_core(first) == decision_core(second) == decision_core(base)
 
 
 def test_evidence_llm_enriches_text_without_changing_core(monkeypatch, feedback):

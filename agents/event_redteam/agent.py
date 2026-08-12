@@ -3,16 +3,36 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from agents.structured import parse_structured
+from pydantic import BaseModel, ConfigDict, Field
+
+from agents.structured import StructuredModelError, parse_structured
 from contracts import (
     ArtifactStatus,
+    ErrorCode,
     EventBrief,
     EvidencePack,
     Producer,
+    RiskCategory,
     RiskAssessment,
     RiskItem,
 )
 from policy import RISK_SPECS
+
+
+class RiskNarrative(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    category: RiskCategory
+    title: str = Field(min_length=1)
+    failure_path: str = Field(min_length=1)
+    revision_question: str = Field(min_length=1)
+    evidence_ids: list[str] = Field(min_length=1)
+
+
+class RedteamNarrative(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    risks: list[RiskNarrative]
 
 
 class EventRedteamAgent:
@@ -24,15 +44,19 @@ class EventRedteamAgent:
         self.client = client
 
     def run(self, event: EventBrief, pack: EvidencePack) -> RiskAssessment:
+        base = self.run_deterministic(event, pack)
         if self.use_llm:
-            return parse_structured(
+            narrative = parse_structured(
                 model=self.model,
                 prompt_path=self.prompt_path,
-                output_type=RiskAssessment,
-                payload={"event": event.model_dump(mode="json"), "evidence_pack": pack.model_dump(mode="json")},
+                output_type=RedteamNarrative,
+                payload=base,
                 client=self.client,
             )
+            return self._merge_narrative(base, narrative)
+        return base
 
+    def run_deterministic(self, event: EventBrief, pack: EvidencePack) -> RiskAssessment:
         visible_languages = [
             insight.language for insight in pack.language_insights if insight.conclusion is not None
         ]
@@ -64,3 +88,28 @@ class EventRedteamAgent:
             errors=list(pack.errors),
             risks=risks,
         )
+
+    @staticmethod
+    def _merge_narrative(
+        base: RiskAssessment, narrative: RedteamNarrative
+    ) -> RiskAssessment:
+        risks_by_category = {
+            risk.category: (index, risk) for index, risk in enumerate(base.risks)
+        }
+        risks = list(base.risks)
+        for proposal in narrative.risks:
+            official = risks_by_category.get(proposal.category)
+            if official is None or not set(proposal.evidence_ids) <= set(official[1].evidence_ids):
+                raise StructuredModelError(
+                    ErrorCode.SCHEMA_INVALID,
+                    "LLM narrative references unknown risk evidence",
+                )
+            index, risk = official
+            risks[index] = risk.model_copy(
+                update={
+                    "title": proposal.title,
+                    "failure_path": proposal.failure_path,
+                    "revision_question": proposal.revision_question,
+                }
+            )
+        return base.model_copy(update={"risks": risks})

@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from agents.structured import parse_structured
 from policy import MIN_RISK_CONFIDENCE, REVISION_SPECS, decide, expected_severity
 from contracts import (
@@ -18,7 +20,25 @@ from contracts import (
     RiskAssessment,
     Severity,
     ValidatedDecision,
+    RiskCategory,
 )
+
+
+class RevisionNarrative(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    category: RiskCategory
+    title: str = Field(min_length=1)
+    change: str = Field(min_length=1)
+    success_metric: str = Field(min_length=1)
+
+
+class AuditNarrative(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision_reason: str = Field(min_length=1)
+    revisions: list[RevisionNarrative]
+
 
 class AuditStrategyAgent:
     model = os.getenv("OPENAI_AUDIT_MODEL", "gpt-5.6-terra")
@@ -34,20 +54,24 @@ class AuditStrategyAgent:
         pack: EvidencePack,
         assessment: RiskAssessment,
     ) -> ValidatedDecision:
+        base = self.run_deterministic(bundle, pack, assessment)
         if self.use_llm:
-            proposal = parse_structured(
+            narrative = parse_structured(
                 model=self.model,
                 prompt_path=self.prompt_path,
-                output_type=ValidatedDecision,
-                payload={
-                    "samples": [sample.model_dump(mode="json") for sample in bundle.samples],
-                    "evidence_ids": [item.evidence_id for item in pack.evidence],
-                    "risk_assessment": assessment.model_dump(mode="json"),
-                },
+                output_type=AuditNarrative,
+                payload=base,
                 client=self.client,
             )
-            assessment = assessment.model_copy(update={"risks": proposal.validated_risks})
+            return self._merge_narrative(base, narrative)
+        return base
 
+    def run_deterministic(
+        self,
+        bundle: FeedbackBundle,
+        pack: EvidencePack,
+        assessment: RiskAssessment,
+    ) -> ValidatedDecision:
         evidence_by_id = {item.evidence_id: item for item in pack.evidence}
         validated = []
         rejected = []
@@ -93,6 +117,33 @@ class AuditStrategyAgent:
             validated_risks=validated,
             rejected_risks=rejected,
             priority_revisions=revisions,
+        )
+
+    @staticmethod
+    def _merge_narrative(
+        base: ValidatedDecision, narrative: AuditNarrative
+    ) -> ValidatedDecision:
+        proposals = {proposal.category: proposal for proposal in narrative.revisions}
+        categories_by_risk_id = {
+            risk.risk_id: risk.category for risk in base.validated_risks
+        }
+        revisions = []
+        for revision in base.priority_revisions:
+            category = categories_by_risk_id[revision.addresses_risk_ids[0]]
+            proposal = proposals.get(category)
+            revisions.append(
+                revision
+                if proposal is None
+                else revision.model_copy(
+                    update={
+                        "title": proposal.title,
+                        "change": proposal.change,
+                        "success_metric": proposal.success_metric,
+                    }
+                )
+            )
+        return base.model_copy(
+            update={"decision_reason": narrative.decision_reason, "priority_revisions": revisions}
         )
 
     def to_brief(
