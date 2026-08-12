@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 from agents.structured import parse_structured
-from policy import MIN_RISK_CONFIDENCE, REVISION_SPECS, decide
+from policy import MIN_RISK_CONFIDENCE, REVISION_SPECS, decide, expected_severity
 from contracts import (
     ArtifactStatus,
     DecisionBrief,
@@ -47,18 +47,21 @@ class AuditStrategyAgent:
                 client=self.client,
             )
 
-        evidence_ids = {item.evidence_id for item in pack.evidence}
+        evidence_by_id = {item.evidence_id: item for item in pack.evidence}
         validated = []
         rejected = []
         for risk in assessment.risks:
-            unknown = set(risk.evidence_ids) - evidence_ids
-            if unknown:
-                rejected.append(
-                    RejectedRisk(
-                        risk_id=risk.risk_id,
-                        reason=f"존재하지 않는 근거 ID 참조: {', '.join(sorted(unknown))}",
-                    )
-                )
+            expected = expected_severity(risk.category)
+            linked = [evidence_by_id[item_id] for item_id in risk.evidence_ids if item_id in evidence_by_id]
+            grounded = len(linked) == len(risk.evidence_ids) and all(
+                risk.category.value in item.mechanism_tags for item in linked
+            )
+            if expected is None:
+                rejected.append(RejectedRisk(risk_id=risk.risk_id, reason="MVP 닫힌 위험 분류표 외 범주"))
+            elif not grounded:
+                rejected.append(RejectedRisk(risk_id=risk.risk_id, reason="위험 범주와 연결 근거 불일치"))
+            elif risk.severity != expected:
+                rejected.append(RejectedRisk(risk_id=risk.risk_id, reason="정책 위험 등급 불일치"))
             elif risk.confidence < MIN_RISK_CONFIDENCE:
                 rejected.append(RejectedRisk(risk_id=risk.risk_id, reason="근거 신뢰도 0.5 미만"))
             else:
@@ -137,4 +140,5 @@ class AuditStrategyAgent:
             panel_results=panel_results,
             evidence=pack.evidence,
             revision_plan=decision.priority_revisions,
+            exploratory_insights=pack.exploratory_insights,
         )

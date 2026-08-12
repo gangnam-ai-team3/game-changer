@@ -54,6 +54,12 @@ class SourceType(StrEnum):
     SYNTHETIC = "synthetic"
 
 
+class InputMode(StrEnum):
+    FIXTURE = "fixture"
+    LIVE = "live"
+    IMPORT = "import"
+
+
 class Decision(StrEnum):
     GO = "Go"
     REVISE = "Revise"
@@ -175,6 +181,7 @@ class EvidenceItem(BaseModel):
 
 
 class FeedbackBundle(Artifact):
+    input_mode: InputMode
     cutoff_at: datetime
     search_log: list[SearchRecord]
     samples: list[LanguageSample]
@@ -220,6 +227,14 @@ class LanguageInsight(BaseModel):
         return self
 
 
+class ExploratoryInsight(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1)
+    summary: str = Field(min_length=1)
+    evidence_ids: list[str] = Field(min_length=1)
+
+
 class Persona(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -239,6 +254,23 @@ class EvidencePack(Artifact):
     language_insights: list[LanguageInsight]
     evidence: list[EvidenceItem]
     personas: list[Persona]
+    exploratory_insights: list[ExploratoryInsight] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_evidence_refs(self) -> EvidencePack:
+        evidence_by_id = {item.evidence_id: item for item in self.evidence}
+        linked = [*self.issues, *self.language_insights, *self.personas, *self.exploratory_insights]
+        for item in linked:
+            unknown = set(item.evidence_ids) - evidence_by_id.keys()
+            if unknown:
+                raise ValueError(f"unknown evidence: {', '.join(sorted(unknown))}")
+        for issue in self.issues:
+            if any(
+                issue.category.value not in evidence_by_id[item_id].mechanism_tags
+                for item_id in issue.evidence_ids
+            ):
+                raise ValueError("issue category does not match evidence tags")
+        return self
 
 
 class RiskItem(BaseModel):
@@ -284,6 +316,14 @@ class ValidatedDecision(Artifact):
     rejected_risks: list[RejectedRisk]
     priority_revisions: list[RevisionAction]
 
+    @model_validator(mode="after")
+    def validate_revision_risk_refs(self) -> ValidatedDecision:
+        validated_ids = {risk.risk_id for risk in self.validated_risks}
+        for revision in self.priority_revisions:
+            if not set(revision.addresses_risk_ids) <= validated_ids:
+                raise ValueError("revision references unvalidated risk")
+        return self
+
 
 class PersonaResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -303,3 +343,4 @@ class DecisionBrief(Artifact):
     panel_results: list[PersonaResult]
     evidence: list[EvidenceItem]
     revision_plan: list[RevisionAction]
+    exploratory_insights: list[ExploratoryInsight] = Field(default_factory=list)

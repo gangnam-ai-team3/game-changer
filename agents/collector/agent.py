@@ -16,6 +16,7 @@ from contracts import (
     EventBrief,
     EvidenceItem,
     FeedbackBundle,
+    InputMode,
     Language,
     LanguageSample,
     PipelineError,
@@ -37,6 +38,14 @@ class CollectionOptions:
     def __post_init__(self) -> None:
         if not 0 <= self.x_estimated_total_cost_usd <= 10:
             raise ValueError("X estimated project cost must be between $0 and $10")
+
+    @property
+    def input_mode(self) -> InputMode:
+        if self.use_fixture:
+            return InputMode.FIXTURE
+        if self.steam_app_id or self.use_x:
+            return InputMode.LIVE
+        return InputMode.IMPORT
 
 
 class CollectorAgent:
@@ -138,6 +147,7 @@ class CollectorAgent:
             producer=Producer.COLLECTOR,
             input_refs=[event.ref],
             errors=errors,
+            input_mode=options.input_mode,
             cutoff_at=event.cutoff_at,
             search_log=search_log,
             samples=samples,

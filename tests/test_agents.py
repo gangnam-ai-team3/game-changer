@@ -50,3 +50,34 @@ def test_three_insufficient_languages_force_hold(event, feedback):
     decision = AuditStrategyAgent().run(feedback, pack, assessment)
     assert decision.decision == Decision.HOLD
     assert sum(insight.conclusion is None for insight in pack.language_insights) == 3
+
+
+def test_audit_rejects_existing_but_semantically_unrelated_evidence(event, feedback):
+    pack = EvidenceRagAgent().run(feedback)
+    assessment = EventRedteamAgent().run(event, pack)
+    target = assessment.risks[0]
+    unrelated = next(
+        item for item in pack.evidence if target.category.value not in item.mechanism_tags
+    )
+    changed = target.model_copy(update={"evidence_ids": [unrelated.evidence_id]})
+    decision = AuditStrategyAgent().run(
+        feedback,
+        pack,
+        assessment.model_copy(update={"risks": [changed, *assessment.risks[1:]]}),
+    )
+    assert changed.risk_id in {item.risk_id for item in decision.rejected_risks}
+
+
+def test_audit_rejects_risk_outside_closed_policy(event, feedback):
+    pack = EvidenceRagAgent().run(feedback)
+    assessment = EventRedteamAgent().run(event, pack)
+    unsupported = assessment.risks[0].model_copy(
+        update={"risk_id": "risk-fairness", "category": RiskCategory.FAIRNESS}
+    )
+    decision = AuditStrategyAgent().run(
+        feedback,
+        pack,
+        assessment.model_copy(update={"risks": [unsupported]}),
+    )
+    assert decision.validated_risks == []
+    assert decision.rejected_risks[0].risk_id == "risk-fairness"
