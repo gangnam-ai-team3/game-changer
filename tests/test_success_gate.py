@@ -16,4 +16,5 @@ def test_explicit_success_gate_passes():
     assert report.event_goal_aligned
     assert report.reproducible_core
     assert report.semantic_links_valid
+    assert report.event_sequence_valid
     assert len(report.input_snapshot_hash) == 64

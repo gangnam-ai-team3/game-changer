@@ -26,3 +26,7 @@ uv run streamlit run streamlit_app.py
 이 명령은 Steam의 현재 리뷰를 메모리에서 읽고 비식별화 여부만 확인합니다. 원문과
 사용자 식별자는 저장하지 않습니다. 네트워크 장애 시 저장된 검증 데이터 시연은
 계속 사용할 수 있습니다.
+
+### 발표 런북
+
+발표 전 확인, 기본·예외 시연, 백업 절차는 [발표 런북](docs/demo/2026-08-12-controlled-hybrid-demo-runbook.md)을 따릅니다.

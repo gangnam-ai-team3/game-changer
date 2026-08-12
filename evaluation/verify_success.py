@@ -11,6 +11,7 @@ from agents.evidence_rag import EvidenceRagAgent
 from contracts import Decision, FeedbackBundle, LanguageSample
 from evaluation.backtest import BacktestResult, evaluate_black_market
 from evaluation.fixtures import load_demo_event, load_feedback_fixture
+from execution import AGENT_ORDER, ExecutionState
 from orchestrator import EventPreflightOrchestrator, PipelineResult
 
 
@@ -27,6 +28,7 @@ class SuccessReport(BaseModel):
     event_goal_aligned: bool
     reproducible_core: bool
     semantic_links_valid: bool
+    event_sequence_valid: bool
     input_snapshot_hash: str
     passed: bool
 
@@ -63,6 +65,12 @@ def verify() -> SuccessReport:
     semantic_links_valid = (
         backtest.evidence_link_rate == 1 and backtest.sampled_claim_support_rate >= 0.9
     )
+    complete_order = [
+        item.agent
+        for item in result.events
+        if item.state == ExecutionState.COMPLETE and item.agent in AGENT_ORDER
+    ]
+    event_sequence_valid = complete_order[:4] == list(AGENT_ORDER)
 
     feedback = load_feedback_fixture(event).model_copy(update={"input_refs": [event.ref]})
     insufficient_samples = [
@@ -99,6 +107,7 @@ def verify() -> SuccessReport:
             backtest.passed,
             reproducible_core,
             semantic_links_valid,
+            event_sequence_valid,
             hidden_count >= 3,
             insufficient_decision.decision == Decision.HOLD,
             cutoff_leak_blocked,
@@ -116,6 +125,7 @@ def verify() -> SuccessReport:
         event_goal_aligned=event_goal_aligned,
         reproducible_core=reproducible_core,
         semantic_links_valid=semantic_links_valid,
+        event_sequence_valid=event_sequence_valid,
         input_snapshot_hash=result.brief.input_snapshot_hash,
         passed=passed,
     )
