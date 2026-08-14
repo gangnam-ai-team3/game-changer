@@ -1,0 +1,110 @@
+from collections.abc import Callable
+
+from contracts import ArtifactStatus, PersonaKind, Producer
+from update_review.contracts import (
+    ExpectedImpact,
+    UpdateBrief,
+    UpdateEvidencePack,
+    UpdateImpactAssessment,
+    UpdateRiskCategory,
+    UpdateRiskItem,
+    ValidationMetric,
+)
+from update_review.policy import expected_severity
+
+
+RISK_BY_TAG = {
+    "balance_regression": UpdateRiskCategory.BALANCE_REGRESSION,
+    "fairness_regression": UpdateRiskCategory.FAIRNESS_REGRESSION,
+    "information_clarity": UpdateRiskCategory.INFORMATION_CLARITY,
+    "flow_disruption": UpdateRiskCategory.FLOW_DISRUPTION,
+    "rule_exception": UpdateRiskCategory.RULE_EXCEPTION,
+    "learning_burden": UpdateRiskCategory.LEARNING_BURDEN,
+}
+
+RISK_COPY = {
+    UpdateRiskCategory.BALANCE_REGRESSION: ("실제 전투 성능 역전", "고정 피해와 반동·연사력의 조합으로 사용률이 쏠릴 가능성이 있음.", "테스트 서버에서 사용률·승률·평균 피해를 확인할 수 있는가?"),
+    UpdateRiskCategory.FAIRNESS_REGRESSION: ("공정성 인식 역전", "변경 결과가 특정 이용자에게만 유리하게 체감될 가능성이 있음.", "숙련도별 성과 편차를 비교할 수 있는가?"),
+    UpdateRiskCategory.INFORMATION_CLARITY: ("변경 정보 이해 부족", "변경 전·후 차이를 알지 못해 잘못된 행동을 할 가능성이 있음.", "한 화면에서 변경 전·후를 설명할 수 있는가?"),
+    UpdateRiskCategory.FLOW_DISRUPTION: ("사용 동선 분절", "새 화면과 절차가 작업 흐름을 끊을 가능성이 있음.", "핵심 작업을 기존 단계 안에서 끝낼 수 있는가?"),
+    UpdateRiskCategory.RULE_EXCEPTION: ("예외 규칙 누락", "기존 이용자와 경계 상황에서 다른 결과가 나올 가능성이 있음.", "경계값·기존 상태·예외 사용자를 모두 테스트했는가?"),
+    UpdateRiskCategory.LEARNING_BURDEN: ("새 규칙 학습 부담", "기존 습관을 다시 배워야 해 이탈할 가능성이 있음.", "첫 사용에서 별도 설명 없이 완료할 수 있는가?"),
+}
+
+
+class UpdateRedteamAgent:
+    def run_deterministic(
+        self,
+        brief: UpdateBrief,
+        pack: UpdateEvidencePack,
+        on_event: Callable[[str, str, dict], None] | None = None,
+    ) -> UpdateImpactAssessment:
+        notify = on_event or (lambda _node, _message, _metrics: None)
+        notify("change_reviewed", "현재 상태와 변경안의 차이를 확인했습니다.", {"update_type": brief.update_type.value})
+        positives = [
+            ExpectedImpact(
+                impact_id=f"impact-{item.signal_id}",
+                title=item.title,
+                summary=item.summary,
+                affected_personas=[impact.persona for impact in pack.persona_impacts if item.signal_id in impact.positive_signal_ids] or [PersonaKind.CORE_GAMEPLAY],
+                evidence_ids=item.evidence_ids,
+                confidence=item.confidence,
+            )
+            for item in pack.positive_signals
+        ]
+        negatives = [
+            ExpectedImpact(
+                impact_id=f"impact-{item.signal_id}",
+                title=item.title,
+                summary=item.summary,
+                affected_personas=[impact.persona for impact in pack.persona_impacts if item.signal_id in impact.negative_signal_ids] or [PersonaKind.CORE_GAMEPLAY],
+                evidence_ids=item.evidence_ids,
+                confidence=item.confidence,
+            )
+            for item in pack.negative_signals
+        ]
+        risks = []
+        for item in [*pack.negative_signals, *pack.split_conditions]:
+            tag = item.signal_id.split("-", 1)[1]
+            category = RISK_BY_TAG.get(tag)
+            if category is None:
+                continue
+            title, failure_path, question = RISK_COPY[category]
+            risks.append(
+                UpdateRiskItem(
+                    risk_id=f"risk-{category.value}",
+                    category=category,
+                    title=title,
+                    severity=expected_severity(category),
+                    affected_personas=[impact.persona for impact in pack.persona_impacts if item.signal_id in impact.positive_signal_ids + impact.negative_signal_ids + impact.split_signal_ids] or [PersonaKind.CORE_GAMEPLAY],
+                    evidence_ids=item.evidence_ids,
+                    failure_path=failure_path,
+                    revision_question=question,
+                    confidence=item.confidence,
+                )
+            )
+        notify("failure_paths_built", "부정·혼합 신호에서 실패 경로를 만들었습니다.", {"risks": len(risks)})
+        metrics = [
+            ValidationMetric(
+                metric_id=f"metric-{risk.category.value}",
+                title=f"{risk.title} 확인 지표",
+                measurement="업데이트 직접 언급 의견의 감정 비율과 관련 행동 지표를 비교",
+                success_condition="부정 반응이 사전 경계값을 넘지 않고 행동 지표의 악화가 없음",
+                addresses_risk_ids=[risk.risk_id],
+            )
+            for risk in risks
+        ]
+        notify("metrics_linked", "각 위험에 출시 후 확인 지표를 연결했습니다.", {"metrics": len(metrics)})
+        result = UpdateImpactAssessment(
+            run_id=brief.run_id,
+            status=ArtifactStatus.PARTIAL if pack.errors else ArtifactStatus.COMPLETE,
+            producer=Producer.EVENT_REDTEAM,
+            input_refs=[brief.ref, pack.ref],
+            errors=list(pack.errors),
+            expected_positive=positives,
+            expected_negative=negatives,
+            risks=risks,
+            validation_metrics=metrics,
+        )
+        notify("assessment_ready", "UpdateImpactAssessment 계약 검증을 통과했습니다.", {"risks": len(risks)})
+        return result
