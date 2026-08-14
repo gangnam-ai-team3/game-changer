@@ -46,6 +46,37 @@ def test_fixed_data_end_to_end_passes_in_under_five_minutes(event):
     assert all(item.observed_at < event.cutoff_at for item in result.brief.evidence)
 
 
+def test_claude_provider_runs_all_three_narrative_agents(monkeypatch, event):
+    import agents.audit_strategy.agent as audit_module
+    import agents.event_redteam.agent as redteam_module
+    import agents.evidence_rag.agent as evidence_module
+
+    calls = []
+
+    def fake_claude(**kwargs):
+        calls.append(kwargs["output_type"].__name__)
+        output_type = kwargs["output_type"]
+        if output_type is evidence_module.EvidenceNarrative:
+            return output_type(issues=[], personas=[], exploratory_insights=[])
+        if output_type is redteam_module.RedteamNarrative:
+            return output_type(risks=[])
+        return output_type(decision_narrative="Claude 설명", revisions=[])
+
+    monkeypatch.setattr(evidence_module, "parse_claude_structured", fake_claude)
+    monkeypatch.setattr(redteam_module, "parse_claude_structured", fake_claude)
+    monkeypatch.setattr(audit_module, "parse_claude_structured", fake_claude)
+
+    result = EventPreflightOrchestrator(
+        use_llm=True, llm_provider="claude", llm_client=object()
+    ).run(event, CollectionOptions())
+
+    assert calls == ["EvidenceNarrative", "RedteamNarrative", "AuditNarrative"]
+    assert result.llm_provider == "claude"
+    assert result.llm_requested is True
+    assert result.fallback_used is False
+    assert result.brief.decision == Decision.REVISE
+
+
 def test_fixture_llm_refusal_retries_once_then_uses_deterministic_fallback(event):
     class RefusingRag(EvidenceRagAgent):
         def __init__(self):

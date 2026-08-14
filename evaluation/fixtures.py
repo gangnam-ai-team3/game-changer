@@ -18,6 +18,13 @@ from contracts import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
+FIXTURE_FILES = {
+    "black_market_2025": "black_market_2025.jsonl",
+    "weekly_supply_2025": "weekly_supply_2025.jsonl",
+}
+FIXTURE_SOURCE_URLS = {
+    "weekly_supply_2025": "https://pubg.com/en/news/8725?category=patch_notes",
+}
 
 
 def load_demo_event(run_id: str) -> EventBrief:
@@ -53,11 +60,15 @@ def load_demo_event(run_id: str) -> EventBrief:
     )
 
 
-def load_feedback_fixture(event: EventBrief) -> FeedbackBundle:
+def load_feedback_fixture(event: EventBrief, case: str = "black_market_2025") -> FeedbackBundle:
     evidence: list[EvidenceItem] = []
     samples: list[LanguageSample] = []
     search_log: list[SearchRecord] = []
-    path = ROOT / "fixtures" / "black_market_2025.jsonl"
+    try:
+        path = ROOT / "fixtures" / FIXTURE_FILES[case]
+    except KeyError as exc:
+        raise ValueError(f"unknown fixture case: {case}") from exc
+    source_url = FIXTURE_SOURCE_URLS.get(case, "https://example.invalid/event-preflight-fixture")
 
     for line in path.read_text(encoding="utf-8").splitlines():
         row = json.loads(line)
@@ -76,7 +87,7 @@ def load_feedback_fixture(event: EventBrief) -> FeedbackBundle:
                 EvidenceItem(
                     evidence_id=f"fx-{suffix}",
                     source=SourceType.SYNTHETIC,
-                    source_url="https://example.invalid/event-preflight-fixture",
+                    source_url=source_url,
                     source_id=f"synthetic-{suffix}",
                     language=language,
                     observed_at=event.cutoff_at - timedelta(days=index + 1),
@@ -90,7 +101,7 @@ def load_feedback_fixture(event: EventBrief) -> FeedbackBundle:
             SearchRecord(
                 source=SourceType.SYNTHETIC,
                 language=language,
-                query="Black Market mechanism synthetic fixture",
+                query=f"{event.event_name} synthetic fixture",
                 requested_at=event.cutoff_at - timedelta(days=1),
                 result_count=row["mechanism_count"],
             )

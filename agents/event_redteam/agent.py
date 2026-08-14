@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from agents.structured import StructuredModelError, parse_structured
+from agents.structured import ClaudeBudget, StructuredModelError, parse_claude_structured, parse_structured, require_korean_text
 from contracts import (
     ArtifactStatus,
     ErrorCode,
@@ -40,9 +40,11 @@ class EventRedteamAgent:
     model = os.getenv("OPENAI_REDTEAM_MODEL", "gpt-5.6-terra")
     prompt_path = Path(__file__).with_name("prompt.md")
 
-    def __init__(self, use_llm: bool = False, client=None) -> None:
+    def __init__(self, use_llm: bool = False, client=None, provider: str | None = None, budget: ClaudeBudget | None = None) -> None:
         self.use_llm = use_llm
         self.client = client
+        self.provider = provider or ("openai" if client is not None else os.getenv("LLM_PROVIDER", "claude"))
+        self.budget = budget
 
     def run(
         self,
@@ -52,13 +54,33 @@ class EventRedteamAgent:
     ) -> RiskAssessment:
         base = self.run_deterministic(event, pack, on_event=on_event)
         if self.use_llm:
-            narrative = parse_structured(
-                model=self.model,
-                prompt_path=self.prompt_path,
-                output_type=RedteamNarrative,
-                payload=base,
-                client=self.client,
-            )
+            if self.provider == "claude":
+                notify = on_event or (lambda _node, _message, _metrics: None)
+                notify("claude_narrative", "Claude가 위험 설명과 실패 경로를 작성합니다.", {"provider": "claude"})
+                narrative = parse_claude_structured(
+                    model=os.getenv("CLAUDE_REDTEAM_MODEL", "claude-haiku-4-5"),
+                    prompt_path=self.prompt_path,
+                    output_type=RedteamNarrative,
+                    payload=base,
+                    client=self.client,
+                    budget=self.budget,
+                )
+                require_korean_text(
+                    [
+                        text
+                        for risk in narrative.risks
+                        for text in (risk.title, risk.failure_path, risk.revision_question)
+                    ]
+                )
+                notify("claude_output_checked", "Claude 위험 설명의 근거 연결을 확인했습니다.", {"provider": "claude"})
+            else:
+                narrative = parse_structured(
+                    model=self.model,
+                    prompt_path=self.prompt_path,
+                    output_type=RedteamNarrative,
+                    payload=base,
+                    client=self.client,
+                )
             return self._merge_narrative(base, narrative)
         return base
 

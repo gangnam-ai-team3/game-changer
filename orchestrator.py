@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,7 +14,7 @@ from agents.audit_strategy import AuditStrategyAgent
 from agents.collector import CollectionOptions, CollectorAgent
 from agents.event_redteam import EventRedteamAgent
 from agents.evidence_rag import EvidenceRagAgent
-from agents.structured import StructuredModelError
+from agents.structured import ClaudeBudget, StructuredModelError
 from contracts import (
     Artifact,
     ArtifactStatus,
@@ -47,6 +48,8 @@ class PipelineResult:
     events: list[ExecutionEvent]
     fallback_used: bool = False
     analysis_incomplete: bool = False
+    llm_provider: str = "deterministic"
+    llm_requested: bool = False
 
 
 class EventPreflightOrchestrator:
@@ -54,15 +57,27 @@ class EventPreflightOrchestrator:
         self,
         *,
         use_llm: bool = False,
+        llm_provider: str | None = None,
+        llm_client=None,
         collector: CollectorAgent | None = None,
         evidence_rag: EvidenceRagAgent | None = None,
         redteam: EventRedteamAgent | None = None,
         audit: AuditStrategyAgent | None = None,
     ) -> None:
+        provider = llm_provider or os.getenv("LLM_PROVIDER", "claude")
+        budget = ClaudeBudget() if use_llm and provider == "claude" else None
         self.collector = collector or CollectorAgent()
-        self.evidence_rag = evidence_rag or EvidenceRagAgent(use_llm=use_llm)
-        self.redteam = redteam or EventRedteamAgent(use_llm=use_llm)
-        self.audit = audit or AuditStrategyAgent(use_llm=use_llm)
+        self.evidence_rag = evidence_rag or EvidenceRagAgent(
+            use_llm=use_llm, client=llm_client, provider=provider, budget=budget
+        )
+        self.redteam = redteam or EventRedteamAgent(
+            use_llm=use_llm, client=llm_client, provider=provider, budget=budget
+        )
+        self.audit = audit or AuditStrategyAgent(
+            use_llm=use_llm, client=llm_client, provider=provider, budget=budget
+        )
+        self.llm_provider = provider if use_llm else "deterministic"
+        self.llm_requested = use_llm
 
     def run(
         self,
@@ -260,6 +275,8 @@ class EventPreflightOrchestrator:
             events,
             fallback_used=fallback_used,
             analysis_incomplete=analysis_incomplete,
+            llm_provider=self.llm_provider,
+            llm_requested=self.llm_requested,
         )
 
     def _stage(
@@ -301,8 +318,8 @@ class EventPreflightOrchestrator:
                         continue
                     emit(name, "agent", ExecutionState.FAILED, f"{exc.code.value}: {exc}")
                     raise
-                emit(name, "agent", ExecutionState.FAILED, f"{exc.code.value}: {exc}")
-                raise PipelineStopped(f"{name}: {exc.code.value}: {exc}") from exc
+                emit(name, "agent", ExecutionState.FAILED, f"{exc.code.value}: 안전 경로로 전환합니다.")
+                raise
             except (ValidationError, ContractViolation) as exc:
                 emit(name, "agent", ExecutionState.FAILED, str(exc))
                 raise PipelineStopped(f"{name}: SCHEMA_INVALID: {exc}") from exc

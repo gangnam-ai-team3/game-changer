@@ -30,6 +30,7 @@ from evaluation.fixtures import load_feedback_fixture
 @dataclass(slots=True)
 class CollectionOptions:
     use_fixture: bool = True
+    fixture_case: str = "black_market_2025"
     imported_csv: bytes | None = None
     steam_app_id: int | None = None
     use_x: bool = False
@@ -65,7 +66,7 @@ class CollectorAgent:
     ) -> FeedbackBundle:
         notify = on_event or (lambda _node, _message, _metrics: None)
         if options.use_fixture:
-            bundle = load_feedback_fixture(event)
+            bundle = load_feedback_fixture(event, options.fixture_case)
             result = bundle.model_copy(update={"input_refs": [event.ref]})
             notify(
                 "source_selected",

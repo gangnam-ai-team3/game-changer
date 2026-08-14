@@ -6,10 +6,11 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from agents.structured import parse_structured
+from agents.structured import ClaudeBudget, parse_claude_structured, parse_structured, require_korean_text
 from policy import MIN_RISK_CONFIDENCE, REVISION_SPECS, decide, expected_severity
 from contracts import (
     ArtifactStatus,
+    Decision,
     DecisionBrief,
     EventBrief,
     EvidencePack,
@@ -45,9 +46,11 @@ class AuditStrategyAgent:
     model = os.getenv("OPENAI_AUDIT_MODEL", "gpt-5.6-terra")
     prompt_path = Path(__file__).with_name("prompt.md")
 
-    def __init__(self, use_llm: bool = False, client=None) -> None:
+    def __init__(self, use_llm: bool = False, client=None, provider: str | None = None, budget: ClaudeBudget | None = None) -> None:
         self.use_llm = use_llm
         self.client = client
+        self.provider = provider or ("openai" if client is not None else os.getenv("LLM_PROVIDER", "claude"))
+        self.budget = budget
 
     def run(
         self,
@@ -58,13 +61,34 @@ class AuditStrategyAgent:
     ) -> ValidatedDecision:
         base = self.run_deterministic(bundle, pack, assessment, on_event=on_event)
         if self.use_llm:
-            narrative = parse_structured(
-                model=self.model,
-                prompt_path=self.prompt_path,
-                output_type=AuditNarrative,
-                payload=base,
-                client=self.client,
-            )
+            if self.provider == "claude":
+                notify = on_event or (lambda _node, _message, _metrics: None)
+                notify("claude_narrative", "Claude가 최종 설명과 개선안 문구를 작성합니다.", {"provider": "claude"})
+                narrative = parse_claude_structured(
+                    model=os.getenv("CLAUDE_AUDIT_MODEL", "claude-haiku-4-5"),
+                    prompt_path=self.prompt_path,
+                    output_type=AuditNarrative,
+                    payload=base,
+                    client=self.client,
+                    budget=self.budget,
+                )
+                require_korean_text(
+                    [narrative.decision_narrative]
+                    + [
+                        text
+                        for revision in narrative.revisions
+                        for text in (revision.title, revision.change, revision.success_metric)
+                    ]
+                )
+                notify("claude_output_checked", "최종 Go·Revise·Hold 판정은 코드 정책으로 재확인했습니다.", {"provider": "claude"})
+            else:
+                narrative = parse_structured(
+                    model=self.model,
+                    prompt_path=self.prompt_path,
+                    output_type=AuditNarrative,
+                    payload=base,
+                    client=self.client,
+                )
             return self._merge_narrative(base, narrative)
         return base
 
@@ -206,11 +230,12 @@ class AuditStrategyAgent:
         panel_results = []
         for persona in pack.personas:
             risks = [risk for risk in top_risks if persona.kind in risk.affected_personas]
+            risk_titles = " · ".join(risk.title for risk in risks)
             panel_results.append(
                 PersonaResult(
                     persona=persona.kind,
                     reaction=(
-                        f"{len(risks)}개 우선 위험 때문에 원안 참여·지출 의사가 약해질 수 있음."
+                        f"{risk_titles} 위험 때문에 원안 참여·지출 의사가 약해질 수 있음."
                         if risks
                         else "상위 위험에서 직접 영향이 확인되지 않음."
                     ),
@@ -219,6 +244,11 @@ class AuditStrategyAgent:
                     confidence=persona.confidence,
                 )
             )
+        decision_labels = {
+            Decision.GO: "검토 가능",
+            Decision.REVISE: "수정 필요",
+            Decision.HOLD: "판정 보류",
+        }
         return DecisionBrief(
             run_id=event.run_id,
             status=decision.status,
@@ -226,7 +256,7 @@ class AuditStrategyAgent:
             input_refs=[event.ref, pack.ref, decision.ref],
             errors=list(decision.errors),
             decision=decision.decision,
-            executive_summary=f"{event.event_name}: {decision.decision.value}. {decision.decision_reason}",
+            executive_summary=f"{event.event_name}: {decision_labels[decision.decision]}. {decision.decision_reason}",
             top_risks=top_risks,
             language_results=pack.language_insights,
             panel_results=panel_results,

@@ -8,7 +8,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 
 from agents.evidence_rag.retrieval import embedding_rank
-from agents.structured import StructuredModelError, parse_structured
+from agents.structured import ClaudeBudget, StructuredModelError, parse_claude_structured, parse_structured, require_korean_text
 from contracts import (
     ArtifactStatus,
     ErrorCode,
@@ -31,6 +31,10 @@ ISSUE_TITLES = {
     RiskCategory.OPAQUE_PROGRESS: "불명확한 확정 진행 경로",
     RiskCategory.RANDOM_BONUS: "확률형 보너스 편차",
     RiskCategory.EXPIRING_CURRENCY: "이벤트 재화 만료 손실",
+}
+TAG_TITLES = {
+    "fixed_reward": "정해진 보상 교환 구조",
+    "weekly_reset": "주간 초기화 시점",
 }
 
 
@@ -67,9 +71,11 @@ class EvidenceRagAgent:
     embedding_model = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
     prompt_path = Path(__file__).with_name("prompt.md")
 
-    def __init__(self, use_llm: bool = False, client=None) -> None:
+    def __init__(self, use_llm: bool = False, client=None, provider: str | None = None, budget: ClaudeBudget | None = None) -> None:
         self.use_llm = use_llm
         self.client = client
+        self.provider = provider or ("openai" if client is not None else os.getenv("LLM_PROVIDER", "claude"))
+        self.budget = budget
 
     def run(
         self,
@@ -78,26 +84,61 @@ class EvidenceRagAgent:
     ) -> EvidencePack:
         base = self.run_deterministic(bundle, on_event=on_event)
         if self.use_llm:
-            client = self.client
-            if client is None:
-                if not os.getenv("OPENAI_API_KEY"):
-                    raise StructuredModelError(ErrorCode.AUTH_FAILED, "OPENAI_API_KEY is missing")
-                from openai import OpenAI
+            if self.provider == "claude":
+                notify = on_event or (lambda _node, _message, _metrics: None)
+                notify("claude_narrative", "Claude가 근거 범위 안의 설명을 생성합니다.", {"provider": "claude"})
+                narrative = parse_claude_structured(
+                    model=os.getenv("CLAUDE_RAG_MODEL", "claude-sonnet-4-6"),
+                    prompt_path=self.prompt_path,
+                    output_type=EvidenceNarrative,
+                    payload=base,
+                    client=self.client,
+                    budget=self.budget,
+                )
+                require_korean_text(
+                    [
+                        text
+                        for issue in narrative.issues
+                        for text in (issue.title, issue.summary)
+                    ]
+                    + [
+                        text
+                        for persona in narrative.personas
+                        for text in (
+                            *persona.motivations,
+                            *persona.churn_triggers,
+                            *persona.play_constraints,
+                            persona.payment_sensitivity,
+                        )
+                    ]
+                    + [
+                        text
+                        for insight in narrative.exploratory_insights
+                        for text in (insight.title, insight.summary)
+                    ]
+                )
+                notify("claude_output_checked", "Claude 설명의 근거 ID와 형식을 확인했습니다.", {"provider": "claude"})
+            else:
+                client = self.client
+                if client is None:
+                    if not os.getenv("OPENAI_API_KEY"):
+                        raise StructuredModelError(ErrorCode.AUTH_FAILED, "OPENAI_API_KEY is missing")
+                    from openai import OpenAI
 
-                client = OpenAI()
-            ranked = embedding_rank(
-                "event reward probability guarantee progression payment expiration fairness",
-                bundle.evidence,
-                client=client,
-                model=self.embedding_model,
-            )
-            narrative = parse_structured(
-                model=self.model,
-                prompt_path=self.prompt_path,
-                output_type=EvidenceNarrative,
-                payload=base.model_copy(update={"evidence": ranked}),
-                client=client,
-            )
+                    client = OpenAI()
+                ranked = embedding_rank(
+                    "event reward probability guarantee progression payment expiration fairness",
+                    bundle.evidence,
+                    client=client,
+                    model=self.embedding_model,
+                )
+                narrative = parse_structured(
+                    model=self.model,
+                    prompt_path=self.prompt_path,
+                    output_type=EvidenceNarrative,
+                    payload=base.model_copy(update={"evidence": ranked}),
+                    client=client,
+                )
             return self._merge_narrative(base, narrative)
         return base
 
@@ -206,7 +247,11 @@ class EvidenceRagAgent:
             items = [item for item in deduplicated if item.language == language]
             sample = samples.get(language)
             if sample and sample.sufficient:
-                top_tags = [tag for tag, _ in Counter(tag for item in items for tag in item.mechanism_tags).most_common(3)]
+                tag_labels = {category.value: title for category, title in ISSUE_TITLES.items()} | TAG_TITLES
+                top_tags = [
+                    tag_labels.get(tag, tag)
+                    for tag, _ in Counter(tag for item in items for tag in item.mechanism_tags).most_common(3)
+                ]
                 language_insights.append(
                     LanguageInsight(
                         language=language,
@@ -237,7 +282,7 @@ class EvidenceRagAgent:
             errors.append(
                 PipelineError(
                     code=ErrorCode.INSUFFICIENT_EVIDENCE,
-                    message="behavioral personas require at least 15 evidence items",
+                    message="이용자 유형을 만들려면 비식별 근거가 최소 15건 필요합니다.",
                 )
             )
 
