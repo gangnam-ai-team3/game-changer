@@ -520,6 +520,63 @@ def test_live_classifier_rejects_cross_source_source_id_collision():
     assert fake.messages.calls == []
 
 
+@pytest.mark.parametrize(
+    "returned_ids",
+    ["incomplete", "duplicate", "unknown"],
+)
+def test_live_classifier_requires_an_exact_set_of_source_ids(returned_ids):
+    raw = [
+        RawFeedback(
+            source=SourceType.STEAM,
+            source_url="https://steamcommunity.com/app/578080/reviews/",
+            source_id="exact-set-source-one",
+            language=Language.KOREAN,
+            observed_at=datetime(2026, 8, 12, tzinfo=UTC),
+            text="첫 번째 원문은 결과물에 남으면 안 됩니다.",
+        ),
+        RawFeedback(
+            source=SourceType.STEAM,
+            source_url="https://steamcommunity.com/app/578080/reviews/",
+            source_id="exact-set-source-two",
+            language=Language.ENGLISH,
+            observed_at=datetime(2026, 8, 12, tzinfo=UTC),
+            text="Second raw text must not persist.",
+        ),
+    ]
+    expected_ids = [_safe_live_source_id(item.source, item.source_id) for item in raw]
+    if returned_ids == "incomplete":
+        source_ids = [expected_ids[0]]
+    elif returned_ids == "duplicate":
+        source_ids = [expected_ids[0], expected_ids[0]]
+    else:
+        source_ids = [expected_ids[0], "unknown-classifier-source"]
+    fake = FakeClaude(
+        [
+            {
+                "items": [
+                    {
+                        "source_id": source_id,
+                        "sentiment": "negative",
+                        "mechanism_tags": ["balance_regression"],
+                        "relevance": 0.9,
+                    }
+                    for source_id in source_ids
+                ]
+            }
+        ]
+    )
+
+    with pytest.raises(StructuredModelError) as error:
+        UpdateCollectorAgent(use_llm=True, client=fake).classify_raw(
+            raw, load_dragunov_brief(f"classifier-{returned_ids}")
+        )
+
+    assert error.value.code is ErrorCode.SCHEMA_INVALID
+    assert raw[0].text not in str(error.value)
+    assert raw[1].text not in str(error.value)
+    assert len(fake.messages.calls) == 1
+
+
 def test_claude_audit_cannot_overwrite_deterministic_decision_summary():
     baseline = UpdateReviewOrchestrator().run(load_dragunov_brief("audit-summary"))
     risk = baseline.impact.risks[0]

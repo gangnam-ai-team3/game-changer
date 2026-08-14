@@ -391,6 +391,85 @@ def test_live_raw_is_classified_then_discarded_with_source_metadata(tmp_path):
     assert result.brief.decision is UpdateDecision.HOLD
 
 
+def test_live_classifier_subset_forces_partial_hold_and_discards_all_raw(tmp_path):
+    first_raw_text = "first subset raw text MUST-NOT-PERSIST-001"
+    missing_raw_text = "missing subset raw text MUST-NOT-PERSIST-002"
+    raw = [
+        RawFeedback(
+            source=SourceType.STEAM,
+            source_url="https://steamcommunity.com/app/578080/reviews/",
+            source_id="subset-source-one",
+            language=Language.ENGLISH,
+            observed_at=datetime(2026, 8, 12, tzinfo=UTC),
+            text=first_raw_text,
+        ),
+        RawFeedback(
+            source=SourceType.STEAM,
+            source_url="https://steamcommunity.com/app/578080/reviews/",
+            source_id="subset-source-two",
+            language=Language.ENGLISH,
+            observed_at=datetime(2026, 8, 12, tzinfo=UTC),
+            text=missing_raw_text,
+        ),
+    ]
+
+    class SubsetSteam:
+        def fetch_reviews(self, _app_id, language, _cutoff_at, **_kwargs):
+            return raw if language is Language.ENGLISH else []
+
+    fake_claude = FakeClaude(
+        [
+            {
+                "items": [
+                    {
+                        "source_id": _safe_live_source_id(
+                            raw[0].source, raw[0].source_id
+                        ),
+                        "sentiment": "negative",
+                        "mechanism_tags": ["balance_regression"],
+                        "relevance": 0.9,
+                    }
+                ]
+            }
+        ]
+    )
+    log_path = tmp_path / "subset-classifier.jsonl"
+    result = UpdateReviewOrchestrator(
+        collector=UpdateCollectorAgent(
+            steam=SubsetSteam(), use_llm=True, client=fake_claude
+        )
+    ).run(
+        load_dragunov_brief("subset-classifier"),
+        UpdateCollectionOptions(
+            use_fixture=False,
+            steam_app_id=578080,
+            period_start=datetime(2026, 8, 6, tzinfo=UTC),
+            period_end=datetime(2026, 8, 13, tzinfo=UTC),
+        ),
+        log_path=log_path,
+    )
+    serialized = json.dumps(
+        {
+            "feedback": result.feedback.model_dump(mode="json"),
+            "evidence": result.evidence.model_dump(mode="json"),
+            "brief": result.brief.model_dump(mode="json"),
+            "events": [event.model_dump(mode="json") for event in result.events],
+        },
+        ensure_ascii=False,
+    )
+
+    assert result.feedback.status is ArtifactStatus.PARTIAL
+    assert result.feedback.evidence == []
+    assert result.feedback.errors[0].code is ErrorCode.SCHEMA_INVALID
+    assert result.evidence.evidence == []
+    assert result.brief.decision is UpdateDecision.HOLD
+    assert result.analysis_incomplete is True
+    assert len(fake_claude.messages.calls) == 1
+    for raw_text in (first_raw_text, missing_raw_text):
+        assert raw_text not in serialized
+        assert raw_text not in log_path.read_text(encoding="utf-8")
+
+
 def test_live_x_success_uses_shared_claude_budget_and_safe_source_metadata():
     raw_text = "X source free text SECRET-X must not persist"
     raw = RawFeedback(

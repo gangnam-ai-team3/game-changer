@@ -525,6 +525,14 @@ class UpdateCollectorAgent:
                     relevance=item.relevance,
                 )
             )
+        # A subset would otherwise silently let the model choose which raw
+        # records become decision evidence.  Classifications are all-or-nothing:
+        # every normalized input correlation ID must appear exactly once.
+        if seen_source_ids != set(by_id):
+            raise StructuredModelError(
+                ErrorCode.SCHEMA_INVALID,
+                "Claude classifier returned incomplete structured classifications.",
+            )
         return output
 
     @staticmethod

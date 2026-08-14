@@ -1,11 +1,37 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+import tomllib
 
 from fastapi.testclient import TestClient
 
 import backend.app.main as api_main
 from backend.app.main import app
+
+
+def test_api_runtime_dependencies_are_declared_locked_and_importable():
+    """Keep the tracked runtime installable, not just the active worktree."""
+
+    project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    requirements = Path("requirements.txt").read_text(encoding="utf-8").splitlines()
+    lock = tomllib.loads(Path("uv.lock").read_text(encoding="utf-8"))
+    root_package = next(
+        package
+        for package in lock["package"]
+        if package["name"] == "event-preflight"
+    )
+
+    required = {"fastapi>=0.115,<1", "uvicorn[standard]>=0.30,<1"}
+    assert required <= set(project["project"]["dependencies"])
+    assert required <= set(requirements)
+    assert {"fastapi", "uvicorn"} <= {
+        dependency["name"] for dependency in root_package["dependencies"]
+    }
+    assert {"fastapi", "uvicorn"} <= {
+        package["name"] for package in lock["package"]
+    }
+    assert app.title == "Game Changer API"
 
 
 def event_payload() -> dict:
