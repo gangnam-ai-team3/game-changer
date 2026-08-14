@@ -398,14 +398,14 @@ def test_claude_auth_failure_falls_back_without_retry_or_error_text_leakage():
     assert "test-key" not in event_json
 
 
-def test_live_classifier_returns_only_sanitized_structured_evidence():
+def test_live_classifier_persists_only_code_owned_summary():
     raw = RawFeedback(
         source=SourceType.STEAM,
         source_url="https://steamcommunity.com/app/578080/reviews/",
         source_id="anonymous-source-001",
         language=Language.KOREAN,
         observed_at=datetime(2026, 8, 12, tzinfo=UTC),
-        text="원문에는 사용자가 작성한 상세 반응이 있다.",
+        text="개인코드 X1234 입니다.",
     )
     fake = FakeClaude(
         [
@@ -414,7 +414,6 @@ def test_live_classifier_returns_only_sanitized_structured_evidence():
                     {
                         "source_id": raw.source_id,
                         "sentiment": "negative",
-                        "summary": "고정 피해의 실제 성능은 테스트로 확인 필요.",
                         "mechanism_tags": ["balance_regression"],
                         "relevance": 0.9,
                     }
@@ -426,28 +425,33 @@ def test_live_classifier_returns_only_sanitized_structured_evidence():
         [raw], load_dragunov_brief("live-classify")
     )
     assert output[0].source_id == raw.source_id
-    assert output[0].summary != raw.text
+    assert output[0].summary == (
+        "성능 균형 관련 부정 신호가 높은 관련성으로 분류되어 출시 전 확인 필요."
+    )
+    assert "X1234" not in output[0].summary
     assert "text" not in output[0].model_dump()
     assert raw.text not in json.dumps(output[0].model_dump(mode="json"), ensure_ascii=False)
+    assert "summary" not in fake.messages.calls[0]["tools"][0]["input_schema"]["properties"]
 
 
 @pytest.mark.parametrize(
-    "summary",
+    ("raw_text", "model_summary"),
     [
-        RAW_COPY_TEXT,
-        "드라구노프 피해 고정 뒤 조준 지연과 장전 취소가 동시에 발생할 "
-        "가능성이 있어 확인 필요.",
+        (RAW_COPY_TEXT, RAW_COPY_TEXT),
+        ("개인코드 X1234 입니다.", "코드 X1234 확인 필요."),
     ],
-    ids=["exact-copy", "partial-copy"],
+    ids=["long-copy", "short-identifier-fragment"],
 )
-def test_live_classifier_rejects_raw_summary_copies_without_exposure(summary):
+def test_live_classifier_rejects_any_model_supplied_summary_without_exposure(
+    raw_text, model_summary
+):
     raw = RawFeedback(
         source=SourceType.STEAM,
         source_url="https://steamcommunity.com/app/578080/reviews/",
         source_id="anonymous-copy-source",
         language=Language.KOREAN,
         observed_at=datetime(2026, 8, 12, tzinfo=UTC),
-        text=RAW_COPY_TEXT,
+        text=raw_text,
     )
     fake = FakeClaude(
         [
@@ -456,7 +460,7 @@ def test_live_classifier_rejects_raw_summary_copies_without_exposure(summary):
                     {
                         "source_id": raw.source_id,
                         "sentiment": "negative",
-                        "summary": summary,
+                        "summary": model_summary,
                         "mechanism_tags": ["balance_regression"],
                         "relevance": 0.9,
                     }
@@ -472,7 +476,9 @@ def test_live_classifier_rejects_raw_summary_copies_without_exposure(summary):
 
     assert error.value.code is ErrorCode.SCHEMA_INVALID
     assert raw.text not in str(error.value)
+    assert model_summary not in str(error.value)
     assert len(fake.messages.calls) == 1
+    assert "summary" not in fake.messages.calls[0]["tools"][0]["input_schema"]["properties"]
 
 
 def test_live_classifier_rejects_cross_source_source_id_collision():
@@ -534,7 +540,7 @@ def test_postlaunch_narrative_from_any_agent_falls_back_without_persistence(
     risk = baseline.impact.risks[0]
     metric = baseline.impact.validation_metrics[0]
     positive = baseline.evidence.positive_signals[0]
-    postlaunch_claim = "출시 후 사용자들이 좋아했다는 실제 반응일 가능성이 있음."
+    postlaunch_claim = "업데이트 직후 인기가 치솟았을 가능성이 있음."
     bad_evidence = {
         "signals": [
             {
@@ -589,3 +595,69 @@ def test_postlaunch_narrative_from_any_agent_falls_back_without_persistence(
     assert result.fallback_used is True
     assert postlaunch_claim not in persisted
     assert postlaunch_claim not in log_path.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("stage", ["evidence", "redteam", "audit"])
+def test_each_semantic_narrative_field_requires_its_own_prediction_marker(
+    stage, tmp_path
+):
+    baseline = UpdateReviewOrchestrator().run(load_dragunov_brief(f"marker-{stage}"))
+    risk = baseline.impact.risks[0]
+    metric = baseline.impact.validation_metrics[0]
+    positive = baseline.evidence.positive_signals[0]
+    unmarked_claim = "이 기능은 항상 성공한다."
+    bad_evidence = {
+        "signals": [
+            {
+                "signal_id": positive.signal_id,
+                "title": "예상",
+                "summary": unmarked_claim,
+                "evidence_ids": positive.evidence_ids,
+            }
+        ]
+    }
+    bad_redteam = {
+        "risks": [
+            {
+                "risk_id": risk.risk_id,
+                "title": "위험 예상",
+                "failure_path": unmarked_claim,
+                "revision_question": "테스트 서버 지표를 확인할 수 있는가?",
+                "evidence_ids": risk.evidence_ids,
+                "validation_metric_ids": [metric.metric_id],
+            }
+        ]
+    }
+    bad_audit = _valid_audit_narrative(
+        risk, metric, executive_summary=unmarked_claim
+    )
+    bad_audit["recommendations"][0]["title"] = "예상"
+    payloads = {
+        "evidence": [bad_evidence, bad_evidence],
+        "redteam": [
+            _valid_evidence_narrative(positive),
+            bad_redteam,
+            bad_redteam,
+        ],
+        "audit": [
+            _valid_evidence_narrative(positive),
+            _valid_redteam_narrative(risk, metric),
+            bad_audit,
+        ],
+    }[stage]
+    log_path = tmp_path / "update-review.jsonl"
+    result = UpdateReviewOrchestrator(
+        use_llm=True, llm_client=FakeClaude(payloads)
+    ).run(load_dragunov_brief(f"marker-{stage}"), log_path=log_path)
+    persisted = json.dumps(
+        {
+            "brief": result.brief.model_dump(mode="json"),
+            "events": [item.model_dump(mode="json") for item in result.events],
+        },
+        ensure_ascii=False,
+    )
+
+    assert result.brief.decision is UpdateDecision.TEST
+    assert result.fallback_used is True
+    assert unmarked_claim not in persisted
+    assert unmarked_claim not in log_path.read_text(encoding="utf-8")

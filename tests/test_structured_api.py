@@ -31,6 +31,19 @@ def test_prelaunch_narrative_guard_rejects_postlaunch_claim():
     assert error.value.code is ErrorCode.SCHEMA_INVALID
 
 
+@pytest.mark.parametrize(
+    "values",
+    [
+        ["예상", "이 기능은 항상 성공한다."],
+        ["가능성", "업데이트 직후 인기가 치솟았다."],
+    ],
+)
+def test_prelaunch_narrative_guard_requires_marker_for_each_field(values):
+    with pytest.raises(StructuredModelError) as error:
+        require_prelaunch_narrative(values)
+    assert error.value.code is ErrorCode.SCHEMA_INVALID
+
+
 def test_responses_parse_uses_pydantic_contract(tmp_path):
     prompt = tmp_path / "prompt.md"
     prompt.write_text("Return TinyOutput", encoding="utf-8")

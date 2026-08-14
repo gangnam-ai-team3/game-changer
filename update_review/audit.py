@@ -97,7 +97,8 @@ class UpdateAuditAgent:
                 text
                 for item in narrative.recommendations
                 for text in (item.title, item.action)
-            ]
+            ],
+            prediction_fields=[narrative.executive_summary],
         )
         risks = {item.risk_id for item in base.validated_risks}
         metrics_by_risk = {

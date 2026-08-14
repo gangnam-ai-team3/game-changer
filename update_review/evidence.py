@@ -112,7 +112,8 @@ class UpdateEvidenceAgent:
                 text
                 for item in narrative.signals
                 for text in (item.title, item.summary)
-            ]
+            ],
+            prediction_fields=[item.summary for item in narrative.signals],
         )
         signals = {
             item.signal_id: item

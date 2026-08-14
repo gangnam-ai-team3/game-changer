@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import os
-import re
-import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -14,7 +12,6 @@ from agents.structured import (
     ClaudeBudget,
     StructuredModelError,
     parse_claude_structured,
-    require_prelaunch_narrative,
 )
 from connectors import RawFeedback
 from connectors.steam import SteamClient
@@ -46,58 +43,24 @@ APPROVED_UPDATE_TAGS = frozenset(
     }
 )
 
-_RAW_OVERLAP_WINDOW = 10
+_TAG_SUMMARY_LABELS = {
+    "predictability": "결과 예측 가능성",
+    "skill_fairness": "실력 기반 공정성",
+    "balance_regression": "성능 균형",
+    "fairness_regression": "공정성 인식",
+    "validation_needed": "검증 지표",
+    "information_clarity": "변경 정보 이해",
+    "flow_disruption": "이용 동선",
+    "rule_exception": "예외 규칙",
+    "learning_burden": "학습 부담",
+}
 
-
-def _normalized_text(value: str) -> str:
-    """Normalize formatting without retaining a raw value in any artifact."""
-
-    return "".join(
-        character
-        for character in unicodedata.normalize("NFKC", value).casefold()
-        if character.isalnum()
-    )
-
-
-def _text_tokens(value: str) -> list[str]:
-    return re.findall(r"\w+", unicodedata.normalize("NFKC", value).casefold())
-
-
-def _contains_meaningful_raw_overlap(raw_text: str, summary: str) -> bool:
-    """Reject exact copies and substantial contiguous source fragments."""
-
-    source = _normalized_text(raw_text)
-    candidate = _normalized_text(summary)
-    if not source or not candidate:
-        return False
-    if source == candidate:
-        return True
-    if min(len(source), len(candidate)) >= 8 and (
-        source in candidate or candidate in source
-    ):
-        return True
-    source_tokens = _text_tokens(raw_text)
-    candidate_tokens = _text_tokens(summary)
-    if len(source_tokens) >= 3 and len(candidate_tokens) >= 3:
-        source_token_windows = {
-            tuple(source_tokens[index : index + 3])
-            for index in range(len(source_tokens) - 2)
-        }
-        if any(
-            tuple(candidate_tokens[index : index + 3]) in source_token_windows
-            for index in range(len(candidate_tokens) - 2)
-        ):
-            return True
-    if min(len(source), len(candidate)) < _RAW_OVERLAP_WINDOW:
-        return False
-    source_windows = {
-        source[index : index + _RAW_OVERLAP_WINDOW]
-        for index in range(len(source) - _RAW_OVERLAP_WINDOW + 1)
-    }
-    return any(
-        candidate[index : index + _RAW_OVERLAP_WINDOW] in source_windows
-        for index in range(len(candidate) - _RAW_OVERLAP_WINDOW + 1)
-    )
+_SENTIMENT_SUMMARY_LABELS = {
+    Sentiment.POSITIVE: "긍정",
+    Sentiment.NEGATIVE: "부정",
+    Sentiment.NEUTRAL: "중립",
+    Sentiment.MIXED: "혼합",
+}
 
 
 class ClassifiedRawItem(BaseModel):
@@ -105,7 +68,6 @@ class ClassifiedRawItem(BaseModel):
 
     source_id: str
     sentiment: Sentiment
-    summary: str = Field(min_length=8, max_length=500)
     mechanism_tags: list[str] = Field(min_length=1)
     relevance: float = Field(ge=0, le=1)
 
@@ -114,6 +76,23 @@ class ClassifiedRawBatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[ClassifiedRawItem]
+
+
+def _code_owned_summary(item: ClassifiedRawItem) -> str:
+    """Build persisted text solely from closed classifier fields, never raw text."""
+
+    tags = "·".join(_TAG_SUMMARY_LABELS[tag] for tag in sorted(set(item.mechanism_tags)))
+    relevance = (
+        "높은 관련성"
+        if item.relevance >= 0.75
+        else "보통 관련성"
+        if item.relevance >= 0.4
+        else "낮은 관련성"
+    )
+    return (
+        f"{tags} 관련 {_SENTIMENT_SUMMARY_LABELS[item.sentiment]} 신호가 "
+        f"{relevance}으로 분류되어 출시 전 확인 필요."
+    )
 
 
 @dataclass(slots=True)
@@ -194,18 +173,16 @@ class UpdateCollectorAgent:
             client=self.client,
             budget=self.budget,
         )
-        require_prelaunch_narrative([item.summary for item in batch.items])
         output = []
         for item in batch.items:
             original = by_id.get(item.source_id)
             if (
                 original is None
                 or not set(item.mechanism_tags) <= APPROVED_UPDATE_TAGS
-                or _contains_meaningful_raw_overlap(original.text, item.summary)
             ):
                 raise StructuredModelError(
                     ErrorCode.SCHEMA_INVALID,
-                    "Claude classifier returned an unsafe structured summary.",
+                    "Claude classifier returned unsafe structured classifications.",
                 )
             output.append(
                 UpdateEvidenceItem(
@@ -217,7 +194,7 @@ class UpdateCollectorAgent:
                     observed_at=original.observed_at,
                     period=EvidencePeriod.BEFORE,
                     sentiment=item.sentiment,
-                    summary=item.summary,
+                    summary=_code_owned_summary(item),
                     mechanism_tags=item.mechanism_tags,
                     relevance=item.relevance,
                 )

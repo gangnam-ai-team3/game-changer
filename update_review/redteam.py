@@ -100,7 +100,8 @@ class UpdateRedteamAgent:
                 text
                 for item in narrative.risks
                 for text in (item.title, item.failure_path, item.revision_question)
-            ]
+            ],
+            prediction_fields=[item.failure_path for item in narrative.risks],
         )
         risks = {item.risk_id: (index, item) for index, item in enumerate(base.risks)}
         metrics_by_risk = {

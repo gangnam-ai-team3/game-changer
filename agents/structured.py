@@ -29,15 +29,19 @@ def require_korean_text(values: list[str]) -> None:
 
 _PREDICTION_MARKERS = ("예상", "가능성", "확인 필요")
 _POST_LAUNCH_ASSERTION = re.compile(
-    r"(?:출시|업데이트|변경)\s*(?:후|이후)"
+    r"(?:출시|업데이트|변경)\s*(?:직후|후|이후)"
     r"|(?:실제|사후)\s*(?:이용자|사용자)?\s*(?:반응|평가|의견)"
     r"|(?:사용자|이용자)(?:들이|가)?\s*[^.]{0,20}"
-    r"(?:좋아했|좋아함|선호했|만족했|반응했|평가했|증가했|감소했)"
+    r"(?:좋아했|좋아함|좋았|선호했|만족했|반응했|평가했|증가했|감소했)"
+    r"|(?:인기|사용률|승률|평균\s*피해|만족도|반응)(?:가|이|은|는)?\s*"
+    r"(?:치솟았|상승했|증가했|감소했|개선됐|악화됐|좋아졌)"
 )
 
 
-def require_prelaunch_narrative(values: list[str]) -> None:
-    """Require prospective Korean copy and reject post-launch assertions."""
+def require_prelaunch_narrative(
+    values: list[str], *, prediction_fields: list[str] | None = None
+) -> None:
+    """Reject post-launch claims and require markers on every semantic prediction."""
 
     require_korean_text(values)
     if any(_POST_LAUNCH_ASSERTION.search(value) for value in values):
@@ -45,10 +49,15 @@ def require_prelaunch_narrative(values: list[str]) -> None:
             ErrorCode.SCHEMA_INVALID,
             "Claude 자연어 결과는 출시 후 실제 반응을 단정할 수 없습니다.",
         )
-    if not any(marker in value for value in values for marker in _PREDICTION_MARKERS):
+    required = values if prediction_fields is None else prediction_fields
+    require_korean_text(required)
+    if any(
+        not any(marker in value for marker in _PREDICTION_MARKERS)
+        for value in required
+    ):
         raise StructuredModelError(
             ErrorCode.SCHEMA_INVALID,
-            "Claude 자연어 결과에는 출시 전 예측 표지가 필요합니다.",
+            "각 Claude 예측 문장에는 출시 전 예측 표지가 필요합니다.",
         )
 
 
