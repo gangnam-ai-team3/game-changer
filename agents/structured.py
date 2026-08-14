@@ -36,6 +36,42 @@ _POST_LAUNCH_ASSERTION = re.compile(
     r"|(?:인기|사용률|승률|평균\s*피해|만족도|반응)(?:가|이|은|는)?\s*"
     r"(?:치솟았|상승했|증가했|감소했|개선됐|악화됐|좋아졌)"
 )
+_RELEASE_TIMING_ASSERTION = re.compile(
+    r"(?:출시|업데이트|변경|배포|패치|릴리스|적용)"
+    r"[^\n.!?。！？]{0,20}(?:직후|후|이후|뒤|다음\s*날)"
+)
+_COMPLETED_RESULT_ASSERTION = re.compile(
+    r"(?:늘었|증가했|상승했|하락했|감소했|줄었|치솟았|개선됐|악화됐|"
+    r"좋아졌|좋아했|선호했|만족했|성공했|실패했|확정됐|완료됐|발생했|"
+    r"나타났|기록됐|달성했|드러났|나왔)"
+)
+_SENTENCE_BOUNDARY = re.compile(r"[.!?。！？]+")
+
+
+def _has_postlaunch_assertion(value: str) -> bool:
+    """Fail closed on post-release timing or completed outcome language."""
+
+    return bool(
+        _POST_LAUNCH_ASSERTION.search(value)
+        or _RELEASE_TIMING_ASSERTION.search(value)
+        or _COMPLETED_RESULT_ASSERTION.search(value)
+    )
+
+
+def _prediction_sentences(value: str) -> list[str]:
+    return [
+        sentence.strip()
+        for sentence in _SENTENCE_BOUNDARY.split(value)
+        if sentence.strip()
+    ]
+
+
+def _has_prediction_marker_on_each_sentence(value: str) -> bool:
+    sentences = _prediction_sentences(value)
+    return bool(sentences) and all(
+        any(marker in sentence for marker in _PREDICTION_MARKERS)
+        for sentence in sentences
+    )
 
 
 def require_prelaunch_narrative(
@@ -44,17 +80,14 @@ def require_prelaunch_narrative(
     """Reject post-launch claims and require markers on every semantic prediction."""
 
     require_korean_text(values)
-    if any(_POST_LAUNCH_ASSERTION.search(value) for value in values):
+    if any(_has_postlaunch_assertion(value) for value in values):
         raise StructuredModelError(
             ErrorCode.SCHEMA_INVALID,
             "Claude 자연어 결과는 출시 후 실제 반응을 단정할 수 없습니다.",
         )
     required = values if prediction_fields is None else prediction_fields
     require_korean_text(required)
-    if any(
-        not any(marker in value for marker in _PREDICTION_MARKERS)
-        for value in required
-    ):
+    if any(not _has_prediction_marker_on_each_sentence(value) for value in required):
         raise StructuredModelError(
             ErrorCode.SCHEMA_INVALID,
             "각 Claude 예측 문장에는 출시 전 예측 표지가 필요합니다.",

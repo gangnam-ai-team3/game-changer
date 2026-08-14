@@ -32,10 +32,27 @@ def test_prelaunch_narrative_guard_rejects_postlaunch_claim():
 
 
 @pytest.mark.parametrize(
+    "value",
+    [
+        "확인 필요. 배포 다음 날 이용률이 늘었다.",
+        "확인 필요. 패치 뒤 승률이 증가했다.",
+        "확인 필요. 릴리스 이후 결과가 확정됐다.",
+        "확인 필요. 적용 후 사용률이 줄었다.",
+    ],
+    ids=["deployment-next-day", "patch-after", "release-after", "apply-after"],
+)
+def test_prelaunch_narrative_guard_rejects_release_timing_and_completed_results(value):
+    with pytest.raises(StructuredModelError) as error:
+        require_prelaunch_narrative([value])
+    assert error.value.code is ErrorCode.SCHEMA_INVALID
+
+
+@pytest.mark.parametrize(
     "values",
     [
         ["예상", "이 기능은 항상 성공한다."],
         ["가능성", "업데이트 직후 인기가 치솟았다."],
+        ["가능성. 이 기능은 항상 성공한다."],
     ],
 )
 def test_prelaunch_narrative_guard_requires_marker_for_each_field(values):

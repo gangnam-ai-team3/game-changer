@@ -597,6 +597,48 @@ def test_postlaunch_narrative_from_any_agent_falls_back_without_persistence(
     assert postlaunch_claim not in log_path.read_text(encoding="utf-8")
 
 
+def test_release_timing_evidence_falls_back_without_artifact_or_jsonl_persistence(
+    tmp_path,
+):
+    brief = load_dragunov_brief("release-result")
+    baseline = UpdateReviewOrchestrator().run(brief)
+    positive = baseline.evidence.positive_signals[0]
+    release_result_claim = "확인 필요. 배포 다음 날 이용률이 늘었다."
+    bad_evidence = {
+        "signals": [
+            {
+                "signal_id": positive.signal_id,
+                "title": "예측 가능성 개선 예상",
+                "summary": release_result_claim,
+                "evidence_ids": positive.evidence_ids,
+            }
+        ]
+    }
+    log_path = tmp_path / "update-review.jsonl"
+    fake = FakeClaude([bad_evidence, bad_evidence])
+    result = UpdateReviewOrchestrator(
+        use_llm=True, llm_client=fake
+    ).run(brief, log_path=log_path)
+    artifacts = json.dumps(
+        {
+            "feedback": result.feedback.model_dump(mode="json"),
+            "evidence": result.evidence.model_dump(mode="json"),
+            "impact": result.impact.model_dump(mode="json"),
+            "validated": result.validated.model_dump(mode="json"),
+            "brief": result.brief.model_dump(mode="json"),
+            "events": [item.model_dump(mode="json") for item in result.events],
+        },
+        ensure_ascii=False,
+    )
+
+    assert result.brief.decision is UpdateDecision.TEST
+    assert result.fallback_used is True
+    assert result.evidence == baseline.evidence
+    assert len(fake.messages.calls) == 2
+    assert release_result_claim not in artifacts
+    assert release_result_claim not in log_path.read_text(encoding="utf-8")
+
+
 @pytest.mark.parametrize("stage", ["evidence", "redteam", "audit"])
 def test_each_semantic_narrative_field_requires_its_own_prediction_marker(
     stage, tmp_path
