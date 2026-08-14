@@ -19,6 +19,9 @@ class TinyOutput(BaseModel):
     answer: str
 
 
+SAFE_PROSPECTIVE_TEMPLATE = "고정 피해로 결과 예측 가능성이 높아질 가능성이 있음."
+
+
 def test_korean_narrative_guard_rejects_all_english_text():
     with pytest.raises(StructuredModelError) as error:
         require_korean_text(["High risk requires revision"])
@@ -27,7 +30,10 @@ def test_korean_narrative_guard_rejects_all_english_text():
 
 def test_prelaunch_narrative_guard_rejects_postlaunch_claim():
     with pytest.raises(StructuredModelError) as error:
-        require_prelaunch_narrative(["출시 후 사용자들이 좋아했다는 실제 반응일 가능성이 있음."])
+        require_prelaunch_narrative(
+            ["출시 후 사용자들이 좋아했다는 실제 반응일 가능성이 있음."],
+            prospective_templates=[SAFE_PROSPECTIVE_TEMPLATE],
+        )
     assert error.value.code is ErrorCode.SCHEMA_INVALID
 
 
@@ -38,13 +44,33 @@ def test_prelaunch_narrative_guard_rejects_postlaunch_claim():
         "확인 필요. 패치 뒤 승률이 증가했다.",
         "확인 필요. 릴리스 이후 결과가 확정됐다.",
         "확인 필요. 적용 후 사용률이 줄었다.",
+        "런칭 후 이용률이 집계됐을 가능성이 있음.",
+        "서비스 공개 뒤 지표가 확인됐을 가능성이 있음.",
+        "버전 공개 다음 날 반응이 관측됐을 가능성이 있음.",
     ],
-    ids=["deployment-next-day", "patch-after", "release-after", "apply-after"],
+    ids=[
+        "deployment-next-day",
+        "patch-after",
+        "release-after",
+        "apply-after",
+        "launch-after",
+        "service-public-after",
+        "version-public-next-day",
+    ],
 )
-def test_prelaunch_narrative_guard_rejects_release_timing_and_completed_results(value):
+def test_prelaunch_narrative_guard_rejects_unapproved_release_result_language(value):
     with pytest.raises(StructuredModelError) as error:
-        require_prelaunch_narrative([value])
+        require_prelaunch_narrative(
+            [value], prospective_templates=[SAFE_PROSPECTIVE_TEMPLATE]
+        )
     assert error.value.code is ErrorCode.SCHEMA_INVALID
+
+
+def test_prelaunch_narrative_guard_accepts_code_owned_prospective_template():
+    require_prelaunch_narrative(
+        [SAFE_PROSPECTIVE_TEMPLATE],
+        prospective_templates=[SAFE_PROSPECTIVE_TEMPLATE],
+    )
 
 
 @pytest.mark.parametrize(
@@ -55,9 +81,11 @@ def test_prelaunch_narrative_guard_rejects_release_timing_and_completed_results(
         ["가능성. 이 기능은 항상 성공한다."],
     ],
 )
-def test_prelaunch_narrative_guard_requires_marker_for_each_field(values):
+def test_prelaunch_narrative_guard_rejects_unapproved_semantic_fields(values):
     with pytest.raises(StructuredModelError) as error:
-        require_prelaunch_narrative(values)
+        require_prelaunch_narrative(
+            values, prospective_templates=[SAFE_PROSPECTIVE_TEMPLATE]
+        )
     assert error.value.code is ErrorCode.SCHEMA_INVALID
 
 

@@ -30,6 +30,13 @@ from update_review.policy import (
 )
 
 
+# The visible brief is deterministic.  This is the only optional Claude
+# executive wording accepted before the code-owned brief is retained.
+_AUDIT_EXECUTIVE_PROSPECTIVE_TEMPLATES = (
+    "결과 예측 가능성은 개선될 수 있으나 전투 지표는 테스트로 확인 필요.",
+)
+
+
 class RecommendationNarrative(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -80,14 +87,21 @@ class UpdateAuditAgent:
         notify = on_event or (lambda _node, _message, _metrics: None)
         notify(
             "claude_narrative",
-            "Claude Haiku가 고정된 판정의 요약과 권고만 보강합니다.",
+            "Claude Haiku가 고정된 판정 범위에서 출시 전 템플릿을 선택합니다.",
             {"provider": "claude"},
         )
         narrative = parse_claude_structured(
             model=os.getenv("CLAUDE_UPDATE_AUDIT_MODEL", "claude-haiku-4-5"),
             prompt_path=self.prompt_path,
             output_type=AuditNarrative,
-            payload=base,
+            payload={
+                "artifact": base.model_dump(mode="json"),
+                "prospective_templates": {
+                    "executive_summary": list(
+                        _AUDIT_EXECUTIVE_PROSPECTIVE_TEMPLATES
+                    )
+                },
+            },
             client=self.client,
             budget=self.budget,
         )
@@ -99,6 +113,7 @@ class UpdateAuditAgent:
                 for text in (item.title, item.action)
             ],
             prediction_fields=[narrative.executive_summary],
+            prospective_templates=_AUDIT_EXECUTIVE_PROSPECTIVE_TEMPLATES,
         )
         risks = {item.risk_id for item in base.validated_risks}
         metrics_by_risk = {
@@ -119,24 +134,12 @@ class UpdateAuditAgent:
                     ErrorCode.SCHEMA_INVALID,
                     "Claude narrative references unknown audit data",
                 )
-        proposals = {item.risk_id: item for item in narrative.recommendations}
-        recommendations = []
-        for item in base.recommendations:
-            risk_id = item.addresses_risk_ids[0]
-            proposal = proposals.get(risk_id)
-            recommendations.append(
-                item
-                if proposal is None
-                else item.model_copy(
-                    update={"title": proposal.title, "action": proposal.action}
-                )
-            )
         notify(
             "claude_output_checked",
-            "코드 판정을 유지한 채 Claude 요약·권고 연결을 확인했습니다.",
+            "코드 판정·권고를 유지한 채 Claude 템플릿 연결을 확인했습니다.",
             {"provider": "claude", "decision": base.decision.value},
         )
-        return base.model_copy(update={"recommendations": recommendations})
+        return base
 
     def run_deterministic(
         self,

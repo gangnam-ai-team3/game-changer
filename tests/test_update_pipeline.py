@@ -258,7 +258,7 @@ def test_mixed_and_negative_signals_share_one_risk_and_metric():
     )
 
 
-def test_claude_changes_only_korean_narrative_not_core_decision():
+def test_claude_accepts_prospective_templates_without_overwriting_code_owned_artifacts():
     baseline = UpdateReviewOrchestrator().run(load_dragunov_brief("claude-run"))
     risk = baseline.impact.risks[0]
     metric = baseline.impact.validation_metrics[0]
@@ -305,6 +305,9 @@ def test_claude_changes_only_korean_narrative_not_core_decision():
     )
     assert result.brief.decision == baseline.brief.decision == UpdateDecision.TEST
     assert result.brief.executive_summary == baseline.brief.executive_summary
+    assert result.evidence == baseline.evidence
+    assert result.impact == baseline.impact
+    assert result.validated == baseline.validated
     assert [item.risk_id for item in result.brief.top_risks] == [
         item.risk_id for item in baseline.brief.top_risks
     ]
@@ -597,13 +600,27 @@ def test_postlaunch_narrative_from_any_agent_falls_back_without_persistence(
     assert postlaunch_claim not in log_path.read_text(encoding="utf-8")
 
 
-def test_release_timing_evidence_falls_back_without_artifact_or_jsonl_persistence(
-    tmp_path,
+@pytest.mark.parametrize(
+    "release_result_claim",
+    [
+        "확인 필요. 배포 다음 날 이용률이 늘었다.",
+        "런칭 후 이용률이 집계됐을 가능성이 있음.",
+        "서비스 공개 뒤 지표가 확인됐을 가능성이 있음.",
+        "버전 공개 다음 날 반응이 관측됐을 가능성이 있음.",
+    ],
+    ids=[
+        "deployment-next-day",
+        "launch-after",
+        "service-public-after",
+        "version-public-next-day",
+    ],
+)
+def test_unapproved_release_result_evidence_falls_back_without_persistence(
+    release_result_claim, tmp_path
 ):
     brief = load_dragunov_brief("release-result")
     baseline = UpdateReviewOrchestrator().run(brief)
     positive = baseline.evidence.positive_signals[0]
-    release_result_claim = "확인 필요. 배포 다음 날 이용률이 늘었다."
     bad_evidence = {
         "signals": [
             {
@@ -630,17 +647,19 @@ def test_release_timing_evidence_falls_back_without_artifact_or_jsonl_persistenc
         },
         ensure_ascii=False,
     )
+    brief_json = json.dumps(result.brief.model_dump(mode="json"), ensure_ascii=False)
 
     assert result.brief.decision is UpdateDecision.TEST
     assert result.fallback_used is True
     assert result.evidence == baseline.evidence
     assert len(fake.messages.calls) == 2
+    assert release_result_claim not in brief_json
     assert release_result_claim not in artifacts
     assert release_result_claim not in log_path.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("stage", ["evidence", "redteam", "audit"])
-def test_each_semantic_narrative_field_requires_its_own_prediction_marker(
+def test_each_semantic_narrative_field_requires_its_own_code_owned_template(
     stage, tmp_path
 ):
     baseline = UpdateReviewOrchestrator().run(load_dragunov_brief(f"marker-{stage}"))

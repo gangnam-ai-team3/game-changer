@@ -35,6 +35,14 @@ SIGNAL_TITLES = {
     "learning_burden": "새 규칙 학습 부담",
 }
 
+# Claude may select only these code-owned prospective alternatives.  The
+# deterministic signal summary is also added for every signal at runtime.
+_SIGNAL_PROSPECTIVE_ALTERNATIVES = {
+    "predictability": (
+        "고정 피해로 결과 예측 가능성이 높아질 가능성이 있음.",
+    ),
+}
+
 PERSONA_TAGS = {
     PersonaKind.TIME_CONSTRAINED: {
         "information_clarity",
@@ -55,6 +63,11 @@ PERSONA_TAGS = {
         "validation_needed",
     },
 }
+
+
+def _signal_prospective_templates(signal: ReactionSignal) -> tuple[str, ...]:
+    tag = signal.signal_id.split("-", 1)[1]
+    return (signal.summary, *_SIGNAL_PROSPECTIVE_ALTERNATIVES.get(tag, ()))
 
 
 class SignalNarrative(BaseModel):
@@ -96,24 +109,8 @@ class UpdateEvidenceAgent:
         notify = on_event or (lambda _node, _message, _metrics: None)
         notify(
             "claude_narrative",
-            "Claude Sonnet이 고정된 근거 범위에서 반응 설명을 보강합니다.",
+            "Claude Sonnet이 고정된 근거 범위에서 출시 전 템플릿을 선택합니다.",
             {"provider": "claude"},
-        )
-        narrative = parse_claude_structured(
-            model=os.getenv("CLAUDE_UPDATE_EVIDENCE_MODEL", "claude-sonnet-4-6"),
-            prompt_path=self.prompt_path,
-            output_type=EvidenceNarrative,
-            payload=base,
-            client=self.client,
-            budget=self.budget,
-        )
-        require_prelaunch_narrative(
-            [
-                text
-                for item in narrative.signals
-                for text in (item.title, item.summary)
-            ],
-            prediction_fields=[item.summary for item in narrative.signals],
         )
         signals = {
             item.signal_id: item
@@ -123,6 +120,22 @@ class UpdateEvidenceAgent:
                 *base.split_conditions,
             ]
         }
+        narrative = parse_claude_structured(
+            model=os.getenv("CLAUDE_UPDATE_EVIDENCE_MODEL", "claude-sonnet-4-6"),
+            prompt_path=self.prompt_path,
+            output_type=EvidenceNarrative,
+            payload={
+                "artifact": base.model_dump(mode="json"),
+                "prospective_templates": {
+                    "summary_by_signal_id": {
+                        signal_id: list(_signal_prospective_templates(signal))
+                        for signal_id, signal in signals.items()
+                    }
+                },
+            },
+            client=self.client,
+            budget=self.budget,
+        )
         for proposal in narrative.signals:
             official = signals.get(proposal.signal_id)
             if official is None or not set(proposal.evidence_ids) <= set(
@@ -132,27 +145,17 @@ class UpdateEvidenceAgent:
                     ErrorCode.SCHEMA_INVALID,
                     "Claude narrative references unknown signal evidence",
                 )
-            signals[proposal.signal_id] = official.model_copy(
-                update={"title": proposal.title, "summary": proposal.summary}
+            require_prelaunch_narrative(
+                [proposal.title, proposal.summary],
+                prediction_fields=[proposal.summary],
+                prospective_templates=_signal_prospective_templates(official),
             )
         notify(
             "claude_output_checked",
-            "Claude 설명의 신호·근거 ID를 확인했습니다.",
+            "Claude 템플릿 선택의 신호·근거 ID를 확인했고 코드 소유 문장을 유지했습니다.",
             {"provider": "claude"},
         )
-        return base.model_copy(
-            update={
-                "positive_signals": [
-                    signals[item.signal_id] for item in base.positive_signals
-                ],
-                "negative_signals": [
-                    signals[item.signal_id] for item in base.negative_signals
-                ],
-                "split_conditions": [
-                    signals[item.signal_id] for item in base.split_conditions
-                ],
-            }
-        )
+        return base
 
     def run_deterministic(
         self,

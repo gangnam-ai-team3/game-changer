@@ -41,6 +41,21 @@ RISK_COPY = {
     UpdateRiskCategory.LEARNING_BURDEN: ("새 규칙 학습 부담", "기존 습관을 다시 배워야 해 이탈할 가능성이 있음.", "첫 사용에서 별도 설명 없이 완료할 수 있는가?"),
 }
 
+# Claude chooses from code-owned prospective wording; it never supplies stored
+# failure-path prose itself.
+_RISK_PROSPECTIVE_ALTERNATIVES = {
+    UpdateRiskCategory.BALANCE_REGRESSION: (
+        "실제 특성 조합에서 메타가 쏠릴 가능성이 있음.",
+    ),
+}
+
+
+def _risk_prospective_templates(risk: UpdateRiskItem) -> tuple[str, ...]:
+    return (
+        risk.failure_path,
+        *_RISK_PROSPECTIVE_ALTERNATIVES.get(risk.category, ()),
+    )
+
 
 class RiskNarrative(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -84,26 +99,10 @@ class UpdateRedteamAgent:
         notify = on_event or (lambda _node, _message, _metrics: None)
         notify(
             "claude_narrative",
-            "Claude Haiku가 고정된 위험과 확인 지표 범위에서 설명을 보강합니다.",
+            "Claude Haiku가 고정된 위험 범위에서 출시 전 템플릿을 선택합니다.",
             {"provider": "claude"},
         )
-        narrative = parse_claude_structured(
-            model=os.getenv("CLAUDE_UPDATE_REDTEAM_MODEL", "claude-haiku-4-5"),
-            prompt_path=self.prompt_path,
-            output_type=RedteamNarrative,
-            payload=base,
-            client=self.client,
-            budget=self.budget,
-        )
-        require_prelaunch_narrative(
-            [
-                text
-                for item in narrative.risks
-                for text in (item.title, item.failure_path, item.revision_question)
-            ],
-            prediction_fields=[item.failure_path for item in narrative.risks],
-        )
-        risks = {item.risk_id: (index, item) for index, item in enumerate(base.risks)}
+        risks = {item.risk_id: item for item in base.risks}
         metrics_by_risk = {
             risk.risk_id: {
                 metric.metric_id
@@ -112,12 +111,27 @@ class UpdateRedteamAgent:
             }
             for risk in base.risks
         }
-        output = list(base.risks)
+        narrative = parse_claude_structured(
+            model=os.getenv("CLAUDE_UPDATE_REDTEAM_MODEL", "claude-haiku-4-5"),
+            prompt_path=self.prompt_path,
+            output_type=RedteamNarrative,
+            payload={
+                "artifact": base.model_dump(mode="json"),
+                "prospective_templates": {
+                    "failure_path_by_risk_id": {
+                        risk_id: list(_risk_prospective_templates(risk))
+                        for risk_id, risk in risks.items()
+                    }
+                },
+            },
+            client=self.client,
+            budget=self.budget,
+        )
         for proposal in narrative.risks:
             official = risks.get(proposal.risk_id)
             if (
                 official is None
-                or not set(proposal.evidence_ids) <= set(official[1].evidence_ids)
+                or not set(proposal.evidence_ids) <= set(official.evidence_ids)
                 or not set(proposal.validation_metric_ids)
                 <= metrics_by_risk[proposal.risk_id]
             ):
@@ -125,20 +139,17 @@ class UpdateRedteamAgent:
                     ErrorCode.SCHEMA_INVALID,
                     "Claude narrative references unknown risk data",
                 )
-            index, risk = official
-            output[index] = risk.model_copy(
-                update={
-                    "title": proposal.title,
-                    "failure_path": proposal.failure_path,
-                    "revision_question": proposal.revision_question,
-                }
+            require_prelaunch_narrative(
+                [proposal.title, proposal.failure_path, proposal.revision_question],
+                prediction_fields=[proposal.failure_path],
+                prospective_templates=_risk_prospective_templates(official),
             )
         notify(
             "claude_output_checked",
-            "Claude 설명의 위험·근거·지표 ID를 확인했습니다.",
+            "Claude 템플릿 선택의 위험·근거·지표 ID를 확인했고 코드 소유 문장을 유지했습니다.",
             {"provider": "claude"},
         )
-        return base.model_copy(update={"risks": output})
+        return base
 
     def run_deterministic(
         self,
