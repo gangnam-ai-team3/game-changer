@@ -52,8 +52,16 @@ class UpdateEvidenceAgent:
         on_event: Callable[[str, str, dict], None] | None = None,
     ) -> UpdateEvidencePack:
         notify = on_event or (lambda _node, _message, _metrics: None)
-        deduplicated = list(
-            {(item.source, item.source_id): item for item in bundle.evidence}.values()
+        ordered_evidence = sorted(
+            bundle.evidence,
+            key=lambda item: (item.source.value, item.source_id, item.evidence_id),
+        )
+        deduplicated = sorted(
+            {
+                (item.source, item.source_id): item
+                for item in ordered_evidence
+            }.values(),
+            key=lambda item: (item.source.value, item.source_id, item.evidence_id),
         )
         notify("deduplicated", "중복 비식별 근거를 하나로 합쳤습니다.", {"evidence": len(deduplicated)})
 

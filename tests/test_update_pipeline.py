@@ -1,9 +1,16 @@
 import pytest
 
 from update_review.collector import UpdateCollectionOptions, UpdateCollectorAgent
-from update_review.contracts import EvidencePeriod, Sentiment, UpdateDecision, UpdateType
+from update_review.contracts import (
+    EvidencePeriod,
+    Sentiment,
+    UpdateDecision,
+    UpdateEvidencePack,
+    UpdateType,
+)
 from update_review.fixtures import load_dragunov_brief, load_update_feedback_fixture
-from update_review.orchestrator import UpdateReviewOrchestrator
+from update_review.orchestrator import UpdateReviewOrchestrator, _input_snapshot_hash
+from update_review.redteam import UpdateRedteamAgent
 
 
 EXPECTED_AGENTS = [
@@ -99,3 +106,81 @@ def test_update_contract_violation_stops_the_pipeline():
         UpdateReviewOrchestrator(collector=WrongCollector()).run(
             load_dragunov_brief("expected")
         )
+
+
+def test_decision_affecting_relevance_changes_snapshot_hash():
+    brief = load_dragunov_brief("hash-relevance")
+    bundle = load_update_feedback_fixture(brief)
+    changed = bundle.model_copy(
+        update={
+            "evidence": [
+                item.model_copy(update={"relevance": 0.1})
+                if item.evidence_id == bundle.evidence[0].evidence_id
+                else item
+                for item in bundle.evidence
+            ]
+        }
+    )
+    assert _input_snapshot_hash(brief, bundle) != _input_snapshot_hash(brief, changed)
+
+
+def test_reversed_evidence_has_identical_result_and_hash():
+    brief = load_dragunov_brief("reversed-evidence")
+    bundle = load_update_feedback_fixture(brief)
+
+    class ReversedCollector:
+        def run(self, brief, options, on_event=None):
+            return load_update_feedback_fixture(brief).model_copy(
+                update={"evidence": list(reversed(bundle.evidence))}
+            )
+
+    first = UpdateReviewOrchestrator().run(brief)
+    second = UpdateReviewOrchestrator(collector=ReversedCollector()).run(brief)
+    assert first.brief == second.brief
+    assert first.brief.input_snapshot_hash == second.brief.input_snapshot_hash
+
+
+def test_mixed_and_negative_signals_share_one_risk_and_metric():
+    brief = load_dragunov_brief("coalesced-risk")
+    bundle = load_update_feedback_fixture(brief)
+    negative = next(item for item in bundle.evidence if item.sentiment is Sentiment.NEGATIVE)
+    mixed = next(item for item in bundle.evidence if item.sentiment is Sentiment.MIXED)
+    pack = UpdateEvidencePack(
+        run_id=brief.run_id,
+        status=bundle.status,
+        producer="evidence_rag",
+        input_refs=[bundle.ref],
+        errors=[],
+        positive_signals=[],
+        negative_signals=[
+            {
+                "signal_id": "negative-balance_regression",
+                "title": "실제 성능 역전 가능성",
+                "summary": "부정 반응",
+                "sentiment": "negative",
+                "evidence_ids": [negative.evidence_id],
+                "confidence": 0.8,
+            }
+        ],
+        split_conditions=[
+            {
+                "signal_id": "mixed-balance_regression",
+                "title": "실제 성능 역전 가능성",
+                "summary": "혼합 반응",
+                "sentiment": "mixed",
+                "evidence_ids": [mixed.evidence_id],
+                "confidence": 0.6,
+            }
+        ],
+        persona_impacts=[],
+        language_insights=[],
+        evidence=[negative, mixed],
+    )
+    result = UpdateRedteamAgent().run_deterministic(brief, pack)
+    assert [risk.risk_id for risk in result.risks] == ["risk-balance_regression"]
+    assert [metric.metric_id for metric in result.validation_metrics] == [
+        "metric-balance_regression"
+    ]
+    assert result.risks[0].evidence_ids == sorted(
+        [negative.evidence_id, mixed.evidence_id]
+    )

@@ -63,24 +63,45 @@ class UpdateRedteamAgent:
             )
             for item in pack.negative_signals
         ]
-        risks = []
+        grouped_signals = {}
         for item in [*pack.negative_signals, *pack.split_conditions]:
             tag = item.signal_id.split("-", 1)[1]
             category = RISK_BY_TAG.get(tag)
-            if category is None:
-                continue
+            if category is not None:
+                grouped_signals.setdefault(category, []).append(item)
+
+        risks = []
+        for category in sorted(grouped_signals, key=lambda item: item.value):
+            items = grouped_signals[category]
             title, failure_path, question = RISK_COPY[category]
+            linked_signal_ids = {item.signal_id for item in items}
+            affected_personas = sorted(
+                {
+                    impact.persona
+                    for impact in pack.persona_impacts
+                    if linked_signal_ids
+                    & set(
+                        impact.positive_signal_ids
+                        + impact.negative_signal_ids
+                        + impact.split_signal_ids
+                    )
+                },
+                key=lambda item: item.value,
+            ) or [PersonaKind.CORE_GAMEPLAY]
+            evidence_ids = sorted(
+                {evidence_id for item in items for evidence_id in item.evidence_ids}
+            )
             risks.append(
                 UpdateRiskItem(
                     risk_id=f"risk-{category.value}",
                     category=category,
                     title=title,
                     severity=expected_severity(category),
-                    affected_personas=[impact.persona for impact in pack.persona_impacts if item.signal_id in impact.positive_signal_ids + impact.negative_signal_ids + impact.split_signal_ids] or [PersonaKind.CORE_GAMEPLAY],
-                    evidence_ids=item.evidence_ids,
+                    affected_personas=affected_personas,
+                    evidence_ids=evidence_ids,
                     failure_path=failure_path,
                     revision_question=question,
-                    confidence=item.confidence,
+                    confidence=sum(item.confidence for item in items) / len(items),
                 )
             )
         notify("failure_paths_built", "부정·혼합 신호에서 실패 경로를 만들었습니다.", {"risks": len(risks)})

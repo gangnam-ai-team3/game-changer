@@ -188,15 +188,8 @@ def _input_snapshot_hash(brief: UpdateBrief, feedback: UpdateFeedbackBundle) -> 
             for item in feedback.samples
         ),
         "evidence": sorted(
-            (
-                item.evidence_id,
-                item.source_id,
-                item.period.value,
-                item.sentiment.value,
-                item.summary,
-                sorted(item.mechanism_tags),
-            )
-            for item in feedback.evidence
+            [item.model_dump(mode="json") for item in feedback.evidence],
+            key=lambda item: (item["source"], item["source_id"], item["evidence_id"]),
         ),
     }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
