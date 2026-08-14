@@ -4,8 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from agents.structured import StructuredModelError
 from connectors import RawFeedback
-from contracts import Language, SourceType
+from contracts import ErrorCode, Language, SourceType
 from update_review.collector import UpdateCollectionOptions, UpdateCollectorAgent
 from update_review.contracts import (
     EvidencePeriod,
@@ -41,6 +42,55 @@ class FakeClaudeMessages:
 class FakeClaude:
     def __init__(self, payloads):
         self.messages = FakeClaudeMessages(payloads)
+
+
+RAW_COPY_TEXT = (
+    "익명 이용자가 드라구노프 피해 고정 뒤 조준 지연과 장전 취소가 동시에 "
+    "발생할 가능성이 있다고 적었다."
+)
+
+
+def _valid_evidence_narrative(signal):
+    return {
+        "signals": [
+            {
+                "signal_id": signal.signal_id,
+                "title": "예측 가능성 개선 예상",
+                "summary": "고정 피해로 결과 예측 가능성이 높아질 가능성이 있음.",
+                "evidence_ids": signal.evidence_ids,
+            }
+        ]
+    }
+
+
+def _valid_redteam_narrative(risk, metric):
+    return {
+        "risks": [
+            {
+                "risk_id": risk.risk_id,
+                "title": "전투 성능 재확인 필요",
+                "failure_path": "실제 특성 조합에서 메타가 쏠릴 가능성이 있음.",
+                "revision_question": "테스트 서버 지표를 확인할 수 있는가?",
+                "evidence_ids": risk.evidence_ids,
+                "validation_metric_ids": [metric.metric_id],
+            }
+        ]
+    }
+
+
+def _valid_audit_narrative(risk, metric, executive_summary=None):
+    return {
+        "executive_summary": executive_summary
+        or "결과 예측 가능성은 개선될 수 있으나 전투 지표는 테스트로 확인 필요.",
+        "recommendations": [
+            {
+                "risk_id": risk.risk_id,
+                "title": "테스트 서버 확인",
+                "action": "사용률·승률·평균 피해를 확인한다.",
+                "validation_metric_ids": [metric.metric_id],
+            }
+        ],
+    }
 
 
 def test_dragunov_fixture_is_synthetic_comparable_reference():
@@ -254,6 +304,7 @@ def test_claude_changes_only_korean_narrative_not_core_decision():
         load_dragunov_brief("claude-run")
     )
     assert result.brief.decision == baseline.brief.decision == UpdateDecision.TEST
+    assert result.brief.executive_summary == baseline.brief.executive_summary
     assert [item.risk_id for item in result.brief.top_risks] == [
         item.risk_id for item in baseline.brief.top_risks
     ]
@@ -322,6 +373,31 @@ def test_fixture_without_claude_key_uses_deterministic_path(monkeypatch):
     assert result.analysis_incomplete is False
 
 
+def test_claude_auth_failure_falls_back_without_retry_or_error_text_leakage():
+    calls = []
+
+    class AuthenticationError(Exception):
+        pass
+
+    class Messages:
+        def create(self, **_kwargs):
+            calls.append(True)
+            raise AuthenticationError("key=test-key")
+
+    result = UpdateReviewOrchestrator(
+        use_llm=True, llm_client=SimpleNamespace(messages=Messages())
+    ).run(load_dragunov_brief("auth-fallback"))
+    event_json = json.dumps(
+        [item.model_dump(mode="json") for item in result.events], ensure_ascii=False
+    )
+
+    assert result.fallback_used is True
+    assert result.brief.decision is UpdateDecision.TEST
+    assert calls == [True]
+    assert not any(item.state.value == "retrying" for item in result.events)
+    assert "test-key" not in event_json
+
+
 def test_live_classifier_returns_only_sanitized_structured_evidence():
     raw = RawFeedback(
         source=SourceType.STEAM,
@@ -353,3 +429,163 @@ def test_live_classifier_returns_only_sanitized_structured_evidence():
     assert output[0].summary != raw.text
     assert "text" not in output[0].model_dump()
     assert raw.text not in json.dumps(output[0].model_dump(mode="json"), ensure_ascii=False)
+
+
+@pytest.mark.parametrize(
+    "summary",
+    [
+        RAW_COPY_TEXT,
+        "드라구노프 피해 고정 뒤 조준 지연과 장전 취소가 동시에 발생할 "
+        "가능성이 있어 확인 필요.",
+    ],
+    ids=["exact-copy", "partial-copy"],
+)
+def test_live_classifier_rejects_raw_summary_copies_without_exposure(summary):
+    raw = RawFeedback(
+        source=SourceType.STEAM,
+        source_url="https://steamcommunity.com/app/578080/reviews/",
+        source_id="anonymous-copy-source",
+        language=Language.KOREAN,
+        observed_at=datetime(2026, 8, 12, tzinfo=UTC),
+        text=RAW_COPY_TEXT,
+    )
+    fake = FakeClaude(
+        [
+            {
+                "items": [
+                    {
+                        "source_id": raw.source_id,
+                        "sentiment": "negative",
+                        "summary": summary,
+                        "mechanism_tags": ["balance_regression"],
+                        "relevance": 0.9,
+                    }
+                ]
+            }
+        ]
+    )
+
+    with pytest.raises(StructuredModelError) as error:
+        UpdateCollectorAgent(use_llm=True, client=fake).classify_raw(
+            [raw], load_dragunov_brief("live-copy")
+        )
+
+    assert error.value.code is ErrorCode.SCHEMA_INVALID
+    assert raw.text not in str(error.value)
+    assert len(fake.messages.calls) == 1
+
+
+def test_live_classifier_rejects_cross_source_source_id_collision():
+    steam = RawFeedback(
+        source=SourceType.STEAM,
+        source_url="https://steamcommunity.com/app/578080/reviews/",
+        source_id="same-anonymous-id",
+        language=Language.KOREAN,
+        observed_at=datetime(2026, 8, 12, tzinfo=UTC),
+        text="Steam 원문은 분류 전에 폐기되어야 한다.",
+    )
+    x_post = RawFeedback(
+        source=SourceType.X,
+        source_url="https://x.com/example/status/1",
+        source_id="same-anonymous-id",
+        language=Language.KOREAN,
+        observed_at=datetime(2026, 8, 12, tzinfo=UTC),
+        text="X 원문도 분류 전에 폐기되어야 한다.",
+    )
+    fake = FakeClaude([])
+
+    with pytest.raises(StructuredModelError) as error:
+        UpdateCollectorAgent(use_llm=True, client=fake).classify_raw(
+            [steam, x_post], load_dragunov_brief("cross-source")
+        )
+
+    assert error.value.code is ErrorCode.SCHEMA_INVALID
+    assert fake.messages.calls == []
+
+
+def test_claude_audit_cannot_overwrite_deterministic_decision_summary():
+    baseline = UpdateReviewOrchestrator().run(load_dragunov_brief("audit-summary"))
+    risk = baseline.impact.risks[0]
+    metric = baseline.impact.validation_metrics[0]
+    positive = baseline.evidence.positive_signals[0]
+    fake = FakeClaude(
+        [
+            _valid_evidence_narrative(positive),
+            _valid_redteam_narrative(risk, metric),
+            _valid_audit_narrative(risk, metric, executive_summary="즉시 출시 가능"),
+        ]
+    )
+
+    result = UpdateReviewOrchestrator(use_llm=True, llm_client=fake).run(
+        load_dragunov_brief("audit-summary")
+    )
+
+    assert result.brief.decision is UpdateDecision.TEST
+    assert result.brief.executive_summary == baseline.brief.executive_summary
+    assert "즉시 출시 가능" not in result.brief.executive_summary
+    assert result.fallback_used is True
+
+
+@pytest.mark.parametrize("stage", ["evidence", "redteam", "audit"])
+def test_postlaunch_narrative_from_any_agent_falls_back_without_persistence(
+    stage, tmp_path
+):
+    baseline = UpdateReviewOrchestrator().run(load_dragunov_brief(f"postlaunch-{stage}"))
+    risk = baseline.impact.risks[0]
+    metric = baseline.impact.validation_metrics[0]
+    positive = baseline.evidence.positive_signals[0]
+    postlaunch_claim = "출시 후 사용자들이 좋아했다는 실제 반응일 가능성이 있음."
+    bad_evidence = {
+        "signals": [
+            {
+                "signal_id": positive.signal_id,
+                "title": "예측 가능성 개선 예상",
+                "summary": postlaunch_claim,
+                "evidence_ids": positive.evidence_ids,
+            }
+        ]
+    }
+    bad_redteam = {
+        "risks": [
+            {
+                "risk_id": risk.risk_id,
+                "title": "전투 성능 재확인 필요",
+                "failure_path": postlaunch_claim,
+                "revision_question": "테스트 서버 지표를 확인할 수 있는가?",
+                "evidence_ids": risk.evidence_ids,
+                "validation_metric_ids": [metric.metric_id],
+            }
+        ]
+    }
+    bad_audit = _valid_audit_narrative(
+        risk, metric, executive_summary=postlaunch_claim
+    )
+    payloads = {
+        "evidence": [bad_evidence, bad_evidence],
+        "redteam": [
+            _valid_evidence_narrative(positive),
+            bad_redteam,
+            bad_redteam,
+        ],
+        "audit": [
+            _valid_evidence_narrative(positive),
+            _valid_redteam_narrative(risk, metric),
+            bad_audit,
+        ],
+    }[stage]
+    log_path = tmp_path / "update-review.jsonl"
+    result = UpdateReviewOrchestrator(
+        use_llm=True, llm_client=FakeClaude(payloads)
+    ).run(load_dragunov_brief(f"postlaunch-{stage}"), log_path=log_path)
+    persisted = json.dumps(
+        {
+            "brief": result.brief.model_dump(mode="json"),
+            "events": [item.model_dump(mode="json") for item in result.events],
+        },
+        ensure_ascii=False,
+    )
+
+    assert result.brief.decision is UpdateDecision.TEST
+    assert result.fallback_used is True
+    assert postlaunch_claim not in persisted
+    assert postlaunch_claim not in log_path.read_text(encoding="utf-8")

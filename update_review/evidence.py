@@ -9,7 +9,7 @@ from agents.structured import (
     ClaudeBudget,
     StructuredModelError,
     parse_claude_structured,
-    require_korean_text,
+    require_prelaunch_narrative,
 )
 from contracts import ArtifactStatus, ErrorCode, Language, PersonaKind, Producer
 from update_review.contracts import (
@@ -107,7 +107,7 @@ class UpdateEvidenceAgent:
             client=self.client,
             budget=self.budget,
         )
-        require_korean_text(
+        require_prelaunch_narrative(
             [
                 text
                 for item in narrative.signals

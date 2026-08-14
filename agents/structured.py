@@ -27,6 +27,31 @@ def require_korean_text(values: list[str]) -> None:
         )
 
 
+_PREDICTION_MARKERS = ("예상", "가능성", "확인 필요")
+_POST_LAUNCH_ASSERTION = re.compile(
+    r"(?:출시|업데이트|변경)\s*(?:후|이후)"
+    r"|(?:실제|사후)\s*(?:이용자|사용자)?\s*(?:반응|평가|의견)"
+    r"|(?:사용자|이용자)(?:들이|가)?\s*[^.]{0,20}"
+    r"(?:좋아했|좋아함|선호했|만족했|반응했|평가했|증가했|감소했)"
+)
+
+
+def require_prelaunch_narrative(values: list[str]) -> None:
+    """Require prospective Korean copy and reject post-launch assertions."""
+
+    require_korean_text(values)
+    if any(_POST_LAUNCH_ASSERTION.search(value) for value in values):
+        raise StructuredModelError(
+            ErrorCode.SCHEMA_INVALID,
+            "Claude 자연어 결과는 출시 후 실제 반응을 단정할 수 없습니다.",
+        )
+    if not any(marker in value for value in values for marker in _PREDICTION_MARKERS):
+        raise StructuredModelError(
+            ErrorCode.SCHEMA_INVALID,
+            "Claude 자연어 결과에는 출시 전 예측 표지가 필요합니다.",
+        )
+
+
 @dataclass
 class ClaudeBudget:
     """Conservative process-local guard for the academy's capped API key."""
@@ -36,13 +61,24 @@ class ClaudeBudget:
     input_usd_per_million: float | None = None
     output_usd_per_million: float | None = None
     max_tokens: int = int(os.getenv("CLAUDE_MAX_OUTPUT_TOKENS", "1400"))
+    max_input_chars: int = int(os.getenv("CLAUDE_MAX_INPUT_CHARS", "50000"))
     requests: int = 0
     reserved_usd: float = 0
 
-    def reserve(self, payload_chars: int, *, model: str = "claude-haiku-4-5") -> None:
+    def reserve(
+        self,
+        payload_chars: int,
+        *,
+        system_chars: int = 0,
+        model: str = "claude-haiku-4-5",
+    ) -> None:
         if self.requests >= self.max_requests:
             raise StructuredModelError(ErrorCode.BUDGET_EXCEEDED, "Claude 요청 한도에 도달했습니다.")
-        estimated_input_tokens = max(payload_chars // 4, 1)
+        input_chars = payload_chars + system_chars
+        if input_chars > self.max_input_chars:
+            raise StructuredModelError(ErrorCode.BUDGET_EXCEEDED, "Claude 입력 한도에 도달했습니다.")
+        # One character per token deliberately over-reserves Korean and tool-schema input.
+        estimated_input_tokens = max(input_chars, 1)
         sonnet = "sonnet" in model.lower()
         input_rate = self.input_usd_per_million
         output_rate = self.output_usd_per_million
@@ -55,6 +91,18 @@ class ClaudeBudget:
             raise StructuredModelError(ErrorCode.BUDGET_EXCEEDED, "Claude 사용 예산 한도에 도달했습니다.")
         self.requests += 1
         self.reserved_usd += estimate
+
+
+def _claude_error_code(exc: Exception) -> ErrorCode:
+    status = getattr(exc, "status_code", None)
+    if status is None:
+        status = getattr(exc, "status", None)
+    if str(status) in {"401", "403"} or type(exc).__name__ in {
+        "AuthenticationError",
+        "PermissionDeniedError",
+    }:
+        return ErrorCode.AUTH_FAILED
+    return ErrorCode.SCHEMA_INVALID
 
 
 def parse_structured[T: BaseModel](
@@ -107,24 +155,32 @@ def parse_claude_structured[T: BaseModel](
             raise StructuredModelError(ErrorCode.AUTH_FAILED, "ANTHROPIC_API_KEY is missing")
         from anthropic import Anthropic
 
-        client = Anthropic()
+        client = Anthropic(max_retries=0)
 
     body = payload.model_dump(mode="json") if isinstance(payload, BaseModel) else payload
     encoded = json.dumps(body, ensure_ascii=False)
+    system_prompt = (
+        prompt_path.read_text(encoding="utf-8")
+        + "\nReturn the result only through the required structured_output tool."
+    )
+    tool_schema = output_type.model_json_schema()
     active_budget = budget or ClaudeBudget()
-    active_budget.reserve(len(encoded), model=model)
+    active_budget.reserve(
+        len(encoded) + len(json.dumps(tool_schema, ensure_ascii=False)),
+        system_chars=len(system_prompt),
+        model=model,
+    )
     try:
         response = client.messages.create(
             model=model,
             max_tokens=active_budget.max_tokens,
-            system=prompt_path.read_text(encoding="utf-8")
-            + "\nReturn the result only through the required structured_output tool.",
+            system=system_prompt,
             messages=[{"role": "user", "content": encoded}],
             tools=[
                 {
                     "name": "structured_output",
                     "description": "Return data that exactly matches the supplied schema.",
-                    "input_schema": output_type.model_json_schema(),
+                    "input_schema": tool_schema,
                 }
             ],
             tool_choice={"type": "tool", "name": "structured_output"},
@@ -140,4 +196,10 @@ def parse_claude_structured[T: BaseModel](
     except StructuredModelError:
         raise
     except Exception as exc:  # SDK and Pydantic exceptions differ by installed version.
-        raise StructuredModelError(ErrorCode.SCHEMA_INVALID, str(exc)) from exc
+        code = _claude_error_code(exc)
+        message = (
+            "Claude 인증 또는 권한 확인에 실패했습니다."
+            if code is ErrorCode.AUTH_FAILED
+            else "Claude 구조화 결과를 검증하지 못했습니다."
+        )
+        raise StructuredModelError(code, message) from None

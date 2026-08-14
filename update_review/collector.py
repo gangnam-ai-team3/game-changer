@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import re
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -12,7 +14,7 @@ from agents.structured import (
     ClaudeBudget,
     StructuredModelError,
     parse_claude_structured,
-    require_korean_text,
+    require_prelaunch_narrative,
 )
 from connectors import RawFeedback
 from connectors.steam import SteamClient
@@ -43,6 +45,59 @@ APPROVED_UPDATE_TAGS = frozenset(
         "learning_burden",
     }
 )
+
+_RAW_OVERLAP_WINDOW = 10
+
+
+def _normalized_text(value: str) -> str:
+    """Normalize formatting without retaining a raw value in any artifact."""
+
+    return "".join(
+        character
+        for character in unicodedata.normalize("NFKC", value).casefold()
+        if character.isalnum()
+    )
+
+
+def _text_tokens(value: str) -> list[str]:
+    return re.findall(r"\w+", unicodedata.normalize("NFKC", value).casefold())
+
+
+def _contains_meaningful_raw_overlap(raw_text: str, summary: str) -> bool:
+    """Reject exact copies and substantial contiguous source fragments."""
+
+    source = _normalized_text(raw_text)
+    candidate = _normalized_text(summary)
+    if not source or not candidate:
+        return False
+    if source == candidate:
+        return True
+    if min(len(source), len(candidate)) >= 8 and (
+        source in candidate or candidate in source
+    ):
+        return True
+    source_tokens = _text_tokens(raw_text)
+    candidate_tokens = _text_tokens(summary)
+    if len(source_tokens) >= 3 and len(candidate_tokens) >= 3:
+        source_token_windows = {
+            tuple(source_tokens[index : index + 3])
+            for index in range(len(source_tokens) - 2)
+        }
+        if any(
+            tuple(candidate_tokens[index : index + 3]) in source_token_windows
+            for index in range(len(candidate_tokens) - 2)
+        ):
+            return True
+    if min(len(source), len(candidate)) < _RAW_OVERLAP_WINDOW:
+        return False
+    source_windows = {
+        source[index : index + _RAW_OVERLAP_WINDOW]
+        for index in range(len(source) - _RAW_OVERLAP_WINDOW + 1)
+    }
+    return any(
+        candidate[index : index + _RAW_OVERLAP_WINDOW] in source_windows
+        for index in range(len(candidate) - _RAW_OVERLAP_WINDOW + 1)
+    )
 
 
 class ClassifiedRawItem(BaseModel):
@@ -111,6 +166,13 @@ class UpdateCollectorAgent:
             raise StructuredModelError(
                 ErrorCode.LLM_REFUSAL, "live raw classification requires Claude"
             )
+        # The Claude contract returns source_id only, so namespace collisions must
+        # be rejected before raw text is sent to the classifier.
+        if len({item.source_id for item in raw}) != len(raw):
+            raise StructuredModelError(
+                ErrorCode.SCHEMA_INVALID,
+                "Claude classifier received ambiguous source identifiers.",
+            )
         by_id = {item.source_id: item for item in raw}
         payload = {
             "update": brief.model_dump(mode="json"),
@@ -132,18 +194,18 @@ class UpdateCollectorAgent:
             client=self.client,
             budget=self.budget,
         )
-        require_korean_text([item.summary for item in batch.items])
+        require_prelaunch_narrative([item.summary for item in batch.items])
         output = []
         for item in batch.items:
             original = by_id.get(item.source_id)
             if (
                 original is None
                 or not set(item.mechanism_tags) <= APPROVED_UPDATE_TAGS
-                or not any(word in item.summary for word in ("예상", "가능성", "확인 필요"))
+                or _contains_meaningful_raw_overlap(original.text, item.summary)
             ):
                 raise StructuredModelError(
                     ErrorCode.SCHEMA_INVALID,
-                    "Claude classifier returned unknown source or tag",
+                    "Claude classifier returned an unsafe structured summary.",
                 )
             output.append(
                 UpdateEvidenceItem(

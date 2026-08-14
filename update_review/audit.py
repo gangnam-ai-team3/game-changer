@@ -8,7 +8,7 @@ from agents.structured import (
     ClaudeBudget,
     StructuredModelError,
     parse_claude_structured,
-    require_korean_text,
+    require_prelaunch_narrative,
 )
 from contracts import ArtifactStatus, ErrorCode, Producer, Severity
 from update_review.contracts import (
@@ -58,7 +58,6 @@ class UpdateAuditAgent:
         self.use_llm = use_llm
         self.client = client
         self.budget = budget
-        self._executive_summary: str | None = None
 
     def run(
         self,
@@ -92,7 +91,7 @@ class UpdateAuditAgent:
             client=self.client,
             budget=self.budget,
         )
-        require_korean_text(
+        require_prelaunch_narrative(
             [narrative.executive_summary]
             + [
                 text
@@ -131,7 +130,6 @@ class UpdateAuditAgent:
                     update={"title": proposal.title, "action": proposal.action}
                 )
             )
-        self._executive_summary = narrative.executive_summary
         notify(
             "claude_output_checked",
             "코드 판정을 유지한 채 Claude 요약·권고 연결을 확인했습니다.",
@@ -148,7 +146,6 @@ class UpdateAuditAgent:
         analysis_incomplete: bool = False,
         on_event: Callable[[str, str, dict], None] | None = None,
     ) -> UpdateValidatedDecision:
-        self._executive_summary = None
         notify = on_event or (lambda _node, _message, _metrics: None)
         evidence_ids = {item.evidence_id for item in pack.evidence}
         validated = []
@@ -267,11 +264,6 @@ class UpdateAuditAgent:
         impact: UpdateImpactAssessment,
         decision: UpdateValidatedDecision,
     ) -> UpdateDecisionBrief:
-        result = self._deterministic_brief(brief, pack, impact, decision)
-        return (
-            result
-            if self._executive_summary is None
-            else result.model_copy(
-                update={"executive_summary": self._executive_summary}
-            )
-        )
+        # The deterministic decision label and reason always own the visible brief.
+        # Claude's summary is validated as untrusted input but is never persisted.
+        return self._deterministic_brief(brief, pack, impact, decision)
