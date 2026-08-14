@@ -1,4 +1,5 @@
 import json
+import hashlib
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
@@ -56,6 +57,11 @@ class FakeClaude:
         self.messages = FakeClaudeMessages(payloads)
 
 
+def _safe_live_source_id(source: SourceType, source_id: str) -> str:
+    digest = hashlib.sha256(f"{source.value}:{source_id}".encode()).hexdigest()[:20]
+    return f"{source.value}-{digest}"
+
+
 def _csv_row(
     *,
     source="reddit",
@@ -110,6 +116,7 @@ def test_steam_start_at_excludes_older_reviews():
 
     assert len(rows) == 1
     assert rows[0].text.startswith("Dragunov")
+    assert rows[0].source_url == "https://steamcommunity.com"
 
 
 def test_x_start_at_excludes_older_posts():
@@ -139,6 +146,29 @@ def test_x_start_at_excludes_older_posts():
     )
 
     assert [item.text for item in rows] == ["inside window"]
+    assert rows[0].source_url == "https://x.com"
+
+
+def test_x_client_does_not_interpolate_an_untrusted_api_id_into_source_url():
+    api_id_secret = "tweet-id?api_id_secret=NEVER-PERSIST"
+    payload = {
+        "data": [
+            {
+                "id": api_id_secret,
+                "created_at": "2026-08-12T00:00:00+00:00",
+                "text": "ephemeral X text",
+            }
+        ]
+    }
+
+    [row] = XClient(
+        "test-token", opener=lambda *_args, **_kwargs: Response(payload)
+    ).fetch_recent(
+        "PUBG", Language.ENGLISH, datetime(2026, 8, 13, tzinfo=UTC)
+    )
+
+    assert row.source_url == "https://x.com"
+    assert api_id_secret not in repr(row)
 
 
 @pytest.mark.parametrize("client", ["steam", "x"])
@@ -314,7 +344,9 @@ def test_live_raw_is_classified_then_discarded_with_source_metadata(tmp_path):
             {
                 "items": [
                     {
-                        "source_id": raw.source_id,
+                        "source_id": _safe_live_source_id(
+                            raw.source, raw.source_id
+                        ),
                         "sentiment": "negative",
                         "mechanism_tags": ["balance_regression"],
                         "relevance": 0.9,
@@ -388,7 +420,9 @@ def test_live_x_success_uses_shared_claude_budget_and_safe_source_metadata():
                 {
                     "items": [
                         {
-                            "source_id": raw.source_id,
+                            "source_id": _safe_live_source_id(
+                                raw.source, raw.source_id
+                            ),
                             "sentiment": "negative",
                             "mechanism_tags": ["balance_regression"],
                             "relevance": 0.9,
@@ -412,6 +446,146 @@ def test_live_x_success_uses_shared_claude_budget_and_safe_source_metadata():
     assert budget.requests == 1
     assert all(record.source is SourceType.X for record in bundle.search_log)
     assert raw_text not in bundle.model_dump_json()
+
+
+def test_live_metadata_secrets_never_reach_artifacts_events_or_jsonl(tmp_path):
+    steam_id_secret = "steam-source-id?private_id=STEAM-7788"
+    x_url_secret = "x_url_query_secret=URL-9922"
+    x_id_secret = "x-source-id?private_id=X-5566"
+    raw_text_secret = "raw text SECRET-TEXT-4400"
+    steam_raw = RawFeedback(
+        source=SourceType.STEAM,
+        source_url="https://steamcommunity.com/app/578080/reviews/",
+        source_id=steam_id_secret,
+        language=Language.ENGLISH,
+        observed_at=datetime(2026, 8, 12, tzinfo=UTC),
+        text=raw_text_secret,
+    )
+    x_raw = RawFeedback(
+        source=SourceType.X,
+        source_url=f"https://x.com/i/web/status/123?{x_url_secret}",
+        source_id=x_id_secret,
+        language=Language.ENGLISH,
+        observed_at=datetime(2026, 8, 12, tzinfo=UTC),
+        text=raw_text_secret,
+    )
+
+    class FakeSteam:
+        def fetch_reviews(self, _app_id, language, _cutoff_at, **_kwargs):
+            return [steam_raw] if language is Language.ENGLISH else []
+
+    class FakeX:
+        def fetch_recent(self, _query, language, _cutoff_at, **_kwargs):
+            return [x_raw] if language is Language.ENGLISH else []
+
+    fake_claude = FakeClaude(
+        [
+            {
+                "items": [
+                    {
+                        "source_id": _safe_live_source_id(
+                            steam_raw.source, steam_raw.source_id
+                        ),
+                        "sentiment": "negative",
+                        "mechanism_tags": ["balance_regression"],
+                        "relevance": 0.9,
+                    }
+                ]
+            }
+        ]
+    )
+    log_path = tmp_path / "metadata-boundary.jsonl"
+    result = UpdateReviewOrchestrator(
+        collector=UpdateCollectorAgent(
+            steam=FakeSteam(),
+            x_client=FakeX(),
+            use_llm=True,
+            client=fake_claude,
+        )
+    ).run(
+        load_dragunov_brief("live-metadata-boundary"),
+        UpdateCollectionOptions(
+            use_fixture=False,
+            steam_app_id=578080,
+            use_x=True,
+            period_start=datetime(2026, 8, 6, tzinfo=UTC),
+            period_end=datetime(2026, 8, 13, tzinfo=UTC),
+        ),
+        log_path=log_path,
+    )
+    feedback_json = result.feedback.model_dump_json()
+    events_json = json.dumps(
+        [item.model_dump(mode="json") for item in result.events], ensure_ascii=False
+    )
+    brief_json = result.brief.model_dump_json()
+    log_text = log_path.read_text(encoding="utf-8")
+
+    [persisted] = result.feedback.evidence
+    assert persisted.source_url == "https://steamcommunity.com"
+    assert persisted.source_id == _safe_live_source_id(
+        steam_raw.source, steam_raw.source_id
+    )
+    assert persisted.evidence_id == f"live-update-{persisted.source_id}"
+    assert result.feedback.errors[0].code is ErrorCode.SCHEMA_INVALID
+    assert result.brief.decision is UpdateDecision.HOLD
+    classifier_payload = fake_claude.messages.calls[0]["messages"][0]["content"]
+    assert steam_id_secret not in classifier_payload
+    assert x_id_secret not in classifier_payload
+    for secret in (steam_id_secret, x_url_secret, x_id_secret, raw_text_secret):
+        assert secret not in feedback_json
+        assert secret not in events_json
+        assert secret not in brief_json
+        assert secret not in log_text
+
+
+@pytest.mark.parametrize(
+    ("source", "source_url"),
+    [
+        (SourceType.STEAM, "https://attacker@steamcommunity.com/app/578080"),
+        (SourceType.STEAM, "https://steamcommunity.com.evil.example/reviews"),
+        (SourceType.X, "https://x.com:444/i/web/status/1"),
+        (SourceType.X, "https://x.com/i/web/status/1#untrusted-fragment"),
+    ],
+    ids=["userinfo", "wrong-host", "unsafe-port", "fragment"],
+)
+def test_live_collector_rejects_unsafe_source_specific_urls(source, source_url):
+    raw = RawFeedback(
+        source=source,
+        source_url=source_url,
+        source_id="unsafe-source-id",
+        language=Language.ENGLISH,
+        observed_at=datetime(2026, 8, 12, tzinfo=UTC),
+        text="unsafe source text",
+    )
+
+    class UnsafeSource:
+        def fetch_reviews(self, _app_id, language, _cutoff_at, **_kwargs):
+            return [raw] if language is Language.ENGLISH else []
+
+        def fetch_recent(self, _query, language, _cutoff_at, **_kwargs):
+            return [raw] if language is Language.ENGLISH else []
+
+    fake_claude = FakeClaude([])
+    collector = UpdateCollectorAgent(
+        steam=UnsafeSource(),
+        x_client=UnsafeSource(),
+        use_llm=True,
+        client=fake_claude,
+    )
+    options = UpdateCollectionOptions(
+        use_fixture=False,
+        steam_app_id=578080 if source is SourceType.STEAM else None,
+        use_x=source is SourceType.X,
+        period_start=datetime(2026, 8, 6, tzinfo=UTC),
+        period_end=datetime(2026, 8, 13, tzinfo=UTC),
+    )
+
+    bundle = collector.run(load_dragunov_brief("unsafe-url"), options)
+
+    assert bundle.status is ArtifactStatus.PARTIAL
+    assert bundle.evidence == []
+    assert bundle.errors[0].code is ErrorCode.SCHEMA_INVALID
+    assert fake_claude.messages.calls == []
 
 
 def test_live_cutoff_leak_is_discarded_before_classification_and_logging(tmp_path):

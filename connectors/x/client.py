@@ -87,7 +87,9 @@ class XClient:
             results.append(
                 RawFeedback(
                     source=SourceType.X,
-                    source_url=f"https://x.com/i/web/status/{public_id}",
+                    # API IDs are untrusted.  Do not interpolate them into a
+                    # URL that can later reach an artifact boundary.
+                    source_url="https://x.com",
                     source_id=hashlib.sha256(public_id.encode()).hexdigest()[:20],
                     language=language,
                     observed_at=observed_at,

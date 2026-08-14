@@ -1,4 +1,5 @@
 import json
+import hashlib
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
@@ -48,6 +49,11 @@ RAW_COPY_TEXT = (
     "익명 이용자가 드라구노프 피해 고정 뒤 조준 지연과 장전 취소가 동시에 "
     "발생할 가능성이 있다고 적었다."
 )
+
+
+def _safe_live_source_id(source: SourceType, source_id: str) -> str:
+    digest = hashlib.sha256(f"{source.value}:{source_id}".encode()).hexdigest()[:20]
+    return f"{source.value}-{digest}"
 
 
 def _valid_evidence_narrative(signal):
@@ -415,7 +421,7 @@ def test_live_classifier_persists_only_code_owned_summary():
             {
                 "items": [
                     {
-                        "source_id": raw.source_id,
+                        "source_id": _safe_live_source_id(raw.source, raw.source_id),
                         "sentiment": "negative",
                         "mechanism_tags": ["balance_regression"],
                         "relevance": 0.9,
@@ -427,7 +433,9 @@ def test_live_classifier_persists_only_code_owned_summary():
     output = UpdateCollectorAgent(use_llm=True, client=fake).classify_raw(
         [raw], load_dragunov_brief("live-classify")
     )
-    assert output[0].source_id == raw.source_id
+    assert output[0].source_id == _safe_live_source_id(raw.source, raw.source_id)
+    assert output[0].source_url == "https://steamcommunity.com"
+    assert raw.source_id not in output[0].model_dump_json()
     assert output[0].summary == (
         "성능 균형 관련 부정 신호가 높은 관련성으로 분류되어 출시 전 확인 필요."
     )

@@ -71,7 +71,10 @@ class SteamClient:
                     results.append(
                         RawFeedback(
                             source=SourceType.STEAM,
-                            source_url=f"https://steamcommunity.com/app/{app_id}/reviews/",
+                            # The review identifier and app path are external
+                            # metadata.  The collector only needs the trusted
+                            # source host, so avoid carrying either forward.
+                            source_url="https://steamcommunity.com",
                             source_id=_anonymous_id(public_id),
                             language=language,
                             observed_at=observed_at,

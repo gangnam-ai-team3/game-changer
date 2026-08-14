@@ -95,6 +95,17 @@ APPROVED_UPDATE_IMPORT_HOSTS = {
 }
 MAX_UPDATE_CSV_BYTES = 2_000_000
 
+# Raw connector URLs are untrusted metadata.  Only these source hosts are
+# accepted at the live boundary, and artifacts retain the corresponding
+# code-owned canonical URL instead of a post/review path or query string.
+LIVE_SOURCE_METADATA = {
+    SourceType.STEAM: (
+        frozenset({"steamcommunity.com", "www.steamcommunity.com"}),
+        "https://steamcommunity.com",
+    ),
+    SourceType.X: (frozenset({"x.com", "www.x.com"}), "https://x.com"),
+}
+
 # Nothing originating with an external source is used in an artifact error,
 # execution event, or JSONL record.  These code-owned messages deliberately
 # retain the actionable error code while keeping rejected input ephemeral.
@@ -166,6 +177,42 @@ def _code_owned_summary(item: ClassifiedRawItem) -> str:
     return _code_owned_summary_from_fields(
         item.sentiment, item.mechanism_tags, item.relevance
     )
+
+
+def _canonical_live_source_url(source: SourceType, value: object) -> str | None:
+    """Validate a raw connector URL without ever retaining its path/query."""
+
+    config = LIVE_SOURCE_METADATA.get(source)
+    if config is None or not isinstance(value, str):
+        return None
+    hosts, canonical_url = config
+    try:
+        parsed = urlparse(value)
+        port = parsed.port
+    except ValueError:
+        return None
+    host = (parsed.hostname or "").lower()
+    if (
+        parsed.scheme.lower() != "https"
+        or host not in hosts
+        or port not in (None, 443)
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or parsed.params
+    ):
+        return None
+    return canonical_url
+
+
+def _live_source_id(source: SourceType, raw_source_id: str) -> str:
+    """Create a non-reversible, source-namespaced correlation/persistence ID."""
+
+    digest = hashlib.sha256(
+        f"{source.value}:{raw_source_id}".encode("utf-8")
+    ).hexdigest()[:20]
+    return f"{source.value}-{digest}"
 
 
 def normalize_update_csv_text(data: bytes | str) -> str:
@@ -385,6 +432,14 @@ class UpdateCollectorAgent:
             raise StructuredModelError(
                 ErrorCode.LLM_REFUSAL, "live raw classification requires Claude"
             )
+        if any(
+            not isinstance(item.source_id, str) or not item.source_id.strip()
+            for item in raw
+        ):
+            raise StructuredModelError(
+                ErrorCode.SCHEMA_INVALID,
+                "Claude classifier received unsafe source metadata.",
+            )
         # The Claude contract returns source_id only, so namespace collisions must
         # be rejected before raw text is sent to the classifier.
         if len({item.source_id for item in raw}) != len(raw):
@@ -392,7 +447,35 @@ class UpdateCollectorAgent:
                 ErrorCode.SCHEMA_INVALID,
                 "Claude classifier received ambiguous source identifiers.",
             )
-        by_id = {item.source_id: item for item in raw}
+        by_id: dict[str, RawFeedback] = {}
+        for original in raw:
+            if (
+                (canonical_url := _canonical_live_source_url(
+                    original.source, original.source_url
+                ))
+                is None
+            ):
+                raise StructuredModelError(
+                    ErrorCode.SCHEMA_INVALID,
+                    "Claude classifier received unsafe source metadata.",
+                )
+            correlation_id = _live_source_id(original.source, original.source_id)
+            if correlation_id in by_id:
+                raise StructuredModelError(
+                    ErrorCode.SCHEMA_INVALID,
+                    "Claude classifier received ambiguous source identifiers.",
+                )
+            # The classifier map carries only normalized metadata.  Claude sees
+            # this code-owned correlation ID, while the caller clears the
+            # original raw list immediately after classification.
+            by_id[correlation_id] = RawFeedback(
+                source=original.source,
+                source_url=canonical_url,
+                source_id=correlation_id,
+                language=original.language,
+                observed_at=original.observed_at,
+                text=original.text,
+            )
         payload = {
             "update": brief.model_dump(mode="json"),
             "feedback": [
@@ -402,7 +485,7 @@ class UpdateCollectorAgent:
                     "observed_at": item.observed_at.isoformat(),
                     "text": item.text,
                 }
-                for item in raw
+                for item in by_id.values()
             ],
         }
         batch = parse_claude_structured(
@@ -429,7 +512,7 @@ class UpdateCollectorAgent:
             seen_source_ids.add(item.source_id)
             output.append(
                 UpdateEvidenceItem(
-                    evidence_id=f"live-update-{original.source.value}-{original.source_id}",
+                    evidence_id=f"live-update-{original.source_id}",
                     source=original.source,
                     source_url=original.source_url,
                     source_id=original.source_id,
@@ -527,15 +610,17 @@ class UpdateCollectorAgent:
     ) -> bool:
         """Defend the collector boundary even when an injected connector misbehaves."""
 
-        if item.source is not source or item.observed_at.tzinfo is None:
+        if (
+            item.source is not source
+            or item.observed_at.tzinfo is None
+            or not isinstance(item.source_id, str)
+            or not item.source_id.strip()
+            or _canonical_live_source_url(item.source, item.source_url) is None
+        ):
             return False
         observed_at = item.observed_at.astimezone(UTC)
-        parsed = urlparse(item.source_url)
         return (
             start_at <= observed_at < cutoff_at
-            and parsed.scheme.lower() == "https"
-            and bool(parsed.hostname)
-            and len(item.source_id) >= 8
         )
 
     @staticmethod
