@@ -1,4 +1,7 @@
+import json
+import os
 from pathlib import Path
+import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[1] / "frontend" / "app"
@@ -77,3 +80,48 @@ def test_update_client_never_accepts_or_serializes_provider_credentials():
     assert "api_key" not in source
     assert "authorization" not in source.lower()
     assert "file.name" not in source
+
+
+def _live_period_payload_in_timezone(timezone: str) -> dict[str, str | None]:
+    script = """
+import { utcWallClockToIso } from "./frontend/app/components/utcWallClock.ts";
+
+process.stdout.write(JSON.stringify({
+  period_start: utcWallClockToIso("2026-08-06T00:00"),
+  period_end: utcWallClockToIso("2026-08-13T00:00"),
+  invalid_period: utcWallClockToIso("2026-02-30T00:00"),
+}));
+"""
+    completed = subprocess.run(
+        [
+            "node",
+            "--no-warnings",
+            "--experimental-strip-types",
+            "--input-type=module",
+            "--eval",
+            script,
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        check=True,
+        capture_output=True,
+        env={**os.environ, "TZ": timezone},
+        text=True,
+    )
+    return json.loads(completed.stdout)
+
+
+def test_live_datetime_payload_keeps_utc_wall_clock_in_non_utc_timezones():
+    source = (ROOT / "components" / "UpdateReview.tsx").read_text(encoding="utf-8")
+
+    assert "period_start: livePeriodStart" in source
+    assert "period_end: livePeriodEnd" in source
+    assert "new Date(periodStart).toISOString()" not in source
+    assert "new Date(periodEnd).toISOString()" not in source
+
+    expected = {
+        "period_start": "2026-08-06T00:00:00Z",
+        "period_end": "2026-08-13T00:00:00Z",
+        "invalid_period": None,
+    }
+    assert _live_period_payload_in_timezone("America/New_York") == expected
+    assert _live_period_payload_in_timezone("Asia/Seoul") == expected

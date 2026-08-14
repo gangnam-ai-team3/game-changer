@@ -3,6 +3,7 @@
 import { ChangeEvent, FormEvent, useState } from "react";
 
 import { AgentEvent, AgentPipeline } from "./AgentPipeline";
+import { utcWallClockToIso } from "./utcWallClock";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -380,6 +381,13 @@ export function UpdateReview() {
       return;
     }
 
+    const livePeriodStart = sourceMode === "live" ? utcWallClockToIso(periodStart) : null;
+    const livePeriodEnd = sourceMode === "live" ? utcWallClockToIso(periodEnd) : null;
+    if (sourceMode === "live" && (!livePeriodStart || !livePeriodEnd)) {
+      setError("수집 시각을 UTC 기준 YYYY-MM-DDTHH:mm 형식으로 정확히 입력해 주세요.");
+      return;
+    }
+
     setLoading(true);
     setError("");
     setResult(null);
@@ -409,12 +417,8 @@ export function UpdateReview() {
           sourceMode === "live" && xQuery.trim()
             ? xQuery.trim()
             : "PUBG Dragunov damage",
-        period_start:
-          sourceMode === "live" && periodStart
-            ? new Date(periodStart).toISOString()
-            : null,
-        period_end:
-          sourceMode === "live" && periodEnd ? new Date(periodEnd).toISOString() : null,
+        period_start: livePeriodStart,
+        period_end: livePeriodEnd,
         imported_csv: sourceMode === "import" ? csvData : null,
         use_llm: useClaude,
       };
