@@ -1,15 +1,64 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 
-from contracts import InputMode
-from update_review.contracts import UpdateBrief, UpdateFeedbackBundle
+from pydantic import BaseModel, ConfigDict, Field
+
+from agents.structured import (
+    ClaudeBudget,
+    StructuredModelError,
+    parse_claude_structured,
+    require_korean_text,
+)
+from connectors import RawFeedback
+from connectors.steam import SteamClient
+from connectors.x import ProjectBudget, XClient
+from contracts import ErrorCode, InputMode
+from update_review.contracts import (
+    EvidencePeriod,
+    Sentiment,
+    UpdateBrief,
+    UpdateEvidenceItem,
+    UpdateFeedbackBundle,
+)
 from update_review.fixtures import load_update_feedback_fixture
 
 
 NodeCallback = Callable[[str, str, dict], None]
+
+APPROVED_UPDATE_TAGS = frozenset(
+    {
+        "predictability",
+        "skill_fairness",
+        "balance_regression",
+        "fairness_regression",
+        "validation_needed",
+        "information_clarity",
+        "flow_disruption",
+        "rule_exception",
+        "learning_burden",
+    }
+)
+
+
+class ClassifiedRawItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_id: str
+    sentiment: Sentiment
+    summary: str = Field(min_length=8, max_length=500)
+    mechanism_tags: list[str] = Field(min_length=1)
+    relevance: float = Field(ge=0, le=1)
+
+
+class ClassifiedRawBatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[ClassifiedRawItem]
 
 
 @dataclass(slots=True)
@@ -34,6 +83,85 @@ class UpdateCollectionOptions:
 
 
 class UpdateCollectorAgent:
+    prompt_path = Path(__file__).with_name("prompts") / "collector.md"
+
+    def __init__(
+        self,
+        steam: SteamClient | None = None,
+        x_client: XClient | None = None,
+        *,
+        use_llm: bool = False,
+        client=None,
+        budget: ClaudeBudget | None = None,
+    ) -> None:
+        self.steam = steam or SteamClient()
+        self.x_client = x_client or XClient(
+            os.getenv("X_BEARER_TOKEN"), ProjectBudget(cap_usd=10)
+        )
+        self.use_llm = use_llm
+        self.client = client
+        self.budget = budget
+
+    def classify_raw(
+        self, raw: list[RawFeedback], brief: UpdateBrief
+    ) -> list[UpdateEvidenceItem]:
+        if not raw:
+            return []
+        if not self.use_llm:
+            raise StructuredModelError(
+                ErrorCode.LLM_REFUSAL, "live raw classification requires Claude"
+            )
+        by_id = {item.source_id: item for item in raw}
+        payload = {
+            "update": brief.model_dump(mode="json"),
+            "feedback": [
+                {
+                    "source_id": item.source_id,
+                    "language": item.language.value,
+                    "observed_at": item.observed_at.isoformat(),
+                    "text": item.text,
+                }
+                for item in raw
+            ],
+        }
+        batch = parse_claude_structured(
+            model=os.getenv("CLAUDE_UPDATE_COLLECTOR_MODEL", "claude-haiku-4-5"),
+            prompt_path=self.prompt_path,
+            output_type=ClassifiedRawBatch,
+            payload=payload,
+            client=self.client,
+            budget=self.budget,
+        )
+        require_korean_text([item.summary for item in batch.items])
+        output = []
+        for item in batch.items:
+            original = by_id.get(item.source_id)
+            if (
+                original is None
+                or not set(item.mechanism_tags) <= APPROVED_UPDATE_TAGS
+                or not any(word in item.summary for word in ("예상", "가능성", "확인 필요"))
+            ):
+                raise StructuredModelError(
+                    ErrorCode.SCHEMA_INVALID,
+                    "Claude classifier returned unknown source or tag",
+                )
+            output.append(
+                UpdateEvidenceItem(
+                    evidence_id=f"live-update-{original.source.value}-{original.source_id}",
+                    source=original.source,
+                    source_url=original.source_url,
+                    source_id=original.source_id,
+                    language=original.language,
+                    observed_at=original.observed_at,
+                    period=EvidencePeriod.BEFORE,
+                    sentiment=item.sentiment,
+                    summary=item.summary,
+                    mechanism_tags=item.mechanism_tags,
+                    relevance=item.relevance,
+                )
+            )
+        return output
+
     def run(
         self,
         brief: UpdateBrief,

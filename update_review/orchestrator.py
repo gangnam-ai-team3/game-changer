@@ -5,7 +5,8 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from contracts import Artifact, ArtifactStatus, Producer
+from agents.structured import ClaudeBudget, StructuredModelError
+from contracts import Artifact, ArtifactStatus, ErrorCode, InputMode, Producer
 from execution import EventCallback, ExecutionEvent, ExecutionState
 from orchestrator import ContractViolation, PipelineStopped
 from update_review.audit import UpdateAuditAgent
@@ -47,12 +48,23 @@ class UpdateReviewOrchestrator:
         use_llm: bool = False,
         llm_client=None,
     ) -> None:
-        self.collector = collector or UpdateCollectorAgent()
-        self.evidence_agent = evidence or UpdateEvidenceAgent()
-        self.redteam = redteam or UpdateRedteamAgent()
-        self.audit = audit or UpdateAuditAgent()
+        budget = ClaudeBudget() if use_llm else None
+        self.collector = collector or UpdateCollectorAgent(
+            use_llm=use_llm, client=llm_client, budget=budget
+        )
+        self.evidence_agent = evidence or UpdateEvidenceAgent(
+            use_llm=use_llm, client=llm_client, budget=budget
+        )
+        self.redteam = redteam or UpdateRedteamAgent(
+            use_llm=use_llm, client=llm_client, budget=budget
+        )
+        self.audit = audit or UpdateAuditAgent(
+            use_llm=use_llm, client=llm_client, budget=budget
+        )
+        self.budget = budget
         self.use_llm = use_llm
-        self.llm_client = llm_client
+        self.llm_provider = "claude" if use_llm else "deterministic"
+        self.llm_requested = use_llm
 
     def run(
         self,
@@ -66,6 +78,9 @@ class UpdateReviewOrchestrator:
             raise PipelineStopped("UpdateBrief producer must be user")
         options = options or UpdateCollectionOptions()
         events: list[ExecutionEvent] = []
+        fallback_used = False
+        force_deterministic = False
+        analysis_incomplete = False
 
         def emit(agent, node, state, message, metrics=None):
             item = ExecutionEvent(
@@ -86,9 +101,64 @@ class UpdateReviewOrchestrator:
                 agent, node, ExecutionState.RUNNING, message, metrics
             )
 
-        def stage(agent, call, output_type, producer, refs):
+        def stage(
+            agent,
+            llm_call,
+            deterministic_call,
+            output_type,
+            producer,
+            refs,
+            *,
+            allow_llm: bool,
+        ):
+            nonlocal analysis_incomplete, fallback_used, force_deterministic
             emit(agent, "agent", ExecutionState.RUNNING, "업데이트 점검 단계를 시작했습니다.")
-            result = self._check(call(), output_type, producer, brief.run_id, refs)
+            if not allow_llm or force_deterministic:
+                result = deterministic_call()
+            else:
+                try:
+                    result = llm_call()
+                except StructuredModelError as exc:
+                    can_retry = (
+                        exc.code in {ErrorCode.SCHEMA_INVALID, ErrorCode.LLM_REFUSAL}
+                        and self._has_retry_budget()
+                    )
+                    if can_retry:
+                        fallback_used = True
+                        force_deterministic = True
+                        if options.input_mode == InputMode.LIVE:
+                            analysis_incomplete = True
+                        emit(
+                            agent,
+                            "agent",
+                            ExecutionState.RETRYING,
+                            "Claude 자연어 결과를 계약 범위 안에서 다시 요청합니다.",
+                        )
+                        try:
+                            result = llm_call()
+                        except StructuredModelError as retry_error:
+                            emit(
+                                agent,
+                                "fallback",
+                                ExecutionState.RUNNING,
+                                "Claude 설명을 제외하고 결정론적 안전 경로를 사용합니다.",
+                                {"reason": retry_error.code.value},
+                            )
+                            result = deterministic_call()
+                    else:
+                        fallback_used = True
+                        force_deterministic = True
+                        if options.input_mode == InputMode.LIVE:
+                            analysis_incomplete = True
+                        emit(
+                            agent,
+                            "fallback",
+                            ExecutionState.RUNNING,
+                            "Claude 설명을 제외하고 결정론적 안전 경로를 사용합니다.",
+                            {"reason": exc.code.value},
+                        )
+                        result = deterministic_call()
+            result = self._check(result, output_type, producer, brief.run_id, refs)
             if result.status == ArtifactStatus.FAILED:
                 raise PipelineStopped(f"{agent} returned failed status")
             emit(agent, "agent", ExecutionState.COMPLETE, "업데이트 점검 단계를 완료했습니다.")
@@ -98,41 +168,60 @@ class UpdateReviewOrchestrator:
         feedback = stage(
             "collection",
             lambda: self.collector.run(brief, options, nodes("collection")),
+            lambda: self.collector.run(brief, options, nodes("collection")),
             UpdateFeedbackBundle,
             Producer.COLLECTOR,
             {brief.ref},
+            allow_llm=False,
         )
         metadata = {"input_snapshot_hash": _input_snapshot_hash(brief, feedback)}
         feedback = feedback.model_copy(update=metadata)
         evidence = stage(
             "evidence_rag_personas",
+            lambda: self.evidence_agent.run(
+                feedback, nodes("evidence_rag_personas")
+            ).model_copy(update=metadata),
             lambda: self.evidence_agent.run_deterministic(
                 feedback, nodes("evidence_rag_personas")
             ).model_copy(update=metadata),
             UpdateEvidencePack,
             Producer.EVIDENCE_RAG,
             {feedback.ref},
+            allow_llm=self.use_llm,
         )
         impact = stage(
             "event_redteam",
+            lambda: self.redteam.run(
+                brief, evidence, nodes("event_redteam")
+            ).model_copy(update=metadata),
             lambda: self.redteam.run_deterministic(
                 brief, evidence, nodes("event_redteam")
             ).model_copy(update=metadata),
             UpdateImpactAssessment,
             Producer.EVENT_REDTEAM,
             {brief.ref, evidence.ref},
+            allow_llm=self.use_llm,
         )
         validated = stage(
             "audit_strategy",
+            lambda: self.audit.run(
+                feedback,
+                evidence,
+                impact,
+                analysis_incomplete=analysis_incomplete,
+                on_event=nodes("audit_strategy"),
+            ).model_copy(update=metadata),
             lambda: self.audit.run_deterministic(
                 feedback,
                 evidence,
                 impact,
+                analysis_incomplete=analysis_incomplete,
                 on_event=nodes("audit_strategy"),
             ).model_copy(update=metadata),
             UpdateValidatedDecision,
             Producer.AUDIT_STRATEGY,
             {feedback.ref, evidence.ref, impact.ref},
+            allow_llm=self.use_llm and feedback.input_mode != InputMode.LIVE,
         )
         final = self.audit.to_brief(brief, evidence, impact, validated).model_copy(
             update=metadata
@@ -145,7 +234,21 @@ class UpdateReviewOrchestrator:
             {brief.ref, evidence.ref, impact.ref, validated.ref},
         )
         self._write(final, log_path)
-        return UpdatePipelineResult(feedback, evidence, impact, validated, final, events)
+        return UpdatePipelineResult(
+            feedback,
+            evidence,
+            impact,
+            validated,
+            final,
+            events,
+            fallback_used=fallback_used,
+            analysis_incomplete=analysis_incomplete,
+            llm_provider=self.llm_provider,
+            llm_requested=self.llm_requested,
+        )
+
+    def _has_retry_budget(self) -> bool:
+        return self.budget is not None and self.budget.requests < self.budget.max_requests
 
     @staticmethod
     def _check(result: Artifact, output_type, producer: Producer, run_id: str, refs: set[str]):

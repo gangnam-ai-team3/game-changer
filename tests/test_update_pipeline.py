@@ -1,5 +1,11 @@
+import json
+from datetime import UTC, datetime
+from types import SimpleNamespace
+
 import pytest
 
+from connectors import RawFeedback
+from contracts import Language, SourceType
 from update_review.collector import UpdateCollectionOptions, UpdateCollectorAgent
 from update_review.contracts import (
     EvidencePeriod,
@@ -19,6 +25,22 @@ EXPECTED_AGENTS = [
     "event_redteam",
     "audit_strategy",
 ]
+
+
+class FakeClaudeMessages:
+    def __init__(self, payloads):
+        self.payloads = list(payloads)
+        self.calls = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        payload = self.payloads.pop(0)
+        return SimpleNamespace(content=[SimpleNamespace(type="tool_use", input=payload)])
+
+
+class FakeClaude:
+    def __init__(self, payloads):
+        self.messages = FakeClaudeMessages(payloads)
 
 
 def test_dragunov_fixture_is_synthetic_comparable_reference():
@@ -184,3 +206,150 @@ def test_mixed_and_negative_signals_share_one_risk_and_metric():
     assert result.risks[0].evidence_ids == sorted(
         [negative.evidence_id, mixed.evidence_id]
     )
+
+
+def test_claude_changes_only_korean_narrative_not_core_decision():
+    baseline = UpdateReviewOrchestrator().run(load_dragunov_brief("claude-run"))
+    risk = baseline.impact.risks[0]
+    metric = baseline.impact.validation_metrics[0]
+    positive = baseline.evidence.positive_signals[0]
+    fake = FakeClaude(
+        [
+            {
+                "signals": [
+                    {
+                        "signal_id": positive.signal_id,
+                        "title": "예측 가능성 개선 예상",
+                        "summary": "고정 피해로 결과 예측 가능성이 높아질 가능성이 있음.",
+                        "evidence_ids": positive.evidence_ids,
+                    }
+                ]
+            },
+            {
+                "risks": [
+                    {
+                        "risk_id": risk.risk_id,
+                        "title": "전투 성능 재확인 필요",
+                        "failure_path": "실제 특성 조합에서 메타가 쏠릴 가능성이 있음.",
+                        "revision_question": "테스트 서버 지표를 확인할 수 있는가?",
+                        "evidence_ids": risk.evidence_ids,
+                        "validation_metric_ids": [metric.metric_id],
+                    }
+                ]
+            },
+            {
+                "executive_summary": "결과 예측 가능성은 개선될 수 있으나 전투 지표는 테스트로 확인 필요.",
+                "recommendations": [
+                    {
+                        "risk_id": risk.risk_id,
+                        "title": "테스트 서버 확인",
+                        "action": "사용률·승률·평균 피해를 확인한다.",
+                        "validation_metric_ids": [metric.metric_id],
+                    }
+                ],
+            },
+        ]
+    )
+    result = UpdateReviewOrchestrator(use_llm=True, llm_client=fake).run(
+        load_dragunov_brief("claude-run")
+    )
+    assert result.brief.decision == baseline.brief.decision == UpdateDecision.TEST
+    assert [item.risk_id for item in result.brief.top_risks] == [
+        item.risk_id for item in baseline.brief.top_risks
+    ]
+    assert [item.evidence_ids for item in result.brief.top_risks] == [
+        item.evidence_ids for item in baseline.brief.top_risks
+    ]
+    assert result.llm_provider == "claude"
+    assert result.llm_requested is True
+    assert result.fallback_used is False
+    assert [call["model"] for call in fake.messages.calls] == [
+        "claude-sonnet-4-6",
+        "claude-haiku-4-5",
+        "claude-haiku-4-5",
+    ]
+
+
+def test_invalid_claude_reference_retries_then_uses_fixture_safe_path():
+    invalid = {
+        "signals": [
+            {
+                "signal_id": "unknown",
+                "title": "한국어 제목",
+                "summary": "한국어 설명을 제공함.",
+                "evidence_ids": ["missing"],
+            }
+        ]
+    }
+    fake = FakeClaude([invalid, invalid])
+    result = UpdateReviewOrchestrator(use_llm=True, llm_client=fake).run(
+        load_dragunov_brief("fallback-run")
+    )
+    assert result.brief.decision is UpdateDecision.TEST
+    assert result.fallback_used is True
+    assert result.analysis_incomplete is False
+    assert len(fake.messages.calls) == 2
+    assert any(item.state.value == "retrying" for item in result.events)
+
+
+def test_claude_request_cap_falls_back_without_an_extra_call():
+    invalid = {
+        "signals": [
+            {
+                "signal_id": "unknown",
+                "title": "한국어 제목",
+                "summary": "한국어 설명을 제공함.",
+                "evidence_ids": ["missing"],
+            }
+        ]
+    }
+    fake = FakeClaude([invalid])
+    orchestrator = UpdateReviewOrchestrator(use_llm=True, llm_client=fake)
+    assert orchestrator.budget is not None
+    orchestrator.budget.max_requests = 1
+    result = orchestrator.run(load_dragunov_brief("budget-fallback-run"))
+    assert result.fallback_used is True
+    assert len(fake.messages.calls) == 1
+
+
+def test_fixture_without_claude_key_uses_deterministic_path(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    result = UpdateReviewOrchestrator(use_llm=True).run(
+        load_dragunov_brief("no-key-run")
+    )
+    assert result.brief.decision is UpdateDecision.TEST
+    assert result.fallback_used is True
+    assert result.analysis_incomplete is False
+
+
+def test_live_classifier_returns_only_sanitized_structured_evidence():
+    raw = RawFeedback(
+        source=SourceType.STEAM,
+        source_url="https://steamcommunity.com/app/578080/reviews/",
+        source_id="anonymous-source-001",
+        language=Language.KOREAN,
+        observed_at=datetime(2026, 8, 12, tzinfo=UTC),
+        text="원문에는 사용자가 작성한 상세 반응이 있다.",
+    )
+    fake = FakeClaude(
+        [
+            {
+                "items": [
+                    {
+                        "source_id": raw.source_id,
+                        "sentiment": "negative",
+                        "summary": "고정 피해의 실제 성능은 테스트로 확인 필요.",
+                        "mechanism_tags": ["balance_regression"],
+                        "relevance": 0.9,
+                    }
+                ]
+            }
+        ]
+    )
+    output = UpdateCollectorAgent(use_llm=True, client=fake).classify_raw(
+        [raw], load_dragunov_brief("live-classify")
+    )
+    assert output[0].source_id == raw.source_id
+    assert output[0].summary != raw.text
+    assert "text" not in output[0].model_dump()
+    assert raw.text not in json.dumps(output[0].model_dump(mode="json"), ensure_ascii=False)

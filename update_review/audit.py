@@ -1,6 +1,16 @@
+import os
 from collections.abc import Callable
+from pathlib import Path
 
-from contracts import ArtifactStatus, Producer, Severity
+from pydantic import BaseModel, ConfigDict, Field
+
+from agents.structured import (
+    ClaudeBudget,
+    StructuredModelError,
+    parse_claude_structured,
+    require_korean_text,
+)
+from contracts import ArtifactStatus, ErrorCode, Producer, Severity
 from update_review.contracts import (
     RejectedUpdateRisk,
     UpdateBrief,
@@ -20,7 +30,115 @@ from update_review.policy import (
 )
 
 
+class RecommendationNarrative(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    risk_id: str
+    title: str = Field(min_length=1)
+    action: str = Field(min_length=1)
+    validation_metric_ids: list[str] = Field(min_length=1)
+
+
+class AuditNarrative(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    executive_summary: str = Field(min_length=1)
+    recommendations: list[RecommendationNarrative]
+
+
 class UpdateAuditAgent:
+    prompt_path = Path(__file__).with_name("prompts") / "audit.md"
+
+    def __init__(
+        self,
+        use_llm: bool = False,
+        client=None,
+        budget: ClaudeBudget | None = None,
+    ) -> None:
+        self.use_llm = use_llm
+        self.client = client
+        self.budget = budget
+        self._executive_summary: str | None = None
+
+    def run(
+        self,
+        bundle: UpdateFeedbackBundle,
+        pack: UpdateEvidencePack,
+        assessment: UpdateImpactAssessment,
+        *,
+        analysis_incomplete: bool = False,
+        on_event: Callable[[str, str, dict], None] | None = None,
+    ) -> UpdateValidatedDecision:
+        base = self.run_deterministic(
+            bundle,
+            pack,
+            assessment,
+            analysis_incomplete=analysis_incomplete,
+            on_event=on_event,
+        )
+        if not self.use_llm:
+            return base
+        notify = on_event or (lambda _node, _message, _metrics: None)
+        notify(
+            "claude_narrative",
+            "Claude Haiku가 고정된 판정의 요약과 권고만 보강합니다.",
+            {"provider": "claude"},
+        )
+        narrative = parse_claude_structured(
+            model=os.getenv("CLAUDE_UPDATE_AUDIT_MODEL", "claude-haiku-4-5"),
+            prompt_path=self.prompt_path,
+            output_type=AuditNarrative,
+            payload=base,
+            client=self.client,
+            budget=self.budget,
+        )
+        require_korean_text(
+            [narrative.executive_summary]
+            + [
+                text
+                for item in narrative.recommendations
+                for text in (item.title, item.action)
+            ]
+        )
+        risks = {item.risk_id for item in base.validated_risks}
+        metrics_by_risk = {
+            risk_id: {
+                metric.metric_id
+                for metric in base.validation_metrics
+                if risk_id in metric.addresses_risk_ids
+            }
+            for risk_id in risks
+        }
+        for proposal in narrative.recommendations:
+            if (
+                proposal.risk_id not in risks
+                or not set(proposal.validation_metric_ids)
+                <= metrics_by_risk[proposal.risk_id]
+            ):
+                raise StructuredModelError(
+                    ErrorCode.SCHEMA_INVALID,
+                    "Claude narrative references unknown audit data",
+                )
+        proposals = {item.risk_id: item for item in narrative.recommendations}
+        recommendations = []
+        for item in base.recommendations:
+            risk_id = item.addresses_risk_ids[0]
+            proposal = proposals.get(risk_id)
+            recommendations.append(
+                item
+                if proposal is None
+                else item.model_copy(
+                    update={"title": proposal.title, "action": proposal.action}
+                )
+            )
+        self._executive_summary = narrative.executive_summary
+        notify(
+            "claude_output_checked",
+            "코드 판정을 유지한 채 Claude 요약·권고 연결을 확인했습니다.",
+            {"provider": "claude", "decision": base.decision.value},
+        )
+        return base.model_copy(update={"recommendations": recommendations})
+
     def run_deterministic(
         self,
         bundle: UpdateFeedbackBundle,
@@ -30,6 +148,7 @@ class UpdateAuditAgent:
         analysis_incomplete: bool = False,
         on_event: Callable[[str, str, dict], None] | None = None,
     ) -> UpdateValidatedDecision:
+        self._executive_summary = None
         notify = on_event or (lambda _node, _message, _metrics: None)
         evidence_ids = {item.evidence_id for item in pack.evidence}
         validated = []
@@ -96,7 +215,7 @@ class UpdateAuditAgent:
             validation_metrics=metrics,
         )
 
-    def to_brief(
+    def _deterministic_brief(
         self,
         brief: UpdateBrief,
         pack: UpdateEvidencePack,
@@ -139,4 +258,20 @@ class UpdateAuditAgent:
             validation_metrics=decision.validation_metrics,
             evidence=pack.evidence,
             recommendations=decision.recommendations,
+        )
+
+    def to_brief(
+        self,
+        brief: UpdateBrief,
+        pack: UpdateEvidencePack,
+        impact: UpdateImpactAssessment,
+        decision: UpdateValidatedDecision,
+    ) -> UpdateDecisionBrief:
+        result = self._deterministic_brief(brief, pack, impact, decision)
+        return (
+            result
+            if self._executive_summary is None
+            else result.model_copy(
+                update={"executive_summary": self._executive_summary}
+            )
         )

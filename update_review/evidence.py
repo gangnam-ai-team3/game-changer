@@ -1,7 +1,17 @@
+import os
 from collections import Counter
 from collections.abc import Callable
+from pathlib import Path
 
-from contracts import ArtifactStatus, Language, PersonaKind, Producer
+from pydantic import BaseModel, ConfigDict, Field
+
+from agents.structured import (
+    ClaudeBudget,
+    StructuredModelError,
+    parse_claude_structured,
+    require_korean_text,
+)
+from contracts import ArtifactStatus, ErrorCode, Language, PersonaKind, Producer
 from update_review.contracts import (
     ReactionSignal,
     Sentiment,
@@ -17,6 +27,7 @@ SIGNAL_TITLES = {
     "predictability": "결과 예측 가능성 상승",
     "skill_fairness": "실력 중심 공정성 인식",
     "balance_regression": "실제 성능 역전 가능성",
+    "fairness_regression": "공정성 인식 저하 가능성",
     "validation_needed": "실제 지표 확인 필요",
     "information_clarity": "변경 정보 이해 가능성",
     "flow_disruption": "이용 동선 변화 부담",
@@ -40,12 +51,108 @@ PERSONA_TAGS = {
         "predictability",
         "skill_fairness",
         "balance_regression",
+        "fairness_regression",
         "validation_needed",
     },
 }
 
 
+class SignalNarrative(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    signal_id: str
+    title: str = Field(min_length=1)
+    summary: str = Field(min_length=1)
+    evidence_ids: list[str] = Field(min_length=1)
+
+
+class EvidenceNarrative(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    signals: list[SignalNarrative]
+
+
 class UpdateEvidenceAgent:
+    prompt_path = Path(__file__).with_name("prompts") / "evidence.md"
+
+    def __init__(
+        self,
+        use_llm: bool = False,
+        client=None,
+        budget: ClaudeBudget | None = None,
+    ) -> None:
+        self.use_llm = use_llm
+        self.client = client
+        self.budget = budget
+
+    def run(
+        self,
+        bundle: UpdateFeedbackBundle,
+        on_event: Callable[[str, str, dict], None] | None = None,
+    ) -> UpdateEvidencePack:
+        base = self.run_deterministic(bundle, on_event=on_event)
+        if not self.use_llm:
+            return base
+        notify = on_event or (lambda _node, _message, _metrics: None)
+        notify(
+            "claude_narrative",
+            "Claude Sonnet이 고정된 근거 범위에서 반응 설명을 보강합니다.",
+            {"provider": "claude"},
+        )
+        narrative = parse_claude_structured(
+            model=os.getenv("CLAUDE_UPDATE_EVIDENCE_MODEL", "claude-sonnet-4-6"),
+            prompt_path=self.prompt_path,
+            output_type=EvidenceNarrative,
+            payload=base,
+            client=self.client,
+            budget=self.budget,
+        )
+        require_korean_text(
+            [
+                text
+                for item in narrative.signals
+                for text in (item.title, item.summary)
+            ]
+        )
+        signals = {
+            item.signal_id: item
+            for item in [
+                *base.positive_signals,
+                *base.negative_signals,
+                *base.split_conditions,
+            ]
+        }
+        for proposal in narrative.signals:
+            official = signals.get(proposal.signal_id)
+            if official is None or not set(proposal.evidence_ids) <= set(
+                official.evidence_ids
+            ):
+                raise StructuredModelError(
+                    ErrorCode.SCHEMA_INVALID,
+                    "Claude narrative references unknown signal evidence",
+                )
+            signals[proposal.signal_id] = official.model_copy(
+                update={"title": proposal.title, "summary": proposal.summary}
+            )
+        notify(
+            "claude_output_checked",
+            "Claude 설명의 신호·근거 ID를 확인했습니다.",
+            {"provider": "claude"},
+        )
+        return base.model_copy(
+            update={
+                "positive_signals": [
+                    signals[item.signal_id] for item in base.positive_signals
+                ],
+                "negative_signals": [
+                    signals[item.signal_id] for item in base.negative_signals
+                ],
+                "split_conditions": [
+                    signals[item.signal_id] for item in base.split_conditions
+                ],
+            }
+        )
+
     def run_deterministic(
         self,
         bundle: UpdateFeedbackBundle,

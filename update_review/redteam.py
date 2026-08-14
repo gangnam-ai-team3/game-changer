@@ -1,6 +1,16 @@
+import os
 from collections.abc import Callable
+from pathlib import Path
 
-from contracts import ArtifactStatus, PersonaKind, Producer
+from pydantic import BaseModel, ConfigDict, Field
+
+from agents.structured import (
+    ClaudeBudget,
+    StructuredModelError,
+    parse_claude_structured,
+    require_korean_text,
+)
+from contracts import ArtifactStatus, ErrorCode, PersonaKind, Producer
 from update_review.contracts import (
     ExpectedImpact,
     UpdateBrief,
@@ -32,7 +42,103 @@ RISK_COPY = {
 }
 
 
+class RiskNarrative(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    risk_id: str
+    title: str = Field(min_length=1)
+    failure_path: str = Field(min_length=1)
+    revision_question: str = Field(min_length=1)
+    evidence_ids: list[str] = Field(min_length=1)
+    validation_metric_ids: list[str] = Field(min_length=1)
+
+
+class RedteamNarrative(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    risks: list[RiskNarrative]
+
+
 class UpdateRedteamAgent:
+    prompt_path = Path(__file__).with_name("prompts") / "redteam.md"
+
+    def __init__(
+        self,
+        use_llm: bool = False,
+        client=None,
+        budget: ClaudeBudget | None = None,
+    ) -> None:
+        self.use_llm = use_llm
+        self.client = client
+        self.budget = budget
+
+    def run(
+        self,
+        brief: UpdateBrief,
+        pack: UpdateEvidencePack,
+        on_event: Callable[[str, str, dict], None] | None = None,
+    ) -> UpdateImpactAssessment:
+        base = self.run_deterministic(brief, pack, on_event=on_event)
+        if not self.use_llm:
+            return base
+        notify = on_event or (lambda _node, _message, _metrics: None)
+        notify(
+            "claude_narrative",
+            "Claude Haiku가 고정된 위험과 확인 지표 범위에서 설명을 보강합니다.",
+            {"provider": "claude"},
+        )
+        narrative = parse_claude_structured(
+            model=os.getenv("CLAUDE_UPDATE_REDTEAM_MODEL", "claude-haiku-4-5"),
+            prompt_path=self.prompt_path,
+            output_type=RedteamNarrative,
+            payload=base,
+            client=self.client,
+            budget=self.budget,
+        )
+        require_korean_text(
+            [
+                text
+                for item in narrative.risks
+                for text in (item.title, item.failure_path, item.revision_question)
+            ]
+        )
+        risks = {item.risk_id: (index, item) for index, item in enumerate(base.risks)}
+        metrics_by_risk = {
+            risk.risk_id: {
+                metric.metric_id
+                for metric in base.validation_metrics
+                if risk.risk_id in metric.addresses_risk_ids
+            }
+            for risk in base.risks
+        }
+        output = list(base.risks)
+        for proposal in narrative.risks:
+            official = risks.get(proposal.risk_id)
+            if (
+                official is None
+                or not set(proposal.evidence_ids) <= set(official[1].evidence_ids)
+                or not set(proposal.validation_metric_ids)
+                <= metrics_by_risk[proposal.risk_id]
+            ):
+                raise StructuredModelError(
+                    ErrorCode.SCHEMA_INVALID,
+                    "Claude narrative references unknown risk data",
+                )
+            index, risk = official
+            output[index] = risk.model_copy(
+                update={
+                    "title": proposal.title,
+                    "failure_path": proposal.failure_path,
+                    "revision_question": proposal.revision_question,
+                }
+            )
+        notify(
+            "claude_output_checked",
+            "Claude 설명의 위험·근거·지표 ID를 확인했습니다.",
+            {"provider": "claude"},
+        )
+        return base.model_copy(update={"risks": output})
+
     def run_deterministic(
         self,
         brief: UpdateBrief,
