@@ -29,9 +29,15 @@ class SteamClient:
         language: Language,
         cutoff_at: datetime,
         limit: int = 100,
+        *,
+        start_at: datetime | None = None,
     ) -> list[RawFeedback]:
         if not 1 <= limit <= 500:
             raise ValueError("limit must be between 1 and 500")
+        if start_at is not None and (
+            start_at.tzinfo is None or start_at >= cutoff_at
+        ):
+            raise ValueError("start_at must be timezone-aware and earlier than cutoff_at")
 
         results: list[RawFeedback] = []
         cursor = "*"
@@ -57,7 +63,9 @@ class SteamClient:
                     break
                 for review in reviews:
                     observed_at = datetime.fromtimestamp(review["timestamp_created"], tz=UTC)
-                    if observed_at >= cutoff_at:
+                    if observed_at >= cutoff_at or (
+                        start_at is not None and observed_at < start_at
+                    ):
                         continue
                     public_id = str(review["recommendationid"])
                     results.append(

@@ -43,7 +43,13 @@ class XClient:
         cutoff_at: datetime,
         max_results: int = 10,
         estimated_cost_usd: float = 0.0,
+        *,
+        start_at: datetime | None = None,
     ) -> list[RawFeedback]:
+        if start_at is not None and (
+            start_at.tzinfo is None or start_at >= cutoff_at
+        ):
+            raise ValueError("start_at must be timezone-aware and earlier than cutoff_at")
         if not self._token:
             raise ConnectorError(ErrorCode.AUTH_FAILED, "X_BEARER_TOKEN is missing")
         if not 10 <= max_results <= 100:
@@ -73,7 +79,9 @@ class XClient:
         results: list[RawFeedback] = []
         for item in payload.get("data", []):
             observed_at = datetime.fromisoformat(item["created_at"]).astimezone(UTC)
-            if observed_at >= cutoff_at:
+            if observed_at >= cutoff_at or (
+                start_at is not None and observed_at < start_at
+            ):
                 continue
             public_id = str(item["id"])
             results.append(

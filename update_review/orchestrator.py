@@ -176,6 +176,18 @@ class UpdateReviewOrchestrator:
         )
         metadata = {"input_snapshot_hash": _input_snapshot_hash(brief, feedback)}
         feedback = feedback.model_copy(update=metadata)
+        # An external source that failed, produced no normalized evidence, or
+        # missed the five-language sample gate is not comparable to the
+        # deterministic fixture.  Keep its partial artifacts for auditability,
+        # but make every downstream decision path deterministic and force the
+        # policy-owned Hold outcome.
+        analysis_incomplete = feedback.input_mode != InputMode.FIXTURE and (
+            bool(feedback.errors)
+            or not feedback.evidence
+            or any(not sample.sufficient for sample in feedback.samples)
+        )
+        if analysis_incomplete:
+            force_deterministic = True
         evidence = stage(
             "evidence_rag_personas",
             lambda: self.evidence_agent.run(
@@ -286,6 +298,12 @@ def _input_snapshot_hash(brief: UpdateBrief, feedback: UpdateFeedbackBundle) -> 
             },
         ),
         "input_mode": feedback.input_mode.value,
+        # Error codes (not potentially sensitive provider messages) affect the
+        # external-source Hold gate and therefore belong in reproducibility
+        # input.  Their code-owned text is intentionally excluded.
+        "errors": sorted(
+            (item.code.value, item.retryable) for item in feedback.errors
+        ),
         "samples": sorted(
             (item.language.value, item.general_count, item.mechanism_count)
             for item in feedback.samples
