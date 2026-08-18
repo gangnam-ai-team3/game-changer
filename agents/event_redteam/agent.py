@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from agents.structured import ClaudeBudget, StructuredModelError, parse_claude_structured, parse_structured, require_korean_text
+from agents.structured import ClaudeBudget, StructuredModelError, parse_claude_structured, parse_structured, require_native_business_korean
 from contracts import (
     ArtifactStatus,
     ErrorCode,
@@ -65,7 +65,7 @@ class EventRedteamAgent:
                     client=self.client,
                     budget=self.budget,
                 )
-                require_korean_text(
+                require_native_business_korean(
                     [
                         text
                         for risk in narrative.risks

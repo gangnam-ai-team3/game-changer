@@ -8,7 +8,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 
 from agents.evidence_rag.retrieval import embedding_rank
-from agents.structured import ClaudeBudget, StructuredModelError, parse_claude_structured, parse_structured, require_korean_text
+from agents.structured import ClaudeBudget, StructuredModelError, parse_claude_structured, parse_structured, require_native_business_korean
 from contracts import (
     ArtifactStatus,
     ErrorCode,
@@ -95,7 +95,7 @@ class EvidenceRagAgent:
                     client=self.client,
                     budget=self.budget,
                 )
-                require_korean_text(
+                require_native_business_korean(
                     [
                         text
                         for issue in narrative.issues
@@ -255,7 +255,7 @@ class EvidenceRagAgent:
                 language_insights.append(
                     LanguageInsight(
                         language=language,
-                        conclusion=f"상위 메커니즘 우려: {', '.join(top_tags)}",
+                        conclusion=f"해당 언어권에서는 {', '.join(top_tags)}이 주요 우려로 예상됩니다.",
                         evidence_ids=[item.evidence_id for item in items],
                         confidence=_average_relevance(items),
                     )
@@ -265,7 +265,7 @@ class EvidenceRagAgent:
                     LanguageInsight(
                         language=language,
                         conclusion=None,
-                        hidden_reason="일반 100건·메커니즘 15건 최소 기준 미달",
+                        hidden_reason="일반 의견 100건과 메커니즘 의견 15건의 최소 표본 기준에 미달했습니다.",
                         evidence_ids=[item.evidence_id for item in items],
                         confidence=0,
                     )

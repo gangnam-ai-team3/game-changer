@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from agents.structured import ClaudeBudget, parse_claude_structured, parse_structured, require_korean_text
+from agents.structured import ClaudeBudget, parse_claude_structured, parse_structured, require_native_business_korean
 from policy import MIN_RISK_CONFIDENCE, REVISION_SPECS, decide, expected_severity
 from contracts import (
     ArtifactStatus,
@@ -72,7 +72,7 @@ class AuditStrategyAgent:
                     client=self.client,
                     budget=self.budget,
                 )
-                require_korean_text(
+                require_native_business_korean(
                     [narrative.decision_narrative]
                     + [
                         text
@@ -230,14 +230,14 @@ class AuditStrategyAgent:
         panel_results = []
         for persona in pack.personas:
             risks = [risk for risk in top_risks if persona.kind in risk.affected_personas]
-            risk_titles = " · ".join(risk.title for risk in risks)
+            risk_titles = ", ".join(risk.title for risk in risks)
             panel_results.append(
                 PersonaResult(
                     persona=persona.kind,
                     reaction=(
-                        f"{risk_titles} 위험 때문에 원안 참여·지출 의사가 약해질 수 있음."
+                        f"{risk_titles} 위험 때문에 원안 참여와 지출 의사가 약해질 수 있습니다."
                         if risks
-                        else "상위 위험에서 직접 영향이 확인되지 않음."
+                        else "상위 위험에서 직접적인 영향은 예상되지 않습니다."
                     ),
                     risk_ids=[risk.risk_id for risk in risks],
                     evidence_ids=persona.evidence_ids,
@@ -245,10 +245,24 @@ class AuditStrategyAgent:
                 )
             )
         decision_labels = {
-            Decision.GO: "검토 가능",
+            Decision.GO: "출시 가능",
             Decision.REVISE: "수정 필요",
             Decision.HOLD: "판정 보류",
         }
+        visible_languages = sum(
+            insight.conclusion is not None for insight in pack.language_insights
+        )
+        risk_summary = (
+            f"우선 확인할 위험은 {', '.join(risk.title.replace('·', ', ') for risk in top_risks[:3])}입니다."
+            if top_risks
+            else "현재 자료에서는 우선 수정이 필요한 위험이 확인되지 않았습니다."
+        )
+        executive_summary = (
+            f"{event.event_name}의 출시 판단은 {decision_labels[decision.decision]}입니다. "
+            f"출시 전 자료를 바탕으로 이용자 유형 {len(panel_results)}개와 "
+            f"결론을 공개할 수 있는 언어권 {visible_languages}개의 예상 반응을 종합했습니다. "
+            f"{risk_summary} 따라서 {decision.decision_reason}"
+        )
         return DecisionBrief(
             run_id=event.run_id,
             status=decision.status,
@@ -256,7 +270,7 @@ class AuditStrategyAgent:
             input_refs=[event.ref, pack.ref, decision.ref],
             errors=list(decision.errors),
             decision=decision.decision,
-            executive_summary=f"{event.event_name}: {decision_labels[decision.decision]}. {decision.decision_reason}",
+            executive_summary=executive_summary,
             top_risks=top_risks,
             language_results=pack.language_insights,
             panel_results=panel_results,

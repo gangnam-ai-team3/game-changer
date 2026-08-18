@@ -67,6 +67,13 @@ def test_rejects_timezone_naive_observed_at(event):
     assert error.value.code == ErrorCode.INVALID_IMPORT
 
 
+def test_rejects_non_utf8_csv_as_invalid_import(event):
+    with pytest.raises(ConnectorError) as error:
+        import_approved_csv(b"\xff\xfe\x00", event.cutoff_at)
+
+    assert error.value.code == ErrorCode.INVALID_IMPORT
+
+
 @pytest.mark.parametrize(
     "data",
     [

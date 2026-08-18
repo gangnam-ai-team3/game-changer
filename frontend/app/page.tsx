@@ -3,6 +3,7 @@
 import { ChangeEvent, FormEvent, useState } from "react";
 
 import { AgentEvent, AgentPipeline } from "./components/AgentPipeline";
+import { businessKorean, businessKoreanJson } from "./components/businessKorean";
 import { UpdateReview } from "./components/UpdateReview";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -11,17 +12,17 @@ const initialForm = {
   game: "PUBG: BATTLEGROUNDS",
   event_name: "Black Market 2025",
   goal: "복귀 Progressive 스킨의 수집 매력을 활용해 이벤트 참여와 유료 전환을 유도하되, 이용자가 목표 보상까지의 비용과 진행 경로를 명확히 이해할 수 있도록 한다.",
-  target_users: "복귀 유저, 무·소과금 유저, 스킨 수집 유저, 코어 전투 유저",
+  target_users: "복귀 이용자, 무과금 및 소과금 이용자, 스킨 수집 이용자, 전투 중심 이용자",
   starts_on: "2025-06-11",
   ends_on: "2025-07-22",
   cutoff_on: "2025-06-11",
-  participation_rule: "패스 미션, Loot Cache 구매·개봉, Workshop 특별 제작 참여",
-  repeat_rule: "일일·주간 미션과 반복 Loot Cache 개봉",
+  participation_rule: "패스 미션, Loot Cache 구매와 개봉, Workshop 특별 제작 참여",
+  repeat_rule: "일일 및 주간 미션과 반복 Loot Cache 개봉",
   rewards: "Progressive weapon skin, Chroma, Black Market Token, Prime Parcel",
   currencies: "G-Coin, BP, Black Market Token, Scrap",
   probability_guarantee: "Loot Cache에서 확률 보상을 얻고 일부 Prime Parcel에서 다시 확률 보상을 얻는 2단계 구조. 원하는 스킨까지의 고정 마일스톤은 없음.",
-  monetization_policy: "Crafter Pass와 G-Coin Loot Cache 팩을 판매하고 확률형 보너스로 추가 토큰을 제공. 구매·개봉·제작·진행 확인 화면이 분리됨.",
-  expiration_policy: "이벤트 종료 뒤 남은 Black Market Token은 교환·환불 없이 삭제",
+  monetization_policy: "Crafter Pass와 G-Coin Loot Cache 팩을 판매하고 확률형 보너스로 추가 토큰을 제공합니다. 구매, 개봉, 제작, 진행 확인 화면은 분리되어 있습니다.",
+  expiration_policy: "이벤트 종료 뒤 남은 Black Market Token은 교환이나 환불 없이 삭제",
 };
 
 type FormState = typeof initialForm;
@@ -32,7 +33,7 @@ const fixturePresets: Record<string, FormState> = {
     game: "PUBG: BATTLEGROUNDS",
     event_name: "Weekly Supply",
     goal: "주간 미션을 완료한 이용자가 획득 가능한 BP와 참여 조건을 명확히 이해하도록 한다.",
-    target_users: "모든 이용자, 무·소과금 유저, 주간 플레이 유저",
+    target_users: "모든 이용자, 무과금 및 소과금 이용자, 주간 플레이 이용자",
     starts_on: "2025-06-11",
     ends_on: "2025-07-09",
     cutoff_on: "2025-06-11",
@@ -126,12 +127,12 @@ const severityLabels: Record<string, string> = {
   Critical: "매우 높음",
 };
 const decisionCopy: Record<string, { title: string; description: string }> = {
-  Go: { title: "현재 기획안으로 검토 가능", description: "확인된 위험이 기준보다 낮습니다." },
+  Go: { title: "현재 기획안으로 출시 가능", description: "확인된 위험이 허용 기준보다 낮습니다." },
   Revise: { title: "수정 후 다시 검토", description: "이용자 경험을 해칠 수 있는 위험이 확인됐습니다." },
   Hold: { title: "판정 보류", description: "현재 자료만으로는 판단하기 어렵습니다." },
 };
 const decisionLabels: Record<string, string> = {
-  Go: "검토 가능",
+  Go: "출시 가능",
   Revise: "수정 필요",
   Hold: "판정 보류",
 };
@@ -169,7 +170,7 @@ function formatApiError(detail: unknown): string {
       .map((item) =>
         typeof item === "object" && item && "msg" in item ? String(item.msg) : String(item),
       )
-      .join(" · ");
+      .join(", ");
   }
   return typeof detail === "string" ? detail : "검토를 실행할 수 없습니다.";
 }
@@ -177,9 +178,9 @@ function formatApiError(detail: unknown): string {
 function ArtifactDetails({ result }: { result: RunResult }) {
   const artifacts: Array<[string, string, Artifact]> = [
     ["FeedbackBundle", "자료 수집 결과", result.feedback],
-    ["EvidencePack", "의견·이용자 유형 결과", result.evidence],
+    ["EvidencePack", "의견 및 이용자 유형 결과", result.evidence],
     ["RiskAssessment", "위험 점검 결과", result.risks],
-    ["ValidatedDecision", "판정·개선안 결과", result.validated],
+    ["ValidatedDecision", "판정 및 개선안 결과", result.validated],
     ["DecisionBrief", "발표용 최종 요약", result.brief],
   ];
   return (
@@ -195,7 +196,7 @@ function ArtifactDetails({ result }: { result: RunResult }) {
               <span>{label}</span>
               <code>{contract}</code>
             </summary>
-            <pre>{JSON.stringify(artifact, null, 2)}</pre>
+            <pre>{businessKoreanJson(artifact)}</pre>
           </details>
         ))}
       </div>
@@ -216,13 +217,13 @@ function ResultInsights({ result }: { result: RunResult }) {
           {result.brief.panel_results.map((panel) => (
             <article className="insight-card" key={panel.persona}>
               <span className="risk-category">{personaLabels[panel.persona] ?? panel.persona}</span>
-              <h3>{panel.reaction}</h3>
+              <h3>{businessKorean(panel.reaction)}</h3>
               <p>
                 {panel.risk_ids.length
-                  ? `연결된 위험 · ${panel.risk_ids.map((id) => riskTitle.get(id) ?? id).join(" · ")}`
+                  ? `연결된 위험: ${panel.risk_ids.map((id) => businessKorean(riskTitle.get(id) ?? id)).join(", ")}`
                   : "직접 연결된 상위 위험 없음"}
               </p>
-              <small>근거 {panel.evidence_ids.length}개 · 신뢰도 {Math.round(panel.confidence * 100)}%</small>
+              <small>근거 {panel.evidence_ids.length}건, 신뢰도 {Math.round(panel.confidence * 100)}%</small>
             </article>
           ))}
         </div>
@@ -236,10 +237,10 @@ function ResultInsights({ result }: { result: RunResult }) {
           {result.brief.language_results.map((item) => (
             <article className={`language-card ${item.conclusion ? "" : "muted"}`} key={item.language}>
               <strong>{languageLabels[item.language] ?? item.language}</strong>
-              <p>{item.conclusion ?? item.hidden_reason ?? "표본 기준 미달"}</p>
+              <p>{businessKorean(item.conclusion ?? item.hidden_reason ?? "표본 기준에 미달했습니다.")}</p>
               <small>
                 {item.conclusion
-                  ? `근거 ${item.evidence_ids.length}개 · 신뢰도 ${Math.round(item.confidence * 100)}%`
+                  ? `근거 ${item.evidence_ids.length}건, 신뢰도 ${Math.round(item.confidence * 100)}%`
                   : "결론 숨김"}
               </small>
             </article>
@@ -255,12 +256,12 @@ function ResultInsights({ result }: { result: RunResult }) {
           {result.brief.revision_plan.map((revision) => (
             <article className="revision-card" key={revision.priority}>
               <span>우선순위 {revision.priority}</span>
-              <h3>{revision.title}</h3>
-              <p>{revision.change}</p>
-              <small>성공 기준 · {revision.success_metric}</small>
+              <h3>{businessKorean(revision.title)}</h3>
+              <p>{businessKorean(revision.change)}</p>
+              <small>성공 기준: {businessKorean(revision.success_metric)}</small>
               <details>
                 <summary>연결 위험 보기</summary>
-                <p>{revision.addresses_risk_ids.map((id) => riskTitle.get(id) ?? id).join(" · ")}</p>
+                <p>{revision.addresses_risk_ids.map((id) => businessKorean(riskTitle.get(id) ?? id)).join(", ")}</p>
               </details>
             </article>
           ))}
@@ -275,6 +276,9 @@ function EventReview() {
   const [sourceMode, setSourceMode] = useState("fixture");
   const [fixtureCase, setFixtureCase] = useState("black_market_2025");
   const [steamAppId, setSteamAppId] = useState("578080");
+  const [useSteam, setUseSteam] = useState(true);
+  const [useX, setUseX] = useState(false);
+  const [xQuery, setXQuery] = useState("PUBG Black Market");
   const [csvData, setCsvData] = useState("");
   const [csvName, setCsvName] = useState("");
   const [useClaude, setUseClaude] = useState(true);
@@ -291,6 +295,12 @@ function EventReview() {
   const handleCsv = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
+    if (file.size > 2_000_000) {
+      setCsvData("");
+      setCsvName("");
+      setError("승인 CSV는 2 MB 이하만 사용할 수 있습니다.");
+      return;
+    }
     const bytes = new Uint8Array(await file.arrayBuffer());
     let binary = "";
     bytes.forEach((byte) => {
@@ -311,6 +321,21 @@ function EventReview() {
       setLoading(false);
       return;
     }
+    if (sourceMode === "live" && !useSteam && !useX) {
+      setError("Steam 또는 X 중 하나 이상을 선택해 주세요.");
+      setLoading(false);
+      return;
+    }
+    if (sourceMode === "live" && useSteam && (!steamAppId || Number(steamAppId) < 1)) {
+      setError("올바른 Steam 앱 ID를 입력해 주세요.");
+      setLoading(false);
+      return;
+    }
+    if (sourceMode === "live" && useX && !xQuery.trim()) {
+      setError("X 검색어를 입력해 주세요.");
+      setLoading(false);
+      return;
+    }
     try {
       const payload = {
         ...form,
@@ -319,7 +344,9 @@ function EventReview() {
         currencies: form.currencies.split(",").map((item) => item.trim()).filter(Boolean),
         source_mode: sourceMode,
         fixture_case: fixtureCase,
-        steam_app_id: sourceMode === "live" ? Number(steamAppId) : null,
+        steam_app_id: sourceMode === "live" && useSteam ? Number(steamAppId) : null,
+        use_x: sourceMode === "live" ? useX : false,
+        x_query: xQuery.trim() || "PUBG Black Market",
         imported_csv: sourceMode === "import" ? csvData : null,
         use_llm: useClaude,
         llm_provider: "claude",
@@ -365,6 +392,12 @@ function EventReview() {
   }
 
   const copy = result ? decisionCopy[result.brief.decision] ?? decisionCopy.Hold : null;
+  const visibleLanguages = result?.brief.language_results.filter((item) => item.conclusion) ?? [];
+  const primaryRisk = result?.brief.top_risks[0];
+  const primaryPanel = result?.brief.panel_results[0];
+  const primaryRevision = result?.brief.revision_plan
+    .slice()
+    .sort((left, right) => left.priority - right.priority)[0];
 
   return (
     <>
@@ -427,8 +460,8 @@ function EventReview() {
           <label className="field">
             <span>자료 출처</span>
             <select value={sourceMode} onChange={(event) => setSourceMode(event.target.value)}>
-              <option value="fixture">검증된 저장 데이터 · 시연 사례 선택</option>
-              <option value="live">Steam 실시간 갱신</option>
+              <option value="fixture">검증된 저장 데이터와 시연 사례</option>
+              <option value="live">Steam과 X 실시간 갱신</option>
               <option value="import">승인 CSV 가져오기</option>
             </select>
           </label>
@@ -445,32 +478,71 @@ function EventReview() {
                   setError("");
                 }}
               >
-                <option value="black_market_2025">대규모 확률형 이벤트 · Black Market 2025</option>
-                <option value="weekly_supply_2025">단순 주간 미션 · Weekly Supply</option>
+                <option value="black_market_2025">대규모 확률형 이벤트: Black Market 2025</option>
+                <option value="weekly_supply_2025">단순 주간 미션: Weekly Supply</option>
               </select>
               <small className="field-help">공식 공개 규칙을 바탕으로 만든 비식별 합성 의견입니다.</small>
             </label>
           )}
           {sourceMode === "live" && (
-            <label className="field">
-              <span>Steam 앱 ID</span>
-              <input value={steamAppId} onChange={(event) => setSteamAppId(event.target.value)} />
-            </label>
+            <div className="source-fields">
+              <div className="grid two" role="group" aria-label="실시간 자료 선택">
+                <label className="toggle source-toggle">
+                  <input
+                    type="checkbox"
+                    checked={useSteam}
+                    onChange={(event) => setUseSteam(event.target.checked)}
+                  />
+                  <span>Steam 공개 리뷰 수집</span>
+                  <small>선택하면 입력한 앱 ID의 공개 리뷰를 확인합니다.</small>
+                </label>
+                <label className="toggle source-toggle">
+                  <input
+                    type="checkbox"
+                    checked={useX}
+                    onChange={(event) => setUseX(event.target.checked)}
+                  />
+                  <span>X 공개 게시물 수집</span>
+                  <small>선택하면 서버에 설정된 X API 연결을 사용합니다.</small>
+                </label>
+              </div>
+              <div className="grid two source-fields">
+                {useSteam && (
+                  <label className="field">
+                    <span>Steam 앱 ID</span>
+                    <input
+                      inputMode="numeric"
+                      value={steamAppId}
+                      onChange={(event) => setSteamAppId(event.target.value)}
+                    />
+                  </label>
+                )}
+                {useX && (
+                  <label className="field">
+                    <span>X 검색어</span>
+                    <input value={xQuery} onChange={(event) => setXQuery(event.target.value)} />
+                  </label>
+                )}
+              </div>
+              <p className="source-note">
+                Steam만, X만, 또는 두 자료를 함께 선택할 수 있습니다. 비밀 키는 서버 환경 변수에서만 읽습니다.
+              </p>
+            </div>
           )}
           {sourceMode === "import" && (
             <label className="field">
               <span>승인 CSV 파일</span>
               <input type="file" accept=".csv,text/csv" onChange={handleCsv} />
-              <small className="field-help">{csvName || "개인정보·원문 열이 없는 승인 CSV만 사용합니다."}</small>
+              <small className="field-help">{csvName || "개인정보와 원문 열이 없는 승인 CSV만 사용합니다."}</small>
             </label>
           )}
           <label className="toggle">
             <input type="checkbox" checked={useClaude} onChange={(event) => setUseClaude(event.target.checked)} />
             <span>Claude로 자연어 설명 보강</span>
-            <small>{useClaude ? "근거·최종 판정은 코드가 다시 검증합니다." : "결정론적 경로만 실행합니다."}</small>
+            <small>{useClaude ? "근거와 최종 판정은 코드가 다시 검증합니다." : "결정론적 경로만 실행합니다."}</small>
           </label>
           <p className="source-note">
-            저장 데이터는 공식 자료를 바탕으로 만든 합성 시연 사례입니다. 이벤트 조건과 근거 자료를 함께 바꿔 비교할 수 있습니다. API 키는 이 화면에 노출하지 않습니다. 분석 설명은 한국어로 제공하고, 근거 원문·비식별 요약은 왜곡을 막기 위해 출처 언어를 유지합니다.
+            저장 데이터는 공식 자료를 바탕으로 만든 합성 시연 사례입니다. 이벤트 조건과 근거 자료를 함께 바꿔 비교할 수 있습니다. API 키는 이 화면에 노출하지 않습니다. 분석 설명은 한국어로 제공하고, 비식별 근거 요약은 왜곡을 막기 위해 출처 언어를 유지합니다.
           </p>
           <button className="primary" disabled={loading}>
             {loading ? "검토 중..." : "AI 검토 시작"}
@@ -491,38 +563,118 @@ function EventReview() {
 
       {result && (
         <section className="results">
-          <div className="result-banner">
-            <div>
-              <p className="eyebrow">검토 결과</p>
-              <h2>{copy?.title}</h2>
-              <p>{result.brief.executive_summary}</p>
-              <small>
-                {copy?.description} · {" "}
-                {result.llm_requested
-                  ? result.fallback_used
-                    ? "Claude 요청 후 결정론적 안전 경로로 전환"
-                    : "Claude 자연어 분석 사용"
-                  : "결정론적 분석 사용"}
-                {" · 실행 ID "}
-                {String(result.brief.run_id)}
-              </small>
+          <section className="decision-brief" aria-labelledby="event-decision-title">
+            <header className="decision-brief-head">
+              <div>
+                <p className="eyebrow">출시 판단</p>
+                <h2 id="event-decision-title">{copy?.title}</h2>
+              </div>
+              <span className="decision">{decisionLabels[result.brief.decision] ?? result.brief.decision}</span>
+            </header>
+            <p className="decision-summary">{businessKorean(result.brief.executive_summary)}</p>
+            <p className="decision-caution">
+              출시 전 자료를 바탕으로 한 예상입니다. 실제 이용자 반응과 출시 후 성과를 의미하지 않습니다.
+            </p>
+
+            <div className="decision-logic" aria-label="출시 판단 과정">
+              <article>
+                <span>1. 판단 근거</span>
+                <strong>비식별 근거 {result.feedback.evidence.length}건</strong>
+                <small>기준일 이전 자료만 사용</small>
+              </article>
+              <b aria-hidden="true">→</b>
+              <article>
+                <span>2. 예상 반응</span>
+                <strong>이용자 유형 {result.brief.panel_results.length}개, 언어권 {visibleLanguages.length}개</strong>
+                <small>표본 기준을 통과한 결론만 공개</small>
+              </article>
+              <b aria-hidden="true">→</b>
+              <article>
+                <span>3. 출시 판단</span>
+                <strong>{decisionLabels[result.brief.decision] ?? result.brief.decision}</strong>
+                <small>{copy?.description}</small>
+              </article>
             </div>
-            <span className="decision">{decisionLabels[result.brief.decision] ?? result.brief.decision}</span>
-          </div>
-          <div className="stats">
-            <div>
-              <small>확인된 위험</small>
-              <strong>{result.brief.top_risks.length}</strong>
+
+            <div className="decision-signal-grid event-signals">
+              <article className="decision-signal negative">
+                <span>가장 큰 예상 우려</span>
+                <strong>{businessKorean(primaryRisk?.title ?? "우선 위험 없음")}</strong>
+                <p>{businessKorean(primaryRisk?.failure_path ?? "현재 자료에서는 우선 수정이 필요한 위험이 확인되지 않았습니다.")}</p>
+              </article>
+              <article className="decision-signal split">
+                <span>영향이 큰 이용자</span>
+                <strong>{primaryPanel ? personaLabels[primaryPanel.persona] ?? businessKorean(primaryPanel.persona) : "직접 영향 없음"}</strong>
+                <p>{businessKorean(primaryPanel?.reaction ?? "상위 위험에서 직접적인 영향은 예상되지 않습니다.")}</p>
+              </article>
+              <article className="decision-signal neutral">
+                <span>언어권별 예상</span>
+                <strong>{visibleLanguages.length}개 언어권에서 결론 공개</strong>
+                <p>{businessKorean(visibleLanguages[0]?.conclusion ?? "표본을 보강한 뒤 언어권별 결론을 확인해야 합니다.")}</p>
+              </article>
             </div>
-            <div>
-              <small>확인한 비식별 의견</small>
-              <strong>{result.feedback.evidence.length}</strong>
+
+            <div className="decision-context-grid">
+              <section>
+                <h3>이용자 유형별 예상 반응</h3>
+                <div className="decision-list">
+                  {result.brief.panel_results.map((item) => (
+                    <article key={item.persona}>
+                      <strong>{personaLabels[item.persona] ?? businessKorean(item.persona)}</strong>
+                      <p>{businessKorean(item.reaction)}</p>
+                      <small>근거 {item.evidence_ids.length}건, 신뢰도 {Math.round(item.confidence * 100)}%</small>
+                    </article>
+                  ))}
+                </div>
+              </section>
+              <section>
+                <h3>언어권별 예상</h3>
+                <div className="decision-list">
+                  {result.brief.language_results.map((item) => (
+                    <article className={item.conclusion ? "" : "is-muted"} key={item.language}>
+                      <strong>{languageLabels[item.language] ?? businessKorean(item.language)}</strong>
+                      <p>{businessKorean(item.conclusion ?? item.hidden_reason ?? "표본이 부족해 결론을 공개하지 않습니다.")}</p>
+                      <small>{item.conclusion ? `근거 ${item.evidence_ids.length}건, 신뢰도 ${Math.round(item.confidence * 100)}%` : "표본 보강 필요"}</small>
+                    </article>
+                  ))}
+                </div>
+              </section>
             </div>
-            <div>
-              <small>처리 노드</small>
-              <strong>{result.events.filter((event) => !["queued", "agent"].includes(event.node)).length}</strong>
+
+            <div className="decision-grounding">
+              <section>
+                <h3>판단을 좌우한 위험</h3>
+                {result.brief.top_risks.length ? (
+                  <ul>
+                    {result.brief.top_risks.slice(0, 3).map((risk) => (
+                      <li key={risk.risk_id}>
+                        <strong>{businessKorean(risk.title)}</strong>
+                        <span>{businessKorean(risk.failure_path)}</span>
+                        <small>근거 {risk.evidence_ids.length}건, 신뢰도 {Math.round(risk.confidence * 100)}%</small>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p>현재 자료에서는 우선 수정이 필요한 위험이 확인되지 않았습니다.</p>
+                )}
+              </section>
+              <aside className="decision-action">
+                <span>지금 해야 할 일</span>
+                <h3>{businessKorean(primaryRevision?.title ?? copy?.title)}</h3>
+                <p>{businessKorean(primaryRevision?.change ?? copy?.description)}</p>
+                {primaryRevision && <small>확인 기준: {businessKorean(primaryRevision.success_metric)}</small>}
+              </aside>
             </div>
-          </div>
+
+            <footer className="decision-meta">
+              <span>{result.llm_requested
+                ? result.fallback_used
+                  ? "Claude 요청 후 결정론적 안전 경로로 전환했습니다."
+                  : "Claude 자연어 분석을 사용했습니다."
+                : "결정론적 분석을 사용했습니다."}</span>
+              <span>실행 ID: {String(result.brief.run_id)}</span>
+            </footer>
+          </section>
           <AgentPipeline events={result.events} mode="event" />
           <div className="risk-section">
             <div className="section-title">
@@ -533,19 +685,19 @@ function EventReview() {
               {result.brief.top_risks.map((risk) => (
                 <article className="risk-card" key={risk.risk_id}>
                   <span className="risk-category">{riskLabels[risk.category] ?? risk.category}</span>
-                  <h3>{risk.title}</h3>
-                  <p>{risk.failure_path}</p>
+                  <h3>{businessKorean(risk.title)}</h3>
+                  <p>{businessKorean(risk.failure_path)}</p>
                   <small>
-                    {severityLabels[risk.severity] ?? risk.severity} · 근거 {risk.evidence_ids.length}개 · 신뢰도 {Math.round(risk.confidence * 100)}%
+                    위험 수준 {severityLabels[risk.severity] ?? risk.severity}, 근거 {risk.evidence_ids.length}건, 신뢰도 {Math.round(risk.confidence * 100)}%
                   </small>
                   <details>
                     <summary>연결된 비식별 의견 보기</summary>
-                    <p>개인정보 보호를 위해 사용자 원문은 저장하지 않고 비식별 요약만 제공합니다. 분석 설명은 한국어로 제공하고, 근거 원문·비식별 요약은 출처 언어를 유지합니다.</p>
+                    <p>개인정보 보호를 위해 사용자 원문은 저장하지 않고 비식별 요약만 제공합니다. 분석 설명은 한국어로 제공하며, 비식별 근거 요약은 왜곡을 막기 위해 출처 언어를 유지합니다.</p>
                     {result.feedback.evidence
                       .filter((item) => risk.evidence_ids.includes(String(item.evidence_id)))
                       .map((item) => (
                         <blockquote key={String(item.evidence_id)}>
-                          <b>{String(item.evidence_id)}</b> {String(item.summary)}
+                          <b>{String(item.evidence_id)}</b> {businessKorean(item.summary)}
                         </blockquote>
                       ))}
                   </details>
@@ -582,7 +734,7 @@ export default function Home() {
           onClick={() => setReviewMode("event")}
         >
           <strong>이벤트 점검</strong>
-          <span>보상·참여·이용 조건을 점검합니다.</span>
+          <span>보상, 참여, 이용 조건을 점검합니다.</span>
         </button>
         <button
           type="button"

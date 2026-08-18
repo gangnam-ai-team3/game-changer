@@ -10,6 +10,7 @@ from agents.structured import (
     parse_claude_structured,
     parse_structured,
     require_korean_text,
+    require_native_business_korean,
     require_prelaunch_narrative,
 )
 from contracts import ErrorCode
@@ -19,12 +20,20 @@ class TinyOutput(BaseModel):
     answer: str
 
 
-SAFE_PROSPECTIVE_TEMPLATE = "고정 피해로 결과 예측 가능성이 높아질 가능성이 있음."
+SAFE_PROSPECTIVE_TEMPLATE = "피해량이 고정되면 결과 예측 가능성이 높아질 것으로 예상됩니다."
 
 
 def test_korean_narrative_guard_rejects_all_english_text():
     with pytest.raises(StructuredModelError) as error:
         require_korean_text(["High risk requires revision"])
+    assert error.value.code == ErrorCode.SCHEMA_INVALID
+
+
+@pytest.mark.parametrize("value", ["위험·근거를 확인합니다.", "궁극적으로 혁신적인 변화입니다."])
+def test_business_korean_guard_rejects_discouraged_writing(value):
+    with pytest.raises(StructuredModelError) as error:
+        require_native_business_korean([value])
+
     assert error.value.code == ErrorCode.SCHEMA_INVALID
 
 
@@ -156,6 +165,9 @@ def test_claude_tool_output_uses_pydantic_schema(tmp_path):
     assert result.answer == "ok"
     assert calls[0]["tool_choice"] == {"type": "tool", "name": "structured_output"}
     assert calls[0]["tools"][0]["input_schema"] == TinyOutput.model_json_schema()
+    assert "한국 실무자가 쓰는 격식 있는 비즈니스 한국어" in calls[0]["system"]
+    assert "가운뎃점을 쓰지 말고" in calls[0]["system"]
+    assert "출시 전 예상과 출시 후 실제 결과" in calls[0]["system"]
 
 
 def test_claude_missing_tool_output_becomes_refusal(tmp_path):

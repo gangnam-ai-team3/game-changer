@@ -28,7 +28,7 @@ SIGNAL_TITLES = {
     "skill_fairness": "실력 중심 공정성 인식",
     "balance_regression": "실제 성능 역전 가능성",
     "fairness_regression": "공정성 인식 저하 가능성",
-    "validation_needed": "실제 지표 확인 필요",
+    "validation_needed": "실제 지표 검증 필요성",
     "information_clarity": "변경 정보 이해 가능성",
     "flow_disruption": "이용 동선 변화 부담",
     "rule_exception": "예외 규칙 처리 부담",
@@ -39,7 +39,7 @@ SIGNAL_TITLES = {
 # deterministic signal summary is also added for every signal at runtime.
 _SIGNAL_PROSPECTIVE_ALTERNATIVES = {
     "predictability": (
-        "고정 피해로 결과 예측 가능성이 높아질 가능성이 있음.",
+        "피해량이 고정되면 결과 예측 가능성이 높아질 것으로 예상됩니다.",
     ),
 }
 
@@ -178,6 +178,11 @@ class UpdateEvidenceAgent:
 
         def signals(sentiment: Sentiment) -> list[ReactionSignal]:
             rows = []
+            reaction_label = {
+                Sentiment.POSITIVE: "긍정 반응",
+                Sentiment.NEGATIVE: "우려 반응",
+                Sentiment.MIXED: "상반된 반응",
+            }[sentiment]
             for tag, title in SIGNAL_TITLES.items():
                 items = [
                     item
@@ -189,10 +194,7 @@ class UpdateEvidenceAgent:
                         ReactionSignal(
                             signal_id=f"{sentiment.value}-{tag}",
                             title=title,
-                            summary=(
-                                f"{len(items)}개 비식별 근거에서 {title} 반응이 "
-                                "나타날 가능성이 있음."
-                            ),
+                            summary=f"비식별 근거 {len(items)}건을 바탕으로 {title}에 대한 {reaction_label}이 예상됩니다.",
                             sentiment=sentiment,
                             evidence_ids=[item.evidence_id for item in items],
                             confidence=sum(item.relevance for item in items) / len(items),
@@ -209,6 +211,9 @@ class UpdateEvidenceAgent:
             {"positive": len(positive), "negative": len(negative), "mixed": len(mixed)},
         )
         signal_ids = {item.signal_id for item in [*positive, *negative, *mixed]}
+        signal_titles = {
+            item.signal_id: item.title for item in [*positive, *negative, *mixed]
+        }
         personas = []
         for persona, tags in PERSONA_TAGS.items():
             items = [item for item in deduplicated if tags.intersection(item.mechanism_tags)]
@@ -225,10 +230,21 @@ class UpdateEvidenceAgent:
                 if item.signal_id.split("-", 1)[1] in tags
             ]
             linked = items[:15]
+            if positive_ids and negative_ids:
+                expected_reaction = (
+                    f"{signal_titles[positive_ids[0]]}에는 긍정적일 수 있지만, "
+                    f"{signal_titles[negative_ids[0]]}에는 우려가 커져 반응이 갈릴 것으로 예상됩니다."
+                )
+            elif positive_ids:
+                expected_reaction = f"{signal_titles[positive_ids[0]]}을 중심으로 긍정적인 반응이 예상됩니다."
+            elif negative_ids:
+                expected_reaction = f"{signal_titles[negative_ids[0]]}을 중심으로 우려하는 반응이 예상됩니다."
+            else:
+                expected_reaction = "이용 조건에 따라 상반된 반응이 나타날 것으로 예상됩니다."
             personas.append(
                 UpdatePersonaImpact(
                     persona=persona,
-                    expected_reaction="연결된 긍정·부정 신호에 따라 반응이 갈릴 가능성이 있음.",
+                    expected_reaction=expected_reaction,
                     positive_signal_ids=[value for value in positive_ids if value in signal_ids],
                     negative_signal_ids=[value for value in negative_ids if value in signal_ids],
                     split_signal_ids=[
@@ -248,16 +264,18 @@ class UpdateEvidenceAgent:
             sample = samples.get(language)
             counts = Counter(item.sentiment for item in items)
             sufficient = bool(sample and sample.sufficient)
+            language_conclusion = (
+                f"긍정 {counts[Sentiment.POSITIVE]}건, 우려 {counts[Sentiment.NEGATIVE]}건, "
+                f"혼합 {counts[Sentiment.MIXED]}건을 바탕으로 반응이 갈릴 것으로 예상됩니다."
+            )
             language_insights.append(
                 UpdateLanguageInsight(
                     language=language,
-                    conclusion=(
-                        "언어권별 긍정·부정·혼합 반응이 갈릴 가능성이 있음."
-                        if sufficient
-                        else None
-                    ),
+                    conclusion=language_conclusion if sufficient else None,
                     hidden_reason=(
-                        None if sufficient else "일반 100건·관련 15건 최소 표본 미달"
+                        None
+                        if sufficient
+                        else "일반 의견 100건과 관련 의견 15건의 최소 표본 기준에 미달했습니다."
                     ),
                     sentiment_counts={sentiment: counts[sentiment] for sentiment in Sentiment},
                     evidence_ids=[item.evidence_id for item in items],

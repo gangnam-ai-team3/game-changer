@@ -35,6 +35,9 @@ def test_fixture_run_returns_pipeline_artifacts():
     result = response.json()["result"]
     assert result["brief"]["decision"] == "Revise"
     assert "수정 필요" in result["brief"]["executive_summary"]
+    assert "이용자 유형" in result["brief"]["executive_summary"]
+    assert "언어권" in result["brief"]["executive_summary"]
+    assert "따라서" in result["brief"]["executive_summary"]
     assert result["feedback"]["evidence"]
     assert result["events"]
     assert all("개 우선 위험" not in panel["reaction"] for panel in result["brief"]["panel_results"])

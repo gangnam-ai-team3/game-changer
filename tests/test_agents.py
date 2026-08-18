@@ -363,6 +363,37 @@ def test_collector_never_loads_fixture_in_live_mode(monkeypatch, event):
     assert all(not item.synthetic for item in bundle.evidence)
 
 
+def test_event_collector_supports_x_without_steam(event):
+    class FakeX:
+        def fetch_recent(
+            self,
+            _query,
+            language,
+            cutoff_at,
+            estimated_cost_usd=0,
+        ):
+            return [
+                RawFeedback(
+                    source=SourceType.X,
+                    source_url="https://x.com",
+                    source_id=f"anonymous-x-{language.value}",
+                    language=language,
+                    observed_at=cutoff_at - timedelta(days=1),
+                    text="the two-step reward path is confusing",
+                )
+            ]
+
+    bundle = CollectorAgent(x_client=FakeX()).run(
+        event,
+        CollectionOptions(use_fixture=False, use_x=True, x_query="PUBG event"),
+    )
+
+    assert bundle.input_mode == InputMode.LIVE
+    assert bundle.evidence
+    assert {item.source for item in bundle.evidence} == {SourceType.X}
+    assert {item.source for item in bundle.search_log} == {SourceType.X}
+
+
 def test_live_evidence_ids_do_not_depend_on_api_order(event):
     items = [
         RawFeedback(

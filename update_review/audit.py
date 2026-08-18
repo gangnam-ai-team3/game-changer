@@ -33,7 +33,7 @@ from update_review.policy import (
 # The visible brief is deterministic.  This is the only optional Claude
 # executive wording accepted before the code-owned brief is retained.
 _AUDIT_EXECUTIVE_PROSPECTIVE_TEMPLATES = (
-    "결과 예측 가능성은 개선될 수 있으나 전투 지표는 테스트로 확인 필요.",
+    "결과 예측 가능성은 개선될 수 있지만 전투 지표는 테스트로 확인해야 합니다.",
 )
 
 
@@ -240,6 +240,22 @@ class UpdateAuditAgent:
             UpdateDecision.TEST: "테스트 후 출시",
             UpdateDecision.HOLD: "판정 보류",
         }[decision.decision]
+        visible_languages = sum(
+            insight.conclusion is not None for insight in pack.language_insights
+        )
+        risk_summary = (
+            f"우선 확인할 위험은 {', '.join(risk.title.replace('·', ', ') for risk in top_risks[:3])}입니다."
+            if top_risks
+            else "현재 자료에서는 우선 수정이 필요한 위험이 확인되지 않았습니다."
+        )
+        executive_summary = (
+            f"{brief.update_name}의 출시 판단은 {label}입니다. "
+            f"출시 전 자료에서 긍정 신호 {len(impact.expected_positive)}건과 "
+            f"우려 신호 {len(impact.expected_negative)}건을 확인했고, "
+            f"이용자 유형 {len(pack.persona_impacts)}개와 결론을 공개할 수 있는 "
+            f"언어권 {visible_languages}개의 예상 반응을 종합했습니다. "
+            f"{risk_summary} 따라서 {decision.decision_reason}"
+        )
         return UpdateDecisionBrief(
             run_id=brief.run_id,
             status=decision.status,
@@ -247,7 +263,7 @@ class UpdateAuditAgent:
             input_refs=[brief.ref, pack.ref, impact.ref, decision.ref],
             errors=list(decision.errors),
             decision=decision.decision,
-            executive_summary=f"{brief.update_name}: {label}. {decision.decision_reason}",
+            executive_summary=executive_summary,
             official_context=brief.official_context,
             official_context_url=brief.official_context_url,
             expected_positive=impact.expected_positive,

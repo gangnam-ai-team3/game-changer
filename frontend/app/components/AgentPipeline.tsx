@@ -2,6 +2,8 @@
 
 import { useMemo } from "react";
 
+import { businessKorean, businessKoreanJson } from "./businessKorean";
+
 export type AgentEvent = {
   sequence: number;
   agent: string;
@@ -51,7 +53,7 @@ const eventAgents: Record<(typeof agentOrder)[number], AgentInfo> = {
   audit_strategy: {
     label: "최종 판정 에이전트",
     contract: "ValidatedDecision",
-    role: "근거와 기준을 다시 확인해 Go·Revise·Hold와 개선안을 결정합니다.",
+    role: "근거와 기준을 다시 확인해 Go, Revise, Hold 중 하나를 선택하고 개선안을 정리합니다.",
   },
 };
 
@@ -59,12 +61,12 @@ const updateAgents: Record<(typeof agentOrder)[number], AgentInfo> = {
   collection: {
     label: "자료 수집 에이전트",
     contract: "UpdateFeedbackBundle",
-    role: "기간·출처·감정·비식별 요약을 업데이트 자료로 정규화합니다.",
+    role: "기간, 출처, 감정, 비식별 요약을 일관된 업데이트 자료로 정리합니다.",
   },
   evidence_rag_personas: {
     label: "변경 영향 분석 에이전트",
     contract: "UpdateEvidencePack",
-    role: "긍정·부정·혼합 신호와 이용자 유형을 연결합니다.",
+    role: "긍정, 부정, 혼합 신호를 이용자 유형과 연결합니다.",
   },
   event_redteam: {
     label: "업데이트 레드팀 에이전트",
@@ -72,9 +74,9 @@ const updateAgents: Record<(typeof agentOrder)[number], AgentInfo> = {
     role: "실패 경로와 출시 후 확인 지표를 제안합니다.",
   },
   audit_strategy: {
-    label: "검증·전략 에이전트",
+    label: "검증 및 전략 에이전트",
     contract: "UpdateValidatedDecision",
-    role: "근거·위험·지표를 검증해 출시 판정을 계산합니다.",
+    role: "근거, 위험, 지표를 검증해 출시 판정을 계산합니다.",
   },
 };
 
@@ -94,7 +96,7 @@ const nodeLabels: Record<string, string> = {
   pack_ready: "의견 분석 결과 정리",
   embedding_ranked: "관련 의견 우선 정렬",
   structured_output_validated: "AI 설명 형식 확인",
-  change_reviewed: "변경 전·후 점검",
+  change_reviewed: "변경 전후 점검",
   event_reviewed: "이벤트 조건 점검",
   failure_paths_built: "문제 발생 경로 정리",
   metrics_linked: "확인 지표 연결",
@@ -186,10 +188,10 @@ export function AgentPipeline({
               <span className="agent-status">
                 <i />
                 {stateLabels[status]}
-                {current ? ` · ${nodeLabels[current.node] ?? current.node}` : ""}
+                {current ? `, ${nodeLabels[current.node] ?? current.node}` : ""}
               </span>
-              <p className="agent-owner">담당자 · {owners[agent]}</p>
-              <p className="agent-contract">출력 형식 · {info.contract}</p>
+              <p className="agent-owner">담당자: {owners[agent]}</p>
+              <p className="agent-contract">출력 형식: {info.contract}</p>
               <p className="agent-role">{info.role}</p>
             </div>
             <div className="nodes">
@@ -199,22 +201,23 @@ export function AgentPipeline({
                     <small>노드 {String(nodeIndex + 1).padStart(2, "0")}</small>
                     <strong>{nodeLabels[event.node] ?? event.node}</strong>
                     <code>{event.node}</code>
-                    <p>{event.message}</p>
+                    <p>{businessKorean(event.message)}</p>
                   </summary>
                   <div className="node-detail">
                     <p>
-                      <b>자연어 설명</b> {event.message}
+                      <b>자연어 설명</b> {businessKorean(event.message)}
                     </p>
                     <p>
                       <b>정의된 값</b>{" "}
                       {Object.entries(event.metrics)
                         .map(([key, value]) => `${key}=${String(value)}`)
+                        .map(businessKorean)
                         .join(", ") || "추가 지표 없음"}
                     </p>
                     <p>
                       <b>처리 상태</b> {stateLabels[event.state] ?? event.state}
                     </p>
-                    <pre>{JSON.stringify(event, null, 2)}</pre>
+                    <pre>{businessKoreanJson(event)}</pre>
                   </div>
                 </details>
               ))}

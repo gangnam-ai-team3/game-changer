@@ -62,7 +62,7 @@ def _valid_evidence_narrative(signal):
             {
                 "signal_id": signal.signal_id,
                 "title": "예측 가능성 개선 예상",
-                "summary": "고정 피해로 결과 예측 가능성이 높아질 가능성이 있음.",
+                "summary": "피해량이 고정되면 결과 예측 가능성이 높아질 것으로 예상됩니다.",
                 "evidence_ids": signal.evidence_ids,
             }
         ]
@@ -75,7 +75,7 @@ def _valid_redteam_narrative(risk, metric):
             {
                 "risk_id": risk.risk_id,
                 "title": "전투 성능 재확인 필요",
-                "failure_path": "실제 특성 조합에서 메타가 쏠릴 가능성이 있음.",
+                "failure_path": "실제 특성 조합에 따라 메타가 한쪽으로 쏠릴 수 있습니다.",
                 "revision_question": "테스트 서버 지표를 확인할 수 있는가?",
                 "evidence_ids": risk.evidence_ids,
                 "validation_metric_ids": [metric.metric_id],
@@ -87,12 +87,12 @@ def _valid_redteam_narrative(risk, metric):
 def _valid_audit_narrative(risk, metric, executive_summary=None):
     return {
         "executive_summary": executive_summary
-        or "결과 예측 가능성은 개선될 수 있으나 전투 지표는 테스트로 확인 필요.",
+        or "결과 예측 가능성은 개선될 수 있지만 전투 지표는 테스트로 확인해야 합니다.",
         "recommendations": [
             {
                 "risk_id": risk.risk_id,
                 "title": "테스트 서버 확인",
-                "action": "사용률·승률·평균 피해를 확인한다.",
+                "action": "사용률, 승률, 평균 피해를 확인한다.",
                 "validation_metric_ids": [metric.metric_id],
             }
         ],
@@ -141,6 +141,10 @@ def test_dragunov_pipeline_is_reproducible_and_requires_test():
     second = UpdateReviewOrchestrator().run(load_dragunov_brief("stable-run"))
     assert first.brief == second.brief
     assert first.brief.decision is UpdateDecision.TEST
+    assert "긍정 신호" in first.brief.executive_summary
+    assert "이용자 유형" in first.brief.executive_summary
+    assert "언어권" in first.brief.executive_summary
+    assert "따라서" in first.brief.executive_summary
     assert first.feedback.ref in first.evidence.input_refs
     assert first.evidence.ref in first.impact.input_refs
     assert first.impact.ref in first.validated.input_refs
@@ -276,7 +280,7 @@ def test_claude_accepts_prospective_templates_without_overwriting_code_owned_art
                     {
                         "signal_id": positive.signal_id,
                         "title": "예측 가능성 개선 예상",
-                        "summary": "고정 피해로 결과 예측 가능성이 높아질 가능성이 있음.",
+                        "summary": "피해량이 고정되면 결과 예측 가능성이 높아질 것으로 예상됩니다.",
                         "evidence_ids": positive.evidence_ids,
                     }
                 ]
@@ -286,7 +290,7 @@ def test_claude_accepts_prospective_templates_without_overwriting_code_owned_art
                     {
                         "risk_id": risk.risk_id,
                         "title": "전투 성능 재확인 필요",
-                        "failure_path": "실제 특성 조합에서 메타가 쏠릴 가능성이 있음.",
+                        "failure_path": "실제 특성 조합에 따라 메타가 한쪽으로 쏠릴 수 있습니다.",
                         "revision_question": "테스트 서버 지표를 확인할 수 있는가?",
                         "evidence_ids": risk.evidence_ids,
                         "validation_metric_ids": [metric.metric_id],
@@ -294,12 +298,12 @@ def test_claude_accepts_prospective_templates_without_overwriting_code_owned_art
                 ]
             },
             {
-                "executive_summary": "결과 예측 가능성은 개선될 수 있으나 전투 지표는 테스트로 확인 필요.",
+                "executive_summary": "결과 예측 가능성은 개선될 수 있지만 전투 지표는 테스트로 확인해야 합니다.",
                 "recommendations": [
                     {
                         "risk_id": risk.risk_id,
                         "title": "테스트 서버 확인",
-                        "action": "사용률·승률·평균 피해를 확인한다.",
+                        "action": "사용률, 승률, 평균 피해를 확인한다.",
                         "validation_metric_ids": [metric.metric_id],
                     }
                 ],

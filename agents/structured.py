@@ -27,6 +27,18 @@ def require_korean_text(values: list[str]) -> None:
         )
 
 
+def require_native_business_korean(values: list[str]) -> None:
+    """Keep user-facing model prose natural, precise, and presentation-safe."""
+
+    require_korean_text(values)
+    forbidden = ("·", "본질적으로", "궁극적으로", "실질적으로", "이유는 명확", "혁신적인 변화")
+    if any(token in value for value in values for token in forbidden):
+        raise StructuredModelError(
+            ErrorCode.SCHEMA_INVALID,
+            "Claude 설명이 한국어 비즈니스 문장 기준을 충족하지 못했습니다.",
+        )
+
+
 def _normalized_template(value: str) -> str:
     return " ".join(value.split())
 
@@ -39,9 +51,9 @@ def require_prelaunch_narrative(
 ) -> None:
     """Require semantic prose to select an approved pre-launch template exactly."""
 
-    require_korean_text(values)
+    require_native_business_korean(values)
     required = values if prediction_fields is None else prediction_fields
-    require_korean_text(required)
+    require_native_business_korean(required)
     allowed = {_normalized_template(value) for value in prospective_templates}
     if any(_normalized_template(value) not in allowed for value in required):
         raise StructuredModelError(
@@ -159,6 +171,10 @@ def parse_claude_structured[T: BaseModel](
     encoded = json.dumps(body, ensure_ascii=False)
     system_prompt = (
         prompt_path.read_text(encoding="utf-8")
+        + "\n\n자연어 문구는 한국 실무자가 쓰는 격식 있는 비즈니스 한국어로 작성하십시오. "
+        "가운뎃점을 쓰지 말고 쉼표나 자연스러운 연결 표현을 사용하십시오. "
+        "번역투, 과장, 모호한 추상어, 반복되는 어미를 피하고 판단 근거와 다음 조치를 분명히 쓰십시오. "
+        "출시 전 예상과 출시 후 실제 결과를 반드시 구분하십시오."
         + "\nReturn the result only through the required structured_output tool."
     )
     tool_schema = output_type.model_json_schema()

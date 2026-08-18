@@ -3,6 +3,7 @@
 import { ChangeEvent, FormEvent, useState } from "react";
 
 import { AgentEvent, AgentPipeline } from "./AgentPipeline";
+import { businessKorean, businessKoreanJson } from "./businessKorean";
 import { utcWallClockToIso } from "./utcWallClock";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -74,6 +75,14 @@ type PersonaImpact = {
   confidence: number;
 };
 
+type Recommendation = {
+  priority: number;
+  title: string;
+  action: string;
+  addresses_risk_ids: string[];
+  validation_metric_ids: string[];
+};
+
 type Artifact = Record<string, unknown>;
 
 type UpdateRunResult = {
@@ -91,7 +100,7 @@ type UpdateRunResult = {
     top_risks: Risk[];
     validation_metrics: Metric[];
     evidence: Evidence[];
-    recommendations: Array<Record<string, unknown>>;
+    recommendations: Recommendation[];
   } & Artifact;
   feedback: { evidence: Evidence[]; status?: string; input_mode?: string } & Artifact;
   evidence: Artifact;
@@ -151,8 +160,8 @@ const decisionDescriptions: Record<string, string> = {
 
 const updateTypeLabels: Record<UpdateType, string> = {
   weapon_balance: "무기 밸런스",
-  ui_ux: "UI·UX",
-  system_rules: "시스템·규칙",
+  ui_ux: "UI와 UX",
+  system_rules: "시스템 규칙",
 };
 
 const languageLabels: Record<string, string> = {
@@ -178,14 +187,14 @@ const initial: UpdateForm = {
   change_summary: "확률형 피해를 제거하고 피해를 60으로 고정",
   goal: "운에 따른 편차를 줄이고 전투 결과 예측 가능성을 높인다.",
   expected_benefits: "피해 결과 예측 가능성, 실력 중심 전투, 공정성 인식 개선",
-  concerns: "반동·연사력을 포함한 실제 성능, 사용률 쏠림, 메타 변화",
+  concerns: "반동과 연사력을 포함한 실제 성능, 사용률 쏠림, 메타 변화",
   scope: "일반 매칭의 Dragunov 사용 경험",
   planned_on: "2026-08-20",
   cutoff_on: "2026-08-13",
   official_context_url: "https://pubg.com/en/news/6616",
   official_context: "PUBG Update 25.2의 확률형 피해 제거 공식 변경 맥락",
   target_weapon: "Dragunov",
-  damage: "기본 58·최대 73 확률 → 60 고정",
+  damage: "기본 피해 58, 최대 피해 73의 확률형 구조에서 피해 60 고정으로 변경",
   recoil: "현행 유지",
   rate_of_fire: "해당 없음",
   ammunition: "7.62mm",
@@ -247,7 +256,7 @@ function formatApiError(detail: unknown) {
           ? String(item.msg)
           : String(item),
       )
-      .join(" · ");
+      .join(", ");
   }
   return typeof detail === "string" ? detail : "업데이트 점검을 실행할 수 없습니다.";
 }
@@ -284,7 +293,7 @@ function ArtifactDetails({ result }: { result: UpdateRunResult }) {
     ["UpdateFeedbackBundle", "자료 수집 결과", result.feedback],
     ["UpdateEvidencePack", "변경 영향 분석 결과", result.evidence],
     ["UpdateImpactAssessment", "레드팀 영향 점검 결과", result.impact],
-    ["UpdateValidatedDecision", "검증·전략 판정 결과", result.validated],
+    ["UpdateValidatedDecision", "검증 및 전략 판정 결과", result.validated],
     ["UpdateDecisionBrief", "발표용 최종 요약", result.brief],
   ];
 
@@ -301,7 +310,7 @@ function ArtifactDetails({ result }: { result: UpdateRunResult }) {
               <span>{label}</span>
               <code>{contract}</code>
             </summary>
-            <pre>{JSON.stringify(artifact, null, 2)}</pre>
+            <pre>{businessKoreanJson(artifact)}</pre>
           </details>
         ))}
       </div>
@@ -471,6 +480,13 @@ export function UpdateReview() {
 
   const actualAfter = result?.brief.evidence.filter((item) => item.period === "after") ?? [];
   const decision = result ? decisionLabels[result.brief.decision] ?? result.brief.decision : "";
+  const visibleLanguages = result?.brief.language_insights.filter((item) => item.conclusion) ?? [];
+  const primaryPositive = result?.brief.expected_positive[0];
+  const primaryNegative = result?.brief.expected_negative[0];
+  const primaryRisk = result?.brief.top_risks[0];
+  const primaryRecommendation = result?.brief.recommendations
+    .slice()
+    .sort((left, right) => left.priority - right.priority)[0];
 
   return (
     <section className="update-review" aria-label="업데이트 점검">
@@ -480,7 +496,7 @@ export function UpdateReview() {
         </p>
         <h2>변경안의 예상 반응과 출시 조건을 점검합니다.</h2>
         <p>
-          변경 내용을 기준으로 예상 긍정·부정 반응, 검증 지표, 출시 판단을 한 화면에서
+          변경 내용을 기준으로 예상되는 긍정 반응과 우려 반응, 검증 지표, 출시 판단을 한 화면에서
           확인합니다.
         </p>
       </div>
@@ -506,10 +522,10 @@ export function UpdateReview() {
                 <strong>{updateTypeLabels[type]}</strong>
                 <span>
                   {type === "weapon_balance"
-                    ? "피해량·반동·사용 환경의 균형을 점검합니다."
+                    ? "피해량, 반동, 사용 환경의 균형을 점검합니다."
                     : type === "ui_ux"
-                      ? "화면·동선·정보 이해와 오류 가능성을 점검합니다."
-                      : "참여 조건·보상·예외 규칙의 영향을 점검합니다."}
+                      ? "화면, 이용 동선, 정보 이해와 오류 가능성을 점검합니다."
+                      : "참여 조건, 보상, 예외 규칙의 영향을 점검합니다."}
                 </span>
               </button>
             ))}
@@ -629,7 +645,7 @@ export function UpdateReview() {
                 onChange={updateForm}
               />
               <FormField
-                label="스폰·사용 모드"
+                label="스폰 및 사용 모드"
                 name="spawn_and_modes"
                 value={form.spawn_and_modes}
                 onChange={updateForm}
@@ -722,7 +738,7 @@ export function UpdateReview() {
               aria-pressed={sourceMode === "live"}
               onClick={() => selectSourceMode("live")}
             >
-              <strong>Steam·X 실시간 갱신</strong>
+              <strong>Steam과 X 실시간 갱신</strong>
               <span>기준일 이전의 선택한 공개 자료만 수집합니다.</span>
             </button>
             <button
@@ -732,7 +748,7 @@ export function UpdateReview() {
               onClick={() => selectSourceMode("import")}
             >
               <strong>승인 CSV 가져오기</strong>
-              <span>개인정보·원문 열이 없는 승인 UTF-8 CSV만 사용합니다.</span>
+              <span>개인정보와 원문 열이 없는 승인된 UTF-8 CSV만 사용합니다.</span>
             </button>
           </div>
 
@@ -764,7 +780,7 @@ export function UpdateReview() {
                 />
               </label>
               <label className="field">
-                <span>수집 종료·기준 시각 (UTC)</span>
+                <span>수집 종료 및 기준 시각 (UTC)</span>
                 <input
                   type="datetime-local"
                   value={periodEnd}
@@ -800,7 +816,7 @@ export function UpdateReview() {
             <span>Claude로 한국어 설명 보강</span>
             <small>
               {useClaude
-                ? "근거 ID·위험·최종 판정은 결정론 정책이 유지합니다."
+                ? "근거 ID, 위험, 최종 판정은 코드 정책으로 다시 검증합니다."
                 : "결정론적 분석 경로만 실행합니다."}
             </small>
           </label>
@@ -831,47 +847,128 @@ export function UpdateReview() {
 
       {result && (
         <section className="results update-results">
-          <div className="result-banner">
-            <div>
-              <p className="eyebrow">출시 판단</p>
-              <h2>{decision}</h2>
-              <p>{result.brief.executive_summary}</p>
-              <small>
-                {decisionDescriptions[result.brief.decision] ?? decisionDescriptions.Hold} · {" "}
-                {result.analysis_incomplete
-                  ? "외부 자료 분석이 충분하지 않아 안전하게 보류했습니다"
-                  : result.llm_requested
-                    ? result.fallback_used
-                      ? "Claude 설명은 안전한 결정론 경로로 대체되었습니다"
-                      : `Claude 설명 보강 사용 (${result.llm_provider})`
-                    : "결정론적 분석 사용"}
-                {" · 실행 ID "}
-                {result.brief.run_id}
-              </small>
-            </div>
-            <span className="decision">{decision}</span>
-          </div>
+          <section className="decision-brief" aria-labelledby="update-decision-title">
+            <header className="decision-brief-head">
+              <div>
+                <p className="eyebrow">출시 판단</p>
+                <h2 id="update-decision-title">{decision}</h2>
+              </div>
+              <span className="decision">{decision}</span>
+            </header>
+            <p className="decision-summary">{businessKorean(result.brief.executive_summary)}</p>
+            <p className="decision-caution">
+              출시 전 자료를 바탕으로 한 예상입니다. 실제 이용자 반응과 출시 후 성과를 의미하지 않습니다.
+            </p>
 
-          <div className="stats">
-            <div>
-              <small>확인된 위험</small>
-              <strong>{result.brief.top_risks.length}</strong>
+            <div className="decision-logic" aria-label="출시 판단 과정">
+              <article>
+                <span>1. 판단 근거</span>
+                <strong>비식별 근거 {result.brief.evidence.length}건</strong>
+                <small>기준일 이전 자료만 사용</small>
+              </article>
+              <b aria-hidden="true">→</b>
+              <article>
+                <span>2. 예상 반응</span>
+                <strong>이용자 유형 {result.brief.persona_impacts.length}개, 언어권 {visibleLanguages.length}개</strong>
+                <small>표본 기준을 통과한 결론만 공개</small>
+              </article>
+              <b aria-hidden="true">→</b>
+              <article>
+                <span>3. 출시 판단</span>
+                <strong>{decision}</strong>
+                <small>{businessKorean(decisionDescriptions[result.brief.decision] ?? decisionDescriptions.Hold)}</small>
+              </article>
             </div>
-            <div>
-              <small>비식별 근거</small>
-              <strong>{result.brief.evidence.length}</strong>
+
+            <div className="decision-signal-grid">
+              <article className="decision-signal positive">
+                <span>예상 긍정 반응</span>
+                <strong>{businessKorean(primaryPositive?.title ?? "확인된 긍정 신호 없음")}</strong>
+                <p>{businessKorean(primaryPositive?.summary ?? "현재 근거에서는 별도의 긍정 반응을 예상하기 어렵습니다.")}</p>
+              </article>
+              <article className="decision-signal negative">
+                <span>예상 우려 반응</span>
+                <strong>{businessKorean(primaryNegative?.title ?? primaryRisk?.title ?? "확인된 우려 신호 없음")}</strong>
+                <p>{businessKorean(primaryNegative?.summary ?? primaryRisk?.failure_path ?? "현재 근거에서는 우선 확인할 우려 반응이 없습니다.")}</p>
+              </article>
+              <article className="decision-signal split">
+                <span>반응이 갈릴 조건</span>
+                <strong>{businessKorean(result.brief.split_conditions[0]?.title ?? "뚜렷한 분기 조건 없음")}</strong>
+                <p>{businessKorean(result.brief.split_conditions[0]?.summary ?? "이용자 유형별 차이는 아래 예상 반응에서 확인할 수 있습니다.")}</p>
+              </article>
             </div>
-            <div>
-              <small>처리 노드</small>
-              <strong>{result.events.filter((event) => event.node !== "agent").length}</strong>
+
+            <div className="decision-context-grid">
+              <section>
+                <h3>이용자 유형별 예상 반응</h3>
+                <div className="decision-list">
+                  {result.brief.persona_impacts.map((item) => (
+                    <article key={item.persona}>
+                      <strong>{personaLabels[item.persona] ?? businessKorean(item.persona)}</strong>
+                      <p>{businessKorean(item.expected_reaction)}</p>
+                      <small>근거 {item.evidence_ids.length}건, 신뢰도 {Math.round(item.confidence * 100)}%</small>
+                    </article>
+                  ))}
+                </div>
+              </section>
+              <section>
+                <h3>언어권별 예상</h3>
+                <div className="decision-list">
+                  {result.brief.language_insights.map((item) => (
+                    <article className={item.conclusion ? "" : "is-muted"} key={item.language}>
+                      <strong>{languageLabels[item.language] ?? businessKorean(item.language)}</strong>
+                      <p>{businessKorean(item.conclusion ?? item.hidden_reason ?? "표본이 부족해 결론을 공개하지 않습니다.")}</p>
+                      <small>{item.conclusion ? `근거 ${item.evidence_ids.length}건, 신뢰도 ${Math.round(item.confidence * 100)}%` : "표본 보강 필요"}</small>
+                    </article>
+                  ))}
+                </div>
+              </section>
             </div>
-          </div>
+
+            <div className="decision-grounding">
+              <section>
+                <h3>판단을 좌우한 위험</h3>
+                {result.brief.top_risks.length ? (
+                  <ul>
+                    {result.brief.top_risks.slice(0, 3).map((risk) => (
+                      <li key={risk.risk_id}>
+                        <strong>{businessKorean(risk.title)}</strong>
+                        <span>{businessKorean(risk.failure_path)}</span>
+                        <small>근거 {risk.evidence_ids.length}건, 신뢰도 {Math.round(risk.confidence * 100)}%</small>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p>현재 자료에서는 우선 수정이 필요한 위험이 확인되지 않았습니다.</p>
+                )}
+              </section>
+              <aside className="decision-action">
+                <span>지금 해야 할 일</span>
+                <h3>{businessKorean(primaryRecommendation?.title ?? decision)}</h3>
+                <p>{businessKorean(primaryRecommendation?.action ?? decisionDescriptions[result.brief.decision] ?? decisionDescriptions.Hold)}</p>
+                {result.brief.validation_metrics[0] && (
+                  <small>확인 기준: {businessKorean(result.brief.validation_metrics[0].success_condition)}</small>
+                )}
+              </aside>
+            </div>
+
+            <footer className="decision-meta">
+              <span>{result.analysis_incomplete
+                ? "외부 자료 분석이 충분하지 않아 판정을 보류했습니다."
+                : result.llm_requested
+                  ? result.fallback_used
+                    ? "Claude 설명은 안전한 결정론 경로로 대체했습니다."
+                    : `Claude 설명 보강을 사용했습니다. (${result.llm_provider})`
+                  : "결정론적 분석을 사용했습니다."}</span>
+              <span>실행 ID: {result.brief.run_id}</span>
+            </footer>
+          </section>
 
           {(result.brief.official_context || result.brief.official_context_url) && (
             <section className="official-context">
               <p className="eyebrow">공식 자료</p>
               <h2>공식으로 확인된 변경 맥락</h2>
-              {result.brief.official_context && <p>{result.brief.official_context}</p>}
+              {result.brief.official_context && <p>{businessKorean(result.brief.official_context)}</p>}
               {result.brief.official_context_url && (
                 <a href={result.brief.official_context_url} target="_blank" rel="noreferrer">
                   공식 변경 내용 열기
@@ -883,7 +980,7 @@ export function UpdateReview() {
           <section className="reaction-section">
             <div className="section-title">
               <h2>출시 전 예상 반응</h2>
-              <p>긍정·부정 신호와 반응이 갈릴 조건을 실제 반응과 구분해 표시합니다.</p>
+              <p>예상되는 긍정 반응과 우려 반응, 반응이 갈릴 조건을 실제 반응과 구분해 표시합니다.</p>
             </div>
             <div className="reaction-grid">
               <article className="reaction-card positive">
@@ -891,9 +988,9 @@ export function UpdateReview() {
                 {result.brief.expected_positive.length ? (
                   result.brief.expected_positive.map((item) => (
                     <div className="reaction-entry" key={item.impact_id}>
-                      <h3>{item.title}</h3>
-                      <p>{item.summary}</p>
-                      <small>근거 {item.evidence_ids.length}개 · 신뢰도 {Math.round(item.confidence * 100)}%</small>
+                      <h3>{businessKorean(item.title)}</h3>
+                      <p>{businessKorean(item.summary)}</p>
+                      <small>근거 {item.evidence_ids.length}건, 신뢰도 {Math.round(item.confidence * 100)}%</small>
                     </div>
                   ))
                 ) : (
@@ -905,9 +1002,9 @@ export function UpdateReview() {
                 {result.brief.expected_negative.length ? (
                   result.brief.expected_negative.map((item) => (
                     <div className="reaction-entry" key={item.impact_id}>
-                      <h3>{item.title}</h3>
-                      <p>{item.summary}</p>
-                      <small>근거 {item.evidence_ids.length}개 · 신뢰도 {Math.round(item.confidence * 100)}%</small>
+                      <h3>{businessKorean(item.title)}</h3>
+                      <p>{businessKorean(item.summary)}</p>
+                      <small>근거 {item.evidence_ids.length}건, 신뢰도 {Math.round(item.confidence * 100)}%</small>
                     </div>
                   ))
                 ) : (
@@ -919,14 +1016,14 @@ export function UpdateReview() {
                 {result.brief.persona_impacts.map((item) => (
                   <div className="reaction-entry" key={item.persona}>
                     <h3>{personaLabels[item.persona] ?? item.persona}</h3>
-                    <p>{item.expected_reaction}</p>
-                    <small>근거 {item.evidence_ids.length}개 · 신뢰도 {Math.round(item.confidence * 100)}%</small>
+                    <p>{businessKorean(item.expected_reaction)}</p>
+                    <small>근거 {item.evidence_ids.length}건, 신뢰도 {Math.round(item.confidence * 100)}%</small>
                   </div>
                 ))}
                 {result.brief.split_conditions.map((item) => (
                   <div className="reaction-entry" key={item.signal_id}>
-                    <h3>{item.title}</h3>
-                    <p>{item.summary}</p>
+                    <h3>{businessKorean(item.title)}</h3>
+                    <p>{businessKorean(item.summary)}</p>
                   </div>
                 ))}
               </article>
@@ -947,16 +1044,16 @@ export function UpdateReview() {
                   <strong>{languageLabels[language.language] ?? language.language}</strong>
                   {language.conclusion ? (
                     <>
-                      <p>{language.conclusion}</p>
+                      <p>{businessKorean(language.conclusion)}</p>
                       <small>
                         {Object.entries(language.sentiment_counts)
                           .map(([sentiment, count]) => `${sentiment} ${count}건`)
-                          .join(" · ")}
+                          .join(", ")}
                       </small>
                     </>
                   ) : (
                     <>
-                      <p>{language.hidden_reason ?? "표본 기준 미달로 결론을 숨겼습니다."}</p>
+                      <p>{businessKorean(language.hidden_reason ?? "표본 기준에 미달해 결론을 공개하지 않습니다.")}</p>
                       <small>감정 비율과 수치는 공개하지 않습니다.</small>
                     </>
                   )}
@@ -983,9 +1080,9 @@ export function UpdateReview() {
                 <tbody>
                   {result.brief.validation_metrics.map((metric) => (
                     <tr key={metric.metric_id}>
-                      <td>{metric.title}</td>
-                      <td>{metric.measurement}</td>
-                      <td>{metric.success_condition}</td>
+                      <td>{businessKorean(metric.title)}</td>
+                      <td>{businessKorean(metric.measurement)}</td>
+                      <td>{businessKorean(metric.success_condition)}</td>
                       <td>{metric.addresses_risk_ids.join(", ")}</td>
                     </tr>
                   ))}
@@ -1003,9 +1100,9 @@ export function UpdateReview() {
               <div className="evidence-list">
                 {actualAfter.map((item) => (
                   <details key={item.evidence_id}>
-                    <summary>{item.summary}</summary>
+                    <summary>{businessKorean(item.summary)}</summary>
                     <p className="evidence-meta">
-                      {item.language} · {item.sentiment} · {item.mechanism_tags.join(", ")} · {item.source}
+                      {item.language}, {item.sentiment}, {item.mechanism_tags.join(", ")}, {item.source}
                     </p>
                   </details>
                 ))}
@@ -1022,11 +1119,11 @@ export function UpdateReview() {
               {result.brief.evidence.map((item) => (
                 <details key={item.evidence_id}>
                   <summary>
-                    <span>{item.summary}</span>
+                    <span>{businessKorean(item.summary)}</span>
                     <small>{item.synthetic ? "합성 비교 참고" : "비식별 요약"}</small>
                   </summary>
                   <p className="evidence-meta">
-                    기간 {item.period} · 감정 {item.sentiment} · 관련성 {Math.round(item.relevance * 100)}% · 태그 {item.mechanism_tags.join(", ")}
+                    기간 {item.period}, 감정 {item.sentiment}, 관련성 {Math.round(item.relevance * 100)}%, 태그 {item.mechanism_tags.join(", ")}
                   </p>
                   <a href={item.source_url} target="_blank" rel="noreferrer">
                     {item.source} 출처 열기

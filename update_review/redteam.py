@@ -33,19 +33,19 @@ RISK_BY_TAG = {
 }
 
 RISK_COPY = {
-    UpdateRiskCategory.BALANCE_REGRESSION: ("실제 전투 성능 역전", "고정 피해와 반동·연사력의 조합으로 사용률이 쏠릴 가능성이 있음.", "테스트 서버에서 사용률·승률·평균 피해를 확인할 수 있는가?"),
-    UpdateRiskCategory.FAIRNESS_REGRESSION: ("공정성 인식 역전", "변경 결과가 특정 이용자에게만 유리하게 체감될 가능성이 있음.", "숙련도별 성과 편차를 비교할 수 있는가?"),
-    UpdateRiskCategory.INFORMATION_CLARITY: ("변경 정보 이해 부족", "변경 전·후 차이를 알지 못해 잘못된 행동을 할 가능성이 있음.", "한 화면에서 변경 전·후를 설명할 수 있는가?"),
-    UpdateRiskCategory.FLOW_DISRUPTION: ("사용 동선 분절", "새 화면과 절차가 작업 흐름을 끊을 가능성이 있음.", "핵심 작업을 기존 단계 안에서 끝낼 수 있는가?"),
-    UpdateRiskCategory.RULE_EXCEPTION: ("예외 규칙 누락", "기존 이용자와 경계 상황에서 다른 결과가 나올 가능성이 있음.", "경계값·기존 상태·예외 사용자를 모두 테스트했는가?"),
-    UpdateRiskCategory.LEARNING_BURDEN: ("새 규칙 학습 부담", "기존 습관을 다시 배워야 해 이탈할 가능성이 있음.", "첫 사용에서 별도 설명 없이 완료할 수 있는가?"),
+    UpdateRiskCategory.BALANCE_REGRESSION: ("실제 전투 성능 역전", "고정 피해와 반동, 연사력의 조합으로 사용률이 쏠릴 수 있습니다.", "테스트 서버에서 사용률, 승률, 평균 피해를 확인할 수 있는가?"),
+    UpdateRiskCategory.FAIRNESS_REGRESSION: ("공정성 인식 역전", "변경 결과가 특정 이용자에게만 유리하게 느껴질 수 있습니다.", "숙련도별 성과 편차를 비교할 수 있는가?"),
+    UpdateRiskCategory.INFORMATION_CLARITY: ("변경 정보 이해 부족", "변경 전후의 차이를 알지 못해 잘못된 행동을 할 수 있습니다.", "한 화면에서 변경 전후의 차이를 설명할 수 있는가?"),
+    UpdateRiskCategory.FLOW_DISRUPTION: ("사용 동선 분절", "새 화면과 절차가 기존 작업 흐름을 끊을 수 있습니다.", "핵심 작업을 기존 단계 안에서 끝낼 수 있는가?"),
+    UpdateRiskCategory.RULE_EXCEPTION: ("예외 규칙 누락", "기존 이용자와 경계 상황에서 서로 다른 결과가 나타날 수 있습니다.", "경계값, 기존 상태, 예외 사용자를 모두 테스트했는가?"),
+    UpdateRiskCategory.LEARNING_BURDEN: ("새 규칙 학습 부담", "기존 습관을 다시 배워야 해 이탈 가능성이 커질 수 있습니다.", "첫 사용에서 별도 설명 없이 완료할 수 있는가?"),
 }
 
 # Claude chooses from code-owned prospective wording; it never supplies stored
 # failure-path prose itself.
 _RISK_PROSPECTIVE_ALTERNATIVES = {
     UpdateRiskCategory.BALANCE_REGRESSION: (
-        "실제 특성 조합에서 메타가 쏠릴 가능성이 있음.",
+        "실제 특성 조합에 따라 메타가 한쪽으로 쏠릴 수 있습니다.",
     ),
 }
 
@@ -228,7 +228,7 @@ class UpdateRedteamAgent:
                 metric_id=f"metric-{risk.category.value}",
                 title=f"{risk.title} 확인 지표",
                 measurement="업데이트 직접 언급 의견의 감정 비율과 관련 행동 지표를 비교",
-                success_condition="부정 반응이 사전 경계값을 넘지 않고 행동 지표의 악화가 없음",
+                success_condition="부정 반응이 사전 경계값을 넘지 않고 행동 지표가 악화되지 않아야 합니다.",
                 addresses_risk_ids=[risk.risk_id],
             )
             for risk in risks

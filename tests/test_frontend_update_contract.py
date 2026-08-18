@@ -35,6 +35,37 @@ def test_update_screen_has_prelaunch_copy_and_four_decision_labels():
     assert 'fetch(`${API_URL}/api/update-runs/stream`' in source
 
 
+def test_both_result_modes_expose_complete_decision_brief():
+    event_source = (ROOT / "page.tsx").read_text(encoding="utf-8")
+    update_source = (ROOT / "components" / "UpdateReview.tsx").read_text(encoding="utf-8")
+
+    for source in (event_source, update_source):
+        assert "decision-logic" in source
+        assert "이용자 유형별 예상 반응" in source
+        assert "언어권별 예상" in source
+        assert "판단을 좌우한 위험" in source
+        assert "지금 해야 할 일" in source
+
+
+def test_event_live_source_can_select_steam_x_or_both():
+    source = (ROOT / "page.tsx").read_text(encoding="utf-8")
+
+    assert "checked={useSteam}" in source
+    assert "checked={useX}" in source
+    assert 'use_x: sourceMode === "live" ? useX : false' in source
+    assert 'sourceMode === "live" && useSteam ? Number(steamAppId) : null' in source
+    assert "Steam만, X만, 또는 두 자료를 함께 선택할 수 있습니다" in source
+
+
+def test_user_facing_frontend_copy_does_not_use_middle_dots():
+    for path in (
+        ROOT / "page.tsx",
+        ROOT / "components" / "UpdateReview.tsx",
+        ROOT / "components" / "AgentPipeline.tsx",
+    ):
+        assert "·" not in path.read_text(encoding="utf-8")
+
+
 def test_actual_after_section_is_conditionally_rendered():
     source = (ROOT / "components" / "UpdateReview.tsx").read_text(encoding="utf-8")
 

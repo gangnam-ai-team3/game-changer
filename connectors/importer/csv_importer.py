@@ -29,7 +29,10 @@ APPROVED_MECHANISM_TAGS = {category.value for category in CLOSED_RISK_SEVERITY}
 
 
 def import_approved_csv(data: bytes | str, cutoff_at: datetime) -> list[EvidenceItem]:
-    text = data.decode("utf-8-sig") if isinstance(data, bytes) else data
+    try:
+        text = data.decode("utf-8-sig") if isinstance(data, bytes) else data
+    except UnicodeDecodeError:
+        _invalid("CSV must be valid UTF-8 text")
     reader = csv.DictReader(io.StringIO(text))
     columns = set(reader.fieldnames or [])
     forbidden = columns & FORBIDDEN_COLUMNS
