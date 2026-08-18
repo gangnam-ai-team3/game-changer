@@ -7,4 +7,12 @@ __pycache__/
 .data/
 .streamlit/secrets.toml
 .env
+.env.*
+!.env.example
+!.env.local.example
+backend/.env
+frontend/.env.local
+frontend/node_modules/
+frontend/.next/
+frontend/out/
 .superpowers/sdd/
