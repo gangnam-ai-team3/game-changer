@@ -112,15 +112,47 @@
     align-items: center;
     gap: 10px;
   }
-  .period-row input[type="datetime-local"] {
-    flex: 1;
-    min-width: 0;
-    color-scheme: light;
-  }
   .period-sep {
     color: var(--text-secondary);
     font-size: 14px;
     flex-shrink: 0;
+  }
+
+  .datetime-combo {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: stretch;
+    gap: 6px;
+  }
+  .datetime-text {
+    flex: 1;
+    min-width: 0;
+    font-variant-numeric: tabular-nums;
+  }
+  .datetime-text.invalid {
+    border-color: #E11D48;
+  }
+  button.calendar-btn {
+    flex-shrink: 0;
+    width: 42px;
+    font-size: 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    cursor: pointer;
+  }
+  button.calendar-btn:hover {
+    background: var(--accent-surface);
+  }
+  .datetime-picker-hidden {
+    position: absolute;
+    width: 0;
+    height: 0;
+    opacity: 0;
+    pointer-events: none;
+    border: 0;
+    padding: 0;
   }
 
   .amount-row {
@@ -163,6 +195,7 @@
   button#collect-btn:active {
     opacity: 0.78;
   }
+
 
   #result-section {
     display: none;
@@ -249,19 +282,71 @@
     overflow-x: auto;
     margin: 4px 0 28px;
   }
+
+  .lang-hint {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: 10px;
+  }
+  .lang-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .lang-grid label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 14px;
+    font-weight: 400;
+    color: var(--text);
+    margin-bottom: 0;
+    cursor: pointer;
+  }
+  .lang-grid input[type="checkbox"] {
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+  .lang-actions {
+    margin-top: 10px;
+    display: flex;
+    gap: 12px;
+  }
+  .lang-actions button {
+    background: none;
+    border: none;
+    color: var(--accent);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0;
+  }
+
+  #result-output {
+    margin: 0;
+    font-family: inherit;
+    font-size: 15px;
+    line-height: 1.75;
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  #result-output.loading {
+    color: var(--text-secondary);
+  }
 </style>
 
 <div class="page">
 
-  <div class="notice">연습용 화면 - 아직 실제로 처리하지 않고, 미리 넣어둔 결과를 보여줍니다</div>
+  <div class="notice">실제로 담당자를 부릅니다</div>
 
   <h1 class="title">데이터 수집</h1>
 
   <div class="panel">
-    <div class="field">
-      <label for="game-name">게임이름</label>
-      <textarea id="game-name" rows="1" placeholder="게임이름을 붙여넣으세요"></textarea>
-    </div>
+    <div class="notice" style="margin-bottom: 20px;">대상 게임: PUBG: BATTLEGROUNDS(고정)</div>
 
     <div class="field">
       <label for="event-keyword">이벤트 키워드</label>
@@ -269,11 +354,30 @@
     </div>
 
     <div class="field">
-      <label for="collect-period-start">게시물 등록기간(데이터 수집기간)</label>
+      <label for="collect-period-start-text">게시물 등록기간(데이터 수집기간)</label>
+      <div class="lang-hint">직접 숫자만 타이핑해도 됩니다(24시간제, 예: 2026년 8월 7일 오전 9시 → 202608070900). 달력 아이콘을 눌러 클릭으로 고를 수도 있습니다.</div>
       <div class="period-row">
-        <input type="datetime-local" id="collect-period-start">
+        <div class="datetime-combo">
+          <input type="text" id="collect-period-start-text" class="datetime-text" placeholder="YYYYMMDDHHmm" inputmode="numeric" maxlength="16">
+          <button type="button" class="calendar-btn" data-picker="collect-period-start" aria-label="달력에서 선택">📅</button>
+          <input type="datetime-local" id="collect-period-start" class="datetime-picker-hidden" tabindex="-1">
+        </div>
         <span class="period-sep">~</span>
-        <input type="datetime-local" id="collect-period-end">
+        <div class="datetime-combo">
+          <input type="text" id="collect-period-end-text" class="datetime-text" placeholder="YYYYMMDDHHmm" inputmode="numeric" maxlength="16">
+          <button type="button" class="calendar-btn" data-picker="collect-period-end" aria-label="달력에서 선택">📅</button>
+          <input type="datetime-local" id="collect-period-end" class="datetime-picker-hidden" tabindex="-1">
+        </div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>언어권 선택(스팀 리뷰, 중복 선택 가능)</label>
+      <div class="lang-hint">최대 31개(전체 언어) 동시 조회 가능 — 선택한 언어는 전부 동시에 병렬로 긁어옵니다. 많이 선택해도 속도는 거의 그대로입니다.</div>
+      <div class="lang-grid" id="lang-grid"></div>
+      <div class="lang-actions">
+        <button type="button" id="lang-select-all">전체 선택</button>
+        <button type="button" id="lang-select-none">전체 해제</button>
       </div>
     </div>
 
@@ -299,95 +403,7 @@
     <div class="panel">
       <h2 class="result-title">결과</h2>
       <div class="result-body">
-
-<h1>피드백 번들 (테스트 실행 결과)</h1>
-
-<p><code>ai/input-sample.md</code>의 더미 데이터를 재료로 <code>hy</code> 에이전트의 7단계 게이트를 적용한 결과입니다. 실제 스팀/X API 호출은 하지 않았고, 입력 파일에 이미 담긴 더미 원본을 승인/반려 로직으로만 처리했습니다(로직 검증용 실행).</p>
-
-<ul>
-  <li>대상 게임: 가상게임A</li>
-  <li>이벤트ID/키워드: patch_v2.3_weapon_balance / "무기 밸런스"</li>
-  <li>수집 기간(컷오프): 2026-08-01 ~ 2026-08-07</li>
-  <li>승인된 출처: steam.com/app/999999/reviews, x.com(#가상게임A)</li>
-  <li>언어권별 최소 표본 기준: 3건(테스트 축소값)</li>
-  <li>API 비용 상한: $50/실행 — 이번 실행에서는 초과 없음(별도 초과 시나리오는 input-sample.md 3번 항목 참고, 이번 결과에 미포함)</li>
-</ul>
-
-<h2>언어권별 표본 수</h2>
-<div class="table-wrap">
-<table>
-  <thead><tr><th>언어권</th><th>표본 수</th><th>상태</th></tr></thead>
-  <tbody>
-    <tr><td>한국어</td><td>3</td><td>충족</td></tr>
-    <tr><td>영어</td><td>3</td><td>충족</td></tr>
-    <tr><td>일본어</td><td>1</td><td>부족</td></tr>
-  </tbody>
-</table>
-</div>
-
-<h2>비식별 VOC 목록</h2>
-<div class="table-wrap">
-<table>
-  <thead><tr><th>근거ID</th><th>출처URL</th><th>요약</th><th>중복 카운트</th></tr></thead>
-  <tbody>
-    <tr><td>VOC-0001</td><td>steam.com/app/999999/reviews/1</td><td>무기 밸런스 패치 이후 근거리 무기가 약해졌다는 의견(동일/유사 표현 반복 포함)</td><td>3</td></tr>
-    <tr><td>VOC-0002</td><td>x.com/.../status/1</td><td>밸런스 패치는 나쁘지 않으나 특정 무기만 과하게 강하다는 의견</td><td>1</td></tr>
-    <tr><td>VOC-0003</td><td>steam.com/app/999999/reviews/2</td><td>패치 이후 근접 무기가 약해졌다는 의견(영어권)</td><td>1</td></tr>
-    <tr><td>VOC-0004</td><td>x.com/.../status/4</td><td>밸런스 패치에 대한 불만(동일 작성자 반복 게시, 대표 1건 채택)</td><td>3</td></tr>
-    <tr><td>VOC-0005</td><td>steam.com/app/999999/reviews/5</td><td>무기 밸런스 조정 후 근접무기가 약해진 것 같다는 의견(일본어권)</td><td>1</td></tr>
-    <tr><td>VOC-0006</td><td>steam.com/app/999999/reviews/6</td><td>밸런스 패치로 원거리 무기가 과해졌다는 의견(영어권)</td><td>1</td></tr>
-    <tr><td>VOC-0007</td><td>steam.com/app/999999/reviews/7</td><td>신규 무기 밸런스 불만, 근접무기 너프가 과하다는 의견(영어권)</td><td>1</td></tr>
-  </tbody>
-</table>
-</div>
-
-<h2>검색 기록</h2>
-<div class="table-wrap">
-<table>
-  <thead><tr><th>실행시각</th><th>출처</th><th>질의/필터</th><th>결과 수(원본 건수)</th></tr></thead>
-  <tbody>
-    <tr><td>테스트 실행</td><td>ai/input-sample.md (더미)</td><td>대상게임=가상게임A, 이벤트=patch_v2.3_weapon_balance, 기간=2026-08-01~2026-08-07</td><td>16건(raw_001~raw_016)</td></tr>
-  </tbody>
-</table>
-</div>
-
-<h2>수집 오류 목록</h2>
-<div class="table-wrap">
-<table>
-  <thead><tr><th>오류코드</th><th>출처</th><th>내용</th><th>재시도 가능 여부</th></tr></thead>
-  <tbody>
-    <tr><td>ERR-RATE-429</td><td>X</td><td>API 레이트리밋으로 수집 실패(raw_013)</td><td>가능</td></tr>
-    <tr><td>ERR-AUTH-01</td><td>X</td><td>인증 만료로 수집 실패(raw_014)</td><td>불가</td></tr>
-  </tbody>
-</table>
-</div>
-
-<h2>성별·연령대</h2>
-<ul>
-  <li>한국어권: 있음 — 출처: 가상게임A 공식 8월 설문 결과. 연령대 10대 12%, 20대 41%, 30대 33%, 40대 이상 14%. 성별: 미공개(설문 미응답 다수)</li>
-  <li>영어권, 일본어권: 미보유(집계 통계 없음)</li>
-</ul>
-
-<h2>게이트 판정 로그 (참고 — 반려 내역)</h2>
-<div class="table-wrap">
-<table>
-  <thead><tr><th>원본ID</th><th>게이트</th><th>판정</th><th>사유</th></tr></thead>
-  <tbody>
-    <tr><td>raw_004</td><td>1. 출처 확인</td><td>반려</td><td>미승인 출처(unofficial_blog)</td></tr>
-    <tr><td>raw_005</td><td>2. 기간/이벤트 매칭</td><td>반려</td><td>컷오프 범위 밖(2026-07-20)</td></tr>
-    <tr><td>raw_006</td><td>2. 기간/이벤트 매칭</td><td>반려</td><td>같은 기간이나 이벤트 불일치(신규 캐릭터 스킨)</td></tr>
-    <tr><td>raw_007</td><td>3. 중복 판정</td><td>병합</td><td>raw_001과 해시 완전일치 → VOC-0001에 병합</td></tr>
-    <tr><td>raw_008</td><td>3. 중복 판정</td><td>병합</td><td>raw_001과 유사도 90%+ → VOC-0001에 병합</td></tr>
-    <tr><td>raw_010</td><td>3. 중복 판정</td><td>병합</td><td>raw_009와 작성자ID+시간창 일치 → VOC-0004에 병합</td></tr>
-    <tr><td>raw_011</td><td>3. 중복 판정</td><td>병합</td><td>raw_009와 작성자ID+시간창 일치 → VOC-0004에 병합</td></tr>
-    <tr><td>raw_013</td><td>6. 수집 오류</td><td>오류(재시도 가능)</td><td>API 레이트리밋</td></tr>
-    <tr><td>raw_014</td><td>6. 수집 오류</td><td>오류(재시도 불가)</td><td>인증 만료</td></tr>
-    <tr><td>(전체)</td><td>5. 언어권 표본 기준</td><td>일부 부족</td><td>일본어권 1건 &lt; 기준 3건</td></tr>
-    <tr><td>(전체)</td><td>7. 비용 상한</td><td>통과</td><td>이번 실행은 상한 이내</td></tr>
-  </tbody>
-</table>
-</div>
-
+        <pre id="result-output"></pre>
       </div>
     </div>
   </div>
@@ -395,16 +411,197 @@
 </div>
 
 <script>
+  function pad2(n) { return String(n).padStart(2, '0'); }
+
+  function formatDigitsForDisplay(digits) {
+    // digits: 최대 12자리 "YYYYMMDDHHmm" -> "YYYY-MM-DD HH:mm" 형태로 보기 좋게 표시
+    var out = digits.slice(0, 4);
+    if (digits.length > 4) out += '-' + digits.slice(4, 6);
+    if (digits.length > 6) out += '-' + digits.slice(6, 8);
+    if (digits.length > 8) out += ' ' + digits.slice(8, 10);
+    if (digits.length > 10) out += ':' + digits.slice(10, 12);
+    return out;
+  }
+
+  function digitsToNativeValue(digits) {
+    // 12자리(YYYYMMDDHHmm) 다 채워졌을 때만 유효한 datetime-local 값으로 변환, 아니면 null
+    if (digits.length !== 12) return null;
+    var year = digits.slice(0, 4);
+    var month = Number(digits.slice(4, 6));
+    var day = Number(digits.slice(6, 8));
+    var hour = Number(digits.slice(8, 10));
+    var minute = Number(digits.slice(10, 12));
+    if (month < 1 || month > 12) return null;
+    if (day < 1 || day > 31) return null;
+    if (hour > 23) return null;
+    if (minute > 59) return null;
+    // 00시=오전 0시부터 24시간제 그대로 해석 — 별도 오전/오후 입력 없음
+    return year + '-' + pad2(month) + '-' + pad2(day) + 'T' + pad2(hour) + ':' + pad2(minute);
+  }
+
+  function nativeValueToDisplay(nativeValue) {
+    // "YYYY-MM-DDTHH:mm" -> "YYYY-MM-DD HH:mm" (달력에서 고른 값을 텍스트 칸에 보여주기 위함)
+    if (!nativeValue) return '';
+    return nativeValue.replace('T', ' ');
+  }
+
+  function setupDateTimeCombo(id) {
+    var textInput = document.getElementById(id + '-text');
+    var nativeInput = document.getElementById(id);
+    var calendarBtn = document.querySelector('button.calendar-btn[data-picker="' + id + '"]');
+
+    textInput.addEventListener('input', function () {
+      var digits = textInput.value.replace(/\D/g, '').slice(0, 12);
+      var cursorWasAtEnd = textInput.selectionStart === textInput.value.length;
+      textInput.value = formatDigitsForDisplay(digits);
+      if (cursorWasAtEnd) {
+        textInput.setSelectionRange(textInput.value.length, textInput.value.length);
+      }
+      var nativeValue = digitsToNativeValue(digits);
+      if (nativeValue) {
+        nativeInput.value = nativeValue;
+        textInput.classList.remove('invalid');
+      } else {
+        nativeInput.value = '';
+        textInput.classList.toggle('invalid', digits.length === 12);
+      }
+    });
+
+    calendarBtn.addEventListener('click', function () {
+      if (typeof nativeInput.showPicker === 'function') {
+        nativeInput.showPicker();
+      } else {
+        nativeInput.focus();
+      }
+    });
+
+    nativeInput.addEventListener('change', function () {
+      textInput.value = nativeValueToDisplay(nativeInput.value);
+      textInput.classList.remove('invalid');
+    });
+  }
+
+  setupDateTimeCombo('collect-period-start');
+  setupDateTimeCombo('collect-period-end');
+
+  var STEAM_LANGUAGES = [
+    { code: 'english', label: '영어' },
+    { code: 'koreana', label: '한국어' },
+    { code: 'japanese', label: '일본어' },
+    { code: 'schinese', label: '중국어(간체)' },
+    { code: 'tchinese', label: '중국어(번체)' },
+    { code: 'russian', label: '러시아어' },
+    { code: 'spanish', label: '스페인어' },
+    { code: 'latam', label: '스페인어(중남미)' },
+    { code: 'portuguese', label: '포르투갈어' },
+    { code: 'brazilian', label: '포르투갈어(브라질)' },
+    { code: 'french', label: '프랑스어' },
+    { code: 'german', label: '독일어' },
+    { code: 'italian', label: '이탈리아어' },
+    { code: 'polish', label: '폴란드어' },
+    { code: 'dutch', label: '네덜란드어' },
+    { code: 'turkish', label: '터키어' },
+    { code: 'thai', label: '태국어' },
+    { code: 'vi', label: '베트남어' },
+    { code: 'indonesian', label: '인도네시아어' },
+    { code: 'malay', label: '말레이어' },
+    { code: 'arabic', label: '아랍어' },
+    { code: 'ukrainian', label: '우크라이나어' },
+    { code: 'czech', label: '체코어' },
+    { code: 'hungarian', label: '헝가리어' },
+    { code: 'romanian', label: '루마니아어' },
+    { code: 'bulgarian', label: '불가리아어' },
+    { code: 'greek', label: '그리스어' },
+    { code: 'swedish', label: '스웨덴어' },
+    { code: 'danish', label: '덴마크어' },
+    { code: 'finnish', label: '핀란드어' },
+    { code: 'norwegian', label: '노르웨이어' }
+  ];
+
+  (function renderLangGrid() {
+    var grid = document.getElementById('lang-grid');
+    STEAM_LANGUAGES.forEach(function (lang) {
+      var label = document.createElement('label');
+      var checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.value = lang.code;
+      checkbox.className = 'lang-checkbox';
+      checkbox.checked = true;
+      label.appendChild(checkbox);
+      label.appendChild(document.createTextNode(lang.label));
+      grid.appendChild(label);
+    });
+  })();
+
+  document.getElementById('lang-select-all').addEventListener('click', function () {
+    document.querySelectorAll('.lang-checkbox').forEach(function (cb) { cb.checked = true; });
+  });
+  document.getElementById('lang-select-none').addEventListener('click', function () {
+    document.querySelectorAll('.lang-checkbox').forEach(function (cb) { cb.checked = false; });
+  });
+
+  function getSelectedLanguages() {
+    return Array.prototype.slice.call(document.querySelectorAll('.lang-checkbox:checked')).map(function (cb) { return cb.value; });
+  }
+
+  var FIXED_GAME_NAME = 'PUBG: BATTLEGROUNDS';
+
+  function buildInputText() {
+    var lines = [];
+    lines.push('대상 게임: ' + FIXED_GAME_NAME);
+    lines.push('이벤트ID/키워드: ' + document.getElementById('event-keyword').value);
+    lines.push('수집 기간: ' + document.getElementById('collect-period-start').value + ' ~ ' + document.getElementById('collect-period-end').value);
+    lines.push('비용 상한: ' + document.getElementById('cost-limit').value + ' ' + document.getElementById('currency-select').value);
+    return lines.join('\n');
+  }
+
   document.getElementById('collect-btn').addEventListener('click', function () {
-    document.getElementById('result-section').style.display = 'block';
-    document.getElementById('result-section').scrollIntoView({ behavior: 'smooth' });
+    var resultSection = document.getElementById('result-section');
+    var resultOutput = document.getElementById('result-output');
+    var btn = document.getElementById('collect-btn');
+
+    resultSection.style.display = 'block';
+    resultSection.scrollIntoView({ behavior: 'smooth' });
+    resultOutput.textContent = '부르는 중...';
+    resultOutput.classList.add('loading');
+    btn.disabled = true;
+
+    fetch('/call-agent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: buildInputText(),
+        costLimitAmount: parseFloat(document.getElementById('cost-limit').value),
+        costLimitCurrency: document.getElementById('currency-select').value,
+        gameName: FIXED_GAME_NAME,
+        periodStartMs: new Date(document.getElementById('collect-period-start').value).getTime(),
+        periodEndMs: new Date(document.getElementById('collect-period-end').value).getTime(),
+        languages: getSelectedLanguages()
+      })
+    })
+      .then(function (res) { return res.json().then(function (data) { return { ok: res.ok, data: data }; }); })
+      .then(function (r) {
+        resultOutput.classList.remove('loading');
+        if (r.ok) {
+          resultOutput.textContent = r.data.result;
+        } else {
+          resultOutput.textContent = '오류: ' + (r.data.error || '알 수 없는 오류');
+        }
+      })
+      .catch(function (err) {
+        resultOutput.classList.remove('loading');
+        resultOutput.textContent = '오류: ' + err.message;
+      })
+      .finally(function () {
+        btn.disabled = false;
+      });
   });
 
   function autoGrow(el) {
     el.style.height = 'auto';
     el.style.height = el.scrollHeight + 'px';
   }
-  ['game-name', 'event-keyword'].forEach(function (id) {
+  ['event-keyword'].forEach(function (id) {
     var el = document.getElementById(id);
     el.addEventListener('input', function () { autoGrow(el); });
   });

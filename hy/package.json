@@ -1,0 +1,8 @@
+{
+  "name": "hy-call-agent",
+  "private": true,
+  "description": "hy 담당자(.claude/agents/hy.md)를 실제로 호출하는 스크립트",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.117.1"
+  }
+}
