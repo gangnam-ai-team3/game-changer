@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>실제로 담당자를 부릅니다</title>
+<style>
+  :root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif; }
+  body { max-width: 760px; margin: 0 auto; padding: 64px 24px; color: #202124; background: #fafafa; }
+  .notice { color: #6b7280; border-left: 3px solid #d1d5db; padding-left: 12px; margin-bottom: 36px; }
+  .panel { background: white; border: 1px solid #e5e7eb; border-radius: 14px; padding: 32px; box-shadow: 0 8px 24px #00000008; }
+  h1 { margin: 0 0 24px; font-size: 28px; }
+  label { display: block; margin: 0 0 8px; font-size: 14px; font-weight: 700; }
+  textarea { width: 100%; min-height: 140px; padding: 12px; border: 1px solid #d1d5db; border-radius: 10px; box-sizing: border-box; font: inherit; resize: vertical; }
+  button { margin-top: 16px; padding: 11px 18px; border: 0; border-radius: 9px; color: white; background: #4f46e5; font: inherit; cursor: pointer; }
+  button:disabled { opacity: .55; cursor: wait; }
+  #status { min-height: 24px; margin-top: 18px; color: #6b7280; }
+  #result { white-space: pre-wrap; margin-top: 14px; padding: 18px; background: #f5f3ff; border-radius: 10px; line-height: 1.65; }
+</style>
+<body>
+  <div class="notice">실제로 담당자를 부릅니다</div>
+  <section class="panel">
+    <h1>근거 구조화 담당자</h1>
+    <label for="input">담당자에게 보낼 글</label>
+    <textarea id="input" placeholder="검토할 변경안이나 피드백을 입력하세요."></textarea>
+    <button id="call">담당자 부르기</button>
+    <div id="status" aria-live="polite"></div>
+    <div id="result" hidden></div>
+  </section>
+  <script>
+    const input = document.querySelector('#input');
+    const button = document.querySelector('#call');
+    const status = document.querySelector('#status');
+    const result = document.querySelector('#result');
+    button.addEventListener('click', async () => {
+      if (!input.value.trim()) { status.textContent = '넣을 글이 없습니다'; result.hidden = true; return; }
+      button.disabled = true; status.textContent = '부르는 중'; result.hidden = true;
+      try {
+        const response = await fetch('/call-agent', { method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({text: input.value}) });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error || '호출에 실패했습니다');
+        result.textContent = body.result; result.hidden = false; status.textContent = '호출 완료';
+      } catch (error) { status.textContent = error.message; }
+      finally { button.disabled = false; }
+    });
+  </script>
+</body>
+</html>
