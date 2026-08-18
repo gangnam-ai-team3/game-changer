@@ -13,6 +13,7 @@ from contracts import ArtifactStatus, ErrorCode, InputMode, Language, SourceType
 from update_review.collector import (
     UpdateCollectionOptions,
     UpdateCollectorAgent,
+    _classification_sample,
     import_update_csv,
 )
 from update_review.contracts import EvidencePeriod, Sentiment, UpdateDecision
@@ -169,6 +170,87 @@ def test_x_client_does_not_interpolate_an_untrusted_api_id_into_source_url():
 
     assert row.source_url == "https://x.com"
     assert api_id_secret not in repr(row)
+
+
+def test_live_classifier_sample_is_bounded_per_language_and_balances_sources():
+    raw = [
+        RawFeedback(
+            source=source,
+            source_url=(
+                "https://steamcommunity.com"
+                if source is SourceType.STEAM
+                else "https://x.com"
+            ),
+            source_id=f"{source.value}-{language.value}-{index}",
+            language=language,
+            observed_at=datetime(2026, 8, 12, tzinfo=UTC),
+            text="ephemeral live text",
+        )
+        for language in Language
+        for source in (SourceType.STEAM, SourceType.X)
+        for index in range(20)
+    ]
+
+    selected = _classification_sample(raw)
+
+    assert len(selected) == len(Language) * 15
+    assert all(
+        sum(item.language is language for item in selected) == 15
+        for language in Language
+    )
+    assert all(
+        sum(item.language is language and item.source is source for item in selected)
+        > 0
+        for language in Language
+        for source in (SourceType.STEAM, SourceType.X)
+    )
+
+
+def test_live_classifier_splits_large_batches_without_relaxing_exact_ids():
+    raw = [
+        RawFeedback(
+            source=SourceType.STEAM,
+            source_url="https://steamcommunity.com",
+            source_id=f"large-live-{index}",
+            language=Language.ENGLISH,
+            observed_at=datetime(2026, 8, 12, tzinfo=UTC),
+            text="ephemeral live text",
+        )
+        for index in range(41)
+    ]
+    expected_ids = [_safe_live_source_id(item.source, item.source_id) for item in raw]
+    fake = FakeClaude(
+        [
+            {
+                "items": [
+                    {
+                        "source_id": source_id,
+                        "sentiment": "negative",
+                        "mechanism_tags": ["balance_regression"],
+                        "relevance": 0.9,
+                    }
+                    for source_id in expected_ids[:40]
+                ]
+            },
+            {
+                "items": [
+                    {
+                        "source_id": expected_ids[40],
+                        "sentiment": "negative",
+                        "mechanism_tags": ["balance_regression"],
+                        "relevance": 0.9,
+                    }
+                ]
+            },
+        ]
+    )
+
+    output = UpdateCollectorAgent(use_llm=True, client=fake).classify_raw(
+        raw, load_dragunov_brief("large-live-batches")
+    )
+
+    assert len(output) == len(raw)
+    assert len(fake.messages.calls) == 2
 
 
 @pytest.mark.parametrize("client", ["steam", "x"])

@@ -58,7 +58,7 @@ class ClaudeBudget:
     max_requests: int = int(os.getenv("CLAUDE_MAX_REQUESTS", "3"))
     input_usd_per_million: float | None = None
     output_usd_per_million: float | None = None
-    max_tokens: int = int(os.getenv("CLAUDE_MAX_OUTPUT_TOKENS", "1400"))
+    max_tokens: int = int(os.getenv("CLAUDE_MAX_OUTPUT_TOKENS", "3000"))
     max_input_chars: int = int(os.getenv("CLAUDE_MAX_INPUT_CHARS", "50000"))
     requests: int = 0
     reserved_usd: float = 0

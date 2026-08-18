@@ -94,6 +94,12 @@ APPROVED_UPDATE_IMPORT_HOSTS = {
     ),
 }
 MAX_UPDATE_CSV_BYTES = 2_000_000
+# Live connectors can return hundreds of long reviews.  The collector keeps
+# the full count for the language sufficiency gate, but sends only a bounded,
+# deterministic representative sample to Claude so one structured response
+# stays within the request/output budget.
+MAX_LIVE_CLASSIFICATION_PER_LANGUAGE = 15
+MAX_LIVE_CLASSIFICATION_BATCH = 40
 
 # Raw connector URLs are untrusted metadata.  Only these source hosts are
 # accepted at the live boundary, and artifacts retain the corresponding
@@ -213,6 +219,37 @@ def _live_source_id(source: SourceType, raw_source_id: str) -> str:
         f"{source.value}:{raw_source_id}".encode("utf-8")
     ).hexdigest()[:20]
     return f"{source.value}-{digest}"
+
+
+def _classification_sample(raw: list[RawFeedback]) -> list[RawFeedback]:
+    """Select a deterministic, source-balanced live sample for Claude."""
+
+    by_language: dict[Language, dict[SourceType, list[RawFeedback]]] = {}
+    for item in raw:
+        by_language.setdefault(item.language, {}).setdefault(item.source, []).append(item)
+
+    selected: list[RawFeedback] = []
+    for language in SUPPORTED_LANGUAGES:
+        groups = [
+            items
+            for _source, items in sorted(
+                by_language.get(language, {}).items(), key=lambda pair: pair[0].value
+            )
+            if items
+        ]
+        language_count = 0
+        while groups and language_count < MAX_LIVE_CLASSIFICATION_PER_LANGUAGE:
+            progressed = False
+            for group in groups:
+                if group:
+                    selected.append(group.pop(0))
+                    language_count += 1
+                    progressed = True
+                    if language_count >= MAX_LIVE_CLASSIFICATION_PER_LANGUAGE:
+                        break
+            if not progressed:
+                break
+    return selected
 
 
 def normalize_update_csv_text(data: bytes | str) -> str:
@@ -476,63 +513,64 @@ class UpdateCollectorAgent:
                 observed_at=original.observed_at,
                 text=original.text,
             )
-        payload = {
-            "update": brief.model_dump(mode="json"),
-            "feedback": [
-                {
-                    "source_id": item.source_id,
-                    "language": item.language.value,
-                    "observed_at": item.observed_at.isoformat(),
-                    "text": item.text,
-                }
-                for item in by_id.values()
-            ],
-        }
-        batch = parse_claude_structured(
-            model=os.getenv("CLAUDE_UPDATE_COLLECTOR_MODEL", "claude-haiku-4-5"),
-            prompt_path=self.prompt_path,
-            output_type=ClassifiedRawBatch,
-            payload=payload,
-            client=self.client,
-            budget=self.budget,
-        )
         output = []
-        seen_source_ids: set[str] = set()
-        for item in batch.items:
-            original = by_id.get(item.source_id)
-            if (
-                original is None
-                or item.source_id in seen_source_ids
-                or not set(item.mechanism_tags) <= APPROVED_UPDATE_TAGS
-            ):
+        source_ids = list(by_id)
+        for offset in range(0, len(source_ids), MAX_LIVE_CLASSIFICATION_BATCH):
+            batch_ids = source_ids[offset : offset + MAX_LIVE_CLASSIFICATION_BATCH]
+            payload = {
+                "update": brief.model_dump(mode="json"),
+                "feedback": [
+                    {
+                        "source_id": by_id[source_id].source_id,
+                        "language": by_id[source_id].language.value,
+                        "observed_at": by_id[source_id].observed_at.isoformat(),
+                        "text": by_id[source_id].text,
+                    }
+                    for source_id in batch_ids
+                ],
+            }
+            batch = parse_claude_structured(
+                model=os.getenv("CLAUDE_UPDATE_COLLECTOR_MODEL", "claude-haiku-4-5"),
+                prompt_path=self.prompt_path,
+                output_type=ClassifiedRawBatch,
+                payload=payload,
+                client=self.client,
+                budget=self.budget,
+            )
+            seen_source_ids: set[str] = set()
+            for item in batch.items:
+                original = by_id.get(item.source_id)
+                if (
+                    original is None
+                    or item.source_id not in batch_ids
+                    or item.source_id in seen_source_ids
+                    or not set(item.mechanism_tags) <= APPROVED_UPDATE_TAGS
+                ):
+                    raise StructuredModelError(
+                        ErrorCode.SCHEMA_INVALID,
+                        "Claude classifier returned unsafe structured classifications.",
+                    )
+                seen_source_ids.add(item.source_id)
+                output.append(
+                    UpdateEvidenceItem(
+                        evidence_id=f"live-update-{original.source_id}",
+                        source=original.source,
+                        source_url=original.source_url,
+                        source_id=original.source_id,
+                        language=original.language,
+                        observed_at=original.observed_at,
+                        period=EvidencePeriod.BEFORE,
+                        sentiment=item.sentiment,
+                        summary=_code_owned_summary(item),
+                        mechanism_tags=item.mechanism_tags,
+                        relevance=item.relevance,
+                    )
+                )
+            if seen_source_ids != set(batch_ids):
                 raise StructuredModelError(
                     ErrorCode.SCHEMA_INVALID,
-                    "Claude classifier returned unsafe structured classifications.",
+                    "Claude classifier returned incomplete structured classifications.",
                 )
-            seen_source_ids.add(item.source_id)
-            output.append(
-                UpdateEvidenceItem(
-                    evidence_id=f"live-update-{original.source_id}",
-                    source=original.source,
-                    source_url=original.source_url,
-                    source_id=original.source_id,
-                    language=original.language,
-                    observed_at=original.observed_at,
-                    period=EvidencePeriod.BEFORE,
-                    sentiment=item.sentiment,
-                    summary=_code_owned_summary(item),
-                    mechanism_tags=item.mechanism_tags,
-                    relevance=item.relevance,
-                )
-            )
-        # A subset would otherwise silently let the model choose which raw
-        # records become decision evidence.  Classifications are all-or-nothing:
-        # every normalized input correlation ID must appear exactly once.
-        if seen_source_ids != set(by_id):
-            raise StructuredModelError(
-                ErrorCode.SCHEMA_INVALID,
-                "Claude classifier returned incomplete structured classifications.",
-            )
         return output
 
     @staticmethod
@@ -903,7 +941,9 @@ class UpdateCollectorAgent:
 
         try:
             if raw:
-                evidence = self.classify_raw(raw, brief)
+                # Keep the full connector count for sufficiency, but bound the
+                # ephemeral raw text sent to one Claude structured call.
+                evidence = self.classify_raw(_classification_sample(raw), brief)
         except Exception as exc:
             errors.append(self._safe_error(exc))
             evidence = []
