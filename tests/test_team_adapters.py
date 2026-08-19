@@ -11,6 +11,7 @@ from agents.event_redteam import EventRedteamAgent
 from agents.evidence_rag import EvidenceRagAgent
 from agents.structured import StructuredModelError
 from evaluation.fixtures import load_demo_event, load_feedback_fixture
+from orchestrator import EventPreflightOrchestrator
 from res.team_adapters import (
     EventJellyRedteamAdapter,
     EventJinbaeAuditAdapter,
@@ -20,8 +21,10 @@ from res.team_adapters import (
     UpdateJinbaeAuditAdapter,
 )
 from update_review.audit import UpdateAuditAgent
+from update_review.collector import UpdateCollectorAgent
 from update_review.evidence import UpdateEvidenceAgent
 from update_review.fixtures import load_dragunov_brief, load_update_feedback_fixture
+from update_review.orchestrator import UpdateReviewOrchestrator
 from update_review.redteam import UpdateRedteamAgent
 
 
@@ -76,6 +79,19 @@ def _update_inputs(run_id="team-update"):
     feedback = load_update_feedback_fixture(brief)
     pack = UpdateEvidenceAgent().run_deterministic(feedback)
     return brief, feedback, pack
+
+
+def _risk_core(risks):
+    return [
+        (
+            risk.risk_id,
+            risk.category,
+            risk.severity,
+            risk.evidence_ids,
+            risk.confidence,
+        )
+        for risk in risks
+    ]
 
 
 @pytest.mark.parametrize(
@@ -157,6 +173,67 @@ def test_update_jelly_cannot_change_code_owned_risk_or_metrics():
         assert after.model_dump(exclude={"failure_path", "revision_question"}) == before.model_dump(
             exclude={"failure_path", "revision_question"}
         )
+
+
+def test_event_orchestrator_calls_each_teammate_once_and_preserves_policy_output():
+    event = load_demo_event("event-team-e2e")
+    baseline = EventPreflightOrchestrator().run(event)
+    runner = FakeJellyRunner(_jelly_result(len(baseline.risks.risks)))
+    probe = FakeJinbaeProbe(
+        {
+            "verdict": "not_grounded",
+            "citations": [],
+            "rationale": "외부 판정으로 출시를 보류하라는 의견입니다.",
+            "decision": "Hold",
+        }
+    )
+
+    result = EventPreflightOrchestrator(
+        redteam=EventJellyRedteamAdapter(runner=runner),
+        audit=EventJinbaeAuditAdapter(probe=probe),
+    ).run(event)
+
+    assert len(runner.calls) == 1
+    assert len(probe.calls) == 1
+    assert result.brief.decision == baseline.brief.decision
+    assert result.brief.decision.value == "Revise"
+    assert _risk_core(result.risks.risks) == _risk_core(baseline.risks.risks)
+    assert _risk_core(result.validated.validated_risks) == _risk_core(
+        baseline.validated.validated_risks
+    )
+    assert _risk_core(result.brief.top_risks) == _risk_core(baseline.brief.top_risks)
+
+
+def test_update_orchestrator_calls_each_teammate_once_and_preserves_policy_output():
+    brief = load_dragunov_brief("update-team-e2e")
+    baseline = UpdateReviewOrchestrator().run(brief)
+    runner = FakeJellyRunner(_jelly_result(len(baseline.impact.risks)))
+    probe = FakeJinbaeProbe(
+        {
+            "verdict": "grounded",
+            "citations": ["invented"],
+            "rationale": "외부 판정으로 즉시 출시하라는 의견입니다.",
+            "decision": "Go",
+        }
+    )
+
+    result = UpdateReviewOrchestrator(
+        collector=UpdateCollectorAgent(),
+        evidence=UpdateEvidenceAgent(),
+        redteam=UpdateJellyRedteamAdapter(runner=runner),
+        audit=UpdateJinbaeAuditAdapter(probe=probe),
+        use_llm=True,
+    ).run(brief)
+
+    assert len(runner.calls) == 1
+    assert len(probe.calls) == 1
+    assert result.brief.decision == baseline.brief.decision
+    assert result.brief.decision.value == "Test"
+    assert _risk_core(result.impact.risks) == _risk_core(baseline.impact.risks)
+    assert _risk_core(result.validated.validated_risks) == _risk_core(
+        baseline.validated.validated_risks
+    )
+    assert _risk_core(result.brief.top_risks) == _risk_core(baseline.brief.top_risks)
 
 
 def test_jelly_runner_uses_one_bounded_node_process_with_stdin_json(monkeypatch):
@@ -307,7 +384,7 @@ def test_jinbae_failure_is_sanitized_after_one_probe_call():
     assert secret not in str(error.value)
 
 
-def test_no_risk_path_skips_jelly_and_jinbae_calls():
+def test_event_no_risk_path_skips_jelly_and_jinbae_calls():
     event, feedback, pack = _event_inputs("no-risk")
     no_issue_pack = pack.model_copy(update={"issues": []})
     runner = FakeJellyRunner(_jelly_result(0))
@@ -319,6 +396,37 @@ def test_no_risk_path_skips_jelly_and_jinbae_calls():
     )
 
     assert assessment.risks == []
+    assert decision.validated_risks == []
+    assert runner.calls == []
+    assert probe.calls == []
+
+
+def test_update_no_risk_path_skips_jelly_and_jinbae_calls():
+    brief, feedback, pack = _update_inputs("update-no-risk")
+    persona_impacts = []
+    for impact in pack.persona_impacts:
+        updates = {"negative_signal_ids": [], "split_signal_ids": []}
+        if not impact.positive_signal_ids:
+            updates.update({"evidence_ids": [], "confidence": 0})
+        persona_impacts.append(impact.model_copy(update=updates))
+    no_risk_pack = type(pack).model_validate(
+        pack.model_copy(
+            update={
+                "negative_signals": [],
+                "split_conditions": [],
+                "persona_impacts": persona_impacts,
+            }
+        ).model_dump(mode="python")
+    )
+    runner = FakeJellyRunner(_jelly_result(0))
+
+    impact = UpdateJellyRedteamAdapter(runner=runner).run(brief, no_risk_pack)
+    probe = FakeJinbaeProbe()
+    decision = UpdateJinbaeAuditAdapter(probe=probe).run(
+        feedback, no_risk_pack, impact
+    )
+
+    assert impact.risks == []
     assert decision.validated_risks == []
     assert runner.calls == []
     assert probe.calls == []
