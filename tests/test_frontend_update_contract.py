@@ -168,6 +168,8 @@ def test_both_modes_offer_safe_corpus_and_team_agent_choice():
         assert '사전 구축 Steam 코퍼스' in source
         assert '한국어와 영어 리뷰에서 파생한 비식별 요약' in source
         assert '리뷰 원문은 포함하지 않습니다' in source
+        assert '현재 데모 코퍼스는 2026년 8월 19일 11:41(UTC)' in source
+        assert '검토 대상의 시작일을 2026년 8월 20일 이후로' in source
         assert '{sourceMode === "live" && (' in source
         assert '{sourceMode === "import" && (' in source
         assert '정아현(Jelly) 위험 점검과 승진배 근거 검증 에이전트' in source
