@@ -238,3 +238,92 @@ def test_create_audit_end_to_end_through_real_pipeline(monkeypatch):
         assert audit.source_chunks[0].chunk_text == "Paris is the capital of France."
     finally:
         session.close()
+
+
+def test_create_audit_produces_grounded_not_grounded_and_partially_grounded_verdicts(monkeypatch):
+    """Runs the real pipeline against a mixed-evidence scenario (a pricing-page answer audited
+    against the real FAQ) to verify grounded/not_grounded/partially_grounded are each produced
+    correctly, with the right citation, and that grounded_ratio only counts grounded claims."""
+    monkeypatch.setattr("app.judge.asyncio.sleep", AsyncMock())
+
+    engine = make_engine("sqlite:///:memory:")
+    init_db(engine)
+    SessionFactory = make_session_factory(engine)
+
+    def override_session():
+        session = SessionFactory()
+        try:
+            yield session
+        finally:
+            session.close()
+
+    response_text = (
+        "Our Pro plan includes unlimited storage. Support is available 24/7. "
+        "The Pro plan costs $49 per month."
+    )
+    source_chunks = [
+        {"id": "c1", "text": "The Pro plan includes 2TB of storage, not unlimited."},
+        {"id": "c2", "text": "Customer support responds within 24 hours on business days."},
+        {"id": "c3", "text": "The Pro plan is priced at $49 per month, billed monthly."},
+    ]
+    claims = [
+        "Our Pro plan includes unlimited storage.",
+        "Support is available 24/7.",
+        "The Pro plan costs $49 per month.",
+    ]
+    judge_responses = {
+        "Our Pro plan includes unlimited storage.": {
+            "verdict": "not_grounded",
+            "citations": ["c1"],
+            "rationale": "c1 states storage is capped at 2TB, not unlimited",
+        },
+        "Support is available 24/7.": {
+            "verdict": "partially_grounded",
+            "citations": ["c2"],
+            "rationale": "c2 confirms 24-hour response but only on business days, not 24/7",
+        },
+        "The Pro plan costs $49 per month.": {
+            "verdict": "grounded",
+            "citations": ["c3"],
+            "rationale": "matches c3 exactly",
+        },
+    }
+    anthropic_client = SimpleNamespace(messages=_FakeAnthropicMessages(claims, judge_responses))
+    voyage_client = _FakeVoyageClient()
+
+    app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_app_settings] = _test_settings
+    app.dependency_overrides[get_anthropic_client] = lambda: anthropic_client
+    app.dependency_overrides[get_voyage_client] = lambda: voyage_client
+
+    client = TestClient(app)
+    response = client.post(
+        "/audits",
+        json={
+            "response_text": response_text,
+            "source_chunks": source_chunks,
+            "metadata": {"source_system": "pricing-chatbot"},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    verdicts = {c["claim_text"]: (c["verdict"], tuple(c["citations"])) for c in body["claims"]}
+    assert verdicts["Our Pro plan includes unlimited storage."] == ("not_grounded", ("c1",))
+    assert verdicts["Support is available 24/7."] == ("partially_grounded", ("c2",))
+    assert verdicts["The Pro plan costs $49 per month."] == ("grounded", ("c3",))
+    # Only 1 of 3 claims is grounded, and grounded_ratio excludes not_grounded/partially_grounded
+    # from the numerator (they're still "gradeable", unlike judgment_failed).
+    assert body["overall"]["grounded_ratio"] == pytest.approx(1 / 3)
+    assert body["overall"]["claim_count"] == 3
+
+    # The persisted audit round-trips identically through GET, and is discoverable by
+    # its source_system through the list endpoint.
+    audit_id = body["audit_id"]
+    fetched = client.get(f"/audits/{audit_id}")
+    assert fetched.status_code == 200
+    assert fetched.json() == body
+
+    listed = client.get("/audits", params={"source_system": "pricing-chatbot"})
+    assert listed.status_code == 200
+    assert [item["audit_id"] for item in listed.json()] == [audit_id]
