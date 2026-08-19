@@ -351,7 +351,7 @@ def test_jelly_runner_uses_one_bounded_node_process_with_stdin_json(monkeypatch)
     assert "safe-1" not in " ".join(command)
     assert json.loads(kwargs["input"]) == rows
     assert kwargs["timeout"] == 7
-    assert kwargs["cwd"].name == "game-changer"
+    assert kwargs["cwd"] == Path(__file__).resolve().parents[1]
     assert kwargs["env"]["CLAUDE_REDTEAM_MODEL"] == "claude-haiku-4-5-20251001"
     assert kwargs["env"]["CLAUDE_MAX_OUTPUT_TOKENS"] == "512"
 
