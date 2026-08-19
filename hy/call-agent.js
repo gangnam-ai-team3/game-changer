@@ -1,8 +1,13 @@
 'use strict';
 
+// Claude(Anthropic API)를 실제로 부르는 부분. 데이터 준비(수집→기간필터→중복제거/짧은글삭제→벡터화)는
+// prepare-evidence.js가 API 없이 전부 처리하고, 이 파일은 그 결과 위에 Claude의 문서화 판단만 얹는다.
+
 const fs = require('fs');
 const path = require('path');
 const Anthropic = require('@anthropic-ai/sdk');
+const { STEAM_LANGUAGES, resolveSteamAppId } = require('./steam-db.js');
+const { prepareEvidence } = require('./prepare-evidence.js');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const ENV_PATH = path.join(REPO_ROOT, '.env');
@@ -26,9 +31,9 @@ const RUNTIME_NOTE =
   '위에 적힌 Read/Write 도구는 이 호출에서는 주어지지 않았으므로 사용할 수 없습니다. ' +
   '파일을 만들었다거나 hy/ 폴더에 저장했다고 말하지 마세요. 실제로 저장되지 않습니다. ' +
   '모든 결과(피드백 번들 전체)는 파일이 아니라 이 응답의 텍스트로만 출력하세요.\n\n' +
-  '아래에 "스팀 공식 appreviews 엔드포인트로 미리 수집한 원본 데이터" 블록이 있다면, ' +
-  '그건 사용자가 입력한 승인 출처 목록과 무관하게 코드가 스팀 공식 API로 직접 가져온 것이라 1단계(출처 확인)를 이미 통과한 데이터입니다. ' +
-  '별도의 승인된 출처 목록이 없다는 이유로 이 데이터를 반려하지 마세요.';
+  '아래에 "미리 준비된 근거 데이터" 블록이 있다면, 그건 hy/prepare-evidence.js가 로컬 DB에서 기간 필터링·너무 짧은 리뷰 제거·' +
+  '근접중복 병합·벡터화까지 이미 코드로 끝내둔 결과입니다. 사용자가 입력한 승인 출처 목록과 무관하게 스팀 공식 API 근거이므로 ' +
+  '1단계(출처 확인)를 이미 통과했고, 3단계(중복 판정)의 유사도 병합도 이미 끝난 상태입니다 — 스스로 다시 병합/분리하지 마세요.';
 
 function loadSystemPrompt() {
   return fs.readFileSync(AGENT_SPEC_PATH, 'utf8') + RUNTIME_NOTE;
@@ -56,213 +61,36 @@ function toUsd(amount, currency) {
 }
 
 const MAX_OUTPUT_TOKENS = 16000;
+// prepare-evidence.js가 만든 근거는 기간 전체가 다 들어있을 수 있어, Claude에게 통째로 넘기면 비용이 커진다.
+// 그래서 Claude에게 보여줄 때만 언어당 개수를 제한한다(수집·벡터화 자체의 완전성과는 무관).
+const MAX_EVIDENCE_PER_LANGUAGE_IN_PROMPT = 300;
 
-// 스팀 공식 API 언어 코드 전체 목록(출처: partner.steamgames.com/doc/store/localization/languages)
-const STEAM_LANGUAGES = [
-  { code: 'english', label: '영어' },
-  { code: 'koreana', label: '한국어' },
-  { code: 'japanese', label: '일본어' },
-  { code: 'schinese', label: '중국어(간체)' },
-  { code: 'tchinese', label: '중국어(번체)' },
-  { code: 'russian', label: '러시아어' },
-  { code: 'spanish', label: '스페인어' },
-  { code: 'latam', label: '스페인어(중남미)' },
-  { code: 'portuguese', label: '포르투갈어' },
-  { code: 'brazilian', label: '포르투갈어(브라질)' },
-  { code: 'french', label: '프랑스어' },
-  { code: 'german', label: '독일어' },
-  { code: 'italian', label: '이탈리아어' },
-  { code: 'polish', label: '폴란드어' },
-  { code: 'dutch', label: '네덜란드어' },
-  { code: 'turkish', label: '터키어' },
-  { code: 'thai', label: '태국어' },
-  { code: 'vi', label: '베트남어' },
-  { code: 'indonesian', label: '인도네시아어' },
-  { code: 'malay', label: '말레이어' },
-  { code: 'arabic', label: '아랍어' },
-  { code: 'ukrainian', label: '우크라이나어' },
-  { code: 'czech', label: '체코어' },
-  { code: 'hungarian', label: '헝가리어' },
-  { code: 'romanian', label: '루마니아어' },
-  { code: 'bulgarian', label: '불가리아어' },
-  { code: 'greek', label: '그리스어' },
-  { code: 'swedish', label: '스웨덴어' },
-  { code: 'danish', label: '덴마크어' },
-  { code: 'finnish', label: '핀란드어' },
-  { code: 'norwegian', label: '노르웨이어' },
-];
-const STEAM_LANGUAGE_CODES = STEAM_LANGUAGES.map((l) => l.code);
-
-// 스팀 리뷰 수집 안전장치(언어 하나=병렬 체인 하나 기준). 기간이 오래된 과거일수록 그 구간에 닿기까지
-// 최신 리뷰를 계속 넘겨야 하므로 무한정 페이지를 넘기지 않도록 상한을 둔다
-// (둘 다 Anthropic 비용과 무관 — 순수 HTTP 요청. 언어별로 병렬 실행되므로 체감 시간은 이 값 하나 기준과 비슷하다).
-const STEAM_MAX_PAGES = 300; // 언어 하나당 페이지당 최대 100건 → 최대 30,000건 스캔
-const STEAM_MAX_REVIEWS_IN_WINDOW = 300; // 언어 하나당 기간 내에서 실제로 담아갈 리뷰 수 상한
-const STEAM_REVIEW_TEXT_LIMIT = 1000; // 리뷰 하나당 담아갈 텍스트 길이 상한(문자)
-
-// 자주 쓰는 게임은 스팀 검색 API 호출 없이 바로 appid로 고정 — 검색 실패(예: "배틀그라운드" 같은 한글 약칭
-// 미인식) 문제도 같이 해결된다. key는 소문자로 비교.
-const STEAM_APPID_ALIASES = {
-  '배틀그라운드': { appid: 578080, matchedName: 'PUBG: BATTLEGROUNDS' },
-  'pubg': { appid: 578080, matchedName: 'PUBG: BATTLEGROUNDS' },
-  'pubg: battlegrounds': { appid: 578080, matchedName: 'PUBG: BATTLEGROUNDS' },
-  'battlegrounds': { appid: 578080, matchedName: 'PUBG: BATTLEGROUNDS' },
-};
-
-async function resolveSteamAppId(gameName) {
-  const alias = STEAM_APPID_ALIASES[gameName.trim().toLowerCase()];
-  if (alias) {
-    return alias;
-  }
-
-  const url = `https://store.steampowered.com/api/storesearch/?term=${encodeURIComponent(gameName)}&l=korean&cc=kr`;
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`스팀 게임 검색 실패: HTTP ${res.status}`);
-  }
-  const data = await res.json();
-  if (!data.items || data.items.length === 0) {
-    return null;
-  }
-  return { appid: data.items[0].id, matchedName: data.items[0].name };
-}
-
-async function fetchSteamReviewsForLanguage({ appid, language, periodStartMs, periodEndMs }) {
-  const reviews = [];
-  let cursor = '*';
-  let scannedPages = 0;
-  let scannedCount = 0;
-  // 스캔이 어떻게 끝났는지 정확한 이유를 남긴다 — "결과가 적다"가 "실제로 적어서"인지
-  // "다 못 봐서"인지를 코드가 직접 구분해서 나중에 사용자에게 정직하게 알려주기 위함
-  let stopReason = null; // 'reachedWindowStart' | 'windowTruncated' | 'cursorExhausted' | 'pageCap'
-
-  for (let page = 0; page < STEAM_MAX_PAGES; page += 1) {
-    const url =
-      `https://store.steampowered.com/appreviews/${appid}?json=1&filter=recent&language=${language}` +
-      `&num_per_page=100&purchase_type=all&filter_offtopic_activity=0&cursor=${encodeURIComponent(cursor)}`;
-    const res = await fetch(url);
-    if (!res.ok) {
-      throw new Error(`스팀 리뷰 조회 실패(${language}): HTTP ${res.status}`);
-    }
-    const data = await res.json();
-    scannedPages += 1;
-
-    const batch = data.reviews || [];
-    if (batch.length === 0) {
-      stopReason = 'cursorExhausted';
-      break;
-    }
-    scannedCount += batch.length;
-
-    for (const review of batch) {
-      const tsMs = review.timestamp_created * 1000;
-      if (tsMs < periodStartMs) {
-        stopReason = 'reachedWindowStart';
-        break;
-      }
-      if (tsMs <= periodEndMs) {
-        reviews.push({
-          recommendationid: review.recommendationid,
-          steamid: review.author && review.author.steamid,
-          language: review.language,
-          review: (review.review || '').slice(0, STEAM_REVIEW_TEXT_LIMIT),
-          voted_up: review.voted_up,
-          timestamp_created: review.timestamp_created,
-          playtime_forever_minutes: review.author && review.author.playtime_forever,
-        });
-        if (reviews.length >= STEAM_MAX_REVIEWS_IN_WINDOW) {
-          stopReason = 'windowTruncated';
-          break;
-        }
-      }
-    }
-
-    if (stopReason) {
-      break;
-    }
-    if (!data.cursor || data.cursor === cursor) {
-      stopReason = 'cursorExhausted';
-      break;
-    }
-    cursor = data.cursor;
-  }
-
-  if (!stopReason) {
-    stopReason = 'pageCap';
-  }
-
-  return {
-    language,
-    reviews,
-    scannedPages,
-    scannedCount,
-    stopReason,
-    // 이 기간의 리뷰를 빠짐없이 다 봤다고 확신할 수 있는 경우만 true
-    complete: stopReason === 'reachedWindowStart' || stopReason === 'cursorExhausted',
-  };
-}
-
-async function fetchSteamReviews({ gameName, periodStartMs, periodEndMs, languages }) {
-  const resolved = await resolveSteamAppId(gameName);
-  if (!resolved) {
-    return { found: false, gameName };
-  }
-
-  const { appid, matchedName } = resolved;
-  const targetLanguages =
-    Array.isArray(languages) && languages.length > 0
-      ? languages.filter((code) => STEAM_LANGUAGE_CODES.includes(code))
-      : STEAM_LANGUAGE_CODES;
-
-  // 언어별로 독립된 커서 체인이라 동시에(병렬로) 실행한다 — 순차로 하나씩 하면 언어 수만큼 시간이 곱해지지만,
-  // 병렬로 하면 (실측 기준) 언어 수와 거의 무관하게 가장 느린 언어 하나만큼의 시간으로 끝난다.
-  const perLanguage = await Promise.all(
-    targetLanguages.map((language) => fetchSteamReviewsForLanguage({ appid, language, periodStartMs, periodEndMs }))
-  );
-
-  const reviews = perLanguage.flatMap((r) => r.reviews);
-
-  return {
-    found: true,
-    appid,
-    matchedName,
-    languagesQueried: targetLanguages,
-    perLanguage: perLanguage.map(({ language, scannedPages, scannedCount, stopReason, complete, reviews: langReviews }) => ({
-      language,
-      scannedPages,
-      scannedCount,
-      stopReason,
-      complete,
-      collected: langReviews.length,
-    })),
-    reviews,
-  };
-}
-
-function describeSteamCollectionStatus(steamResult) {
-  if (!steamResult.found) {
+function describeEvidenceStatus(evidenceResult) {
+  if (!evidenceResult.found) {
     return (
-      `[스팀 수집 상태: 실패] "${steamResult.gameName}"에 해당하는 게임을 스팀에서 찾지 못했습니다. ` +
+      `[근거 준비 상태: 실패] "${evidenceResult.gameName}"에 해당하는 게임을 스팀에서 찾지 못했습니다. ` +
       `공식 영문/정식 명칭에 가깝게 다시 확인해주세요.`
     );
   }
-  const totalCollected = steamResult.reviews.length;
-  const base = `대상: ${steamResult.matchedName}(appid ${steamResult.appid}) · 조회한 언어 ${steamResult.perLanguage.length}개 · 기간 내 수집 합계 ${totalCollected}건`;
-
-  const incomplete = steamResult.perLanguage.filter((p) => !p.complete && p.scannedCount > 0);
-  if (incomplete.length === 0) {
-    return `[스팀 수집 상태: 완전 수집] 조회한 모든 언어권에서 요청한 기간을 끝까지 스캔했습니다 — 아래는 이 기간의 전체 리뷰입니다. ${base}`;
+  if (evidenceResult.dbMissing) {
+    return (
+      `[근거 준비 상태: DB 없음] 로컬 DB(hy/steam-reviews.db)가 아직 없습니다. ` +
+      `먼저 hy/collector.js를 실행해서 리뷰를 수집해야 조회할 수 있습니다.`
+    );
   }
 
-  const reasonLabel = (r) =>
-    r === 'windowTruncated'
-      ? `기간 내 리뷰가 ${STEAM_MAX_REVIEWS_IN_WINDOW}건을 넘어 일부만 담음`
-      : `페이지 상한(${STEAM_MAX_PAGES})에 도달했지만 기간 시작점에 도달 못함`;
-  const detail = incomplete.map((p) => `${p.language}(${reasonLabel(p.stopReason)}, ${p.collected}건까지만)`).join(', ');
+  const base =
+    `대상: ${evidenceResult.matchedName}(appid ${evidenceResult.appid}) · 조회한 언어 ${evidenceResult.perLanguage.length}개 · ` +
+    `원본 ${evidenceResult.totalRaw}건 → 짧은 리뷰 제거·중복 병합 후 최종 ${evidenceResult.totalFinal}건`;
 
+  const incomplete = evidenceResult.perLanguage.filter((p) => !p.collectionComplete);
+  if (incomplete.length === 0) {
+    return `[근거 준비 상태: 완전 수집] 조회한 모든 언어권의 DB 수집이 이 기간에 대해 완료된 상태입니다. ${base}`;
+  }
+  const detail = incomplete.map((p) => p.language).join(', ');
   return (
-    `[스팀 수집 상태: 일부만 수집됨(미완료)] 다음 언어권은 요청한 기간을 끝까지 못 봤습니다 — ${detail}. ` +
-    `나머지 언어권은 완전 수집됨. 지금 데이터가 이 기간의 "전부"라는 보장이 없습니다. ${base}`
+    `[근거 준비 상태: 일부만 수집됨(미완료)] 다음 언어권은 DB 수집 자체가 아직 이 기간(더 과거 쪽)까지 안 끝났습니다 — ${detail}. ` +
+    `지금 있는 게 이 기간의 "전부"라는 보장이 없습니다(hy/collector.js를 더 돌리면 채워집니다). ${base}`
   );
 }
 
@@ -270,26 +98,40 @@ async function callAgent(inputText, options = {}) {
   const client = new Anthropic({ apiKey: loadApiKey() });
   const system = loadSystemPrompt();
 
-  let steamBlock = '';
-  let steamStatusLine = '';
+  let evidenceBlock = '';
+  let evidenceStatusLine = '';
+  let evidenceResult = null;
   if (options.gameName && Number.isFinite(options.periodStartMs) && Number.isFinite(options.periodEndMs)) {
-    const steamResult = await fetchSteamReviews({
+    evidenceResult = await prepareEvidence({
       gameName: options.gameName,
       periodStartMs: options.periodStartMs,
       periodEndMs: options.periodEndMs,
       languages: options.languages,
     });
-    steamStatusLine = describeSteamCollectionStatus(steamResult);
-    steamBlock =
-      '\n\n---\n# 스팀 공식 appreviews 엔드포인트로 미리 수집한 원본 데이터(코드가 직접 가져옴, 가공 전)\n' +
-      steamStatusLine +
+    evidenceStatusLine = describeEvidenceStatus(evidenceResult);
+
+    // Claude에게 보여줄 때만 언어당 개수 제한(비용 때문) — evidenceResult.evidence 자체(반환값)는 그대로 둔다.
+    const perLanguageCount = new Map();
+    const evidenceForPrompt = (evidenceResult.evidence || []).filter((item) => {
+      const count = perLanguageCount.get(item.language) || 0;
+      if (count >= MAX_EVIDENCE_PER_LANGUAGE_IN_PROMPT) return false;
+      perLanguageCount.set(item.language, count + 1);
+      return true;
+    });
+
+    evidenceBlock =
+      '\n\n---\n# 미리 준비된 근거 데이터(hy/prepare-evidence.js가 API 없이 처리, 가공 전 텍스트 원문 포함)\n' +
+      evidenceStatusLine +
       '\n\n' +
-      JSON.stringify(steamResult, null, 2) +
+      JSON.stringify({ perLanguage: evidenceResult.perLanguage, evidence: evidenceForPrompt }, null, 2) +
       '\n\n(steamid는 아직 비식별화 전입니다 — 4단계 게이트에서 근거ID로 치환해서 최종 결과에는 원본 steamid가 남지 않게 하세요.)' +
-      '\n(위 [스팀 수집 상태] 줄을 결과 맨 앞에 그대로 옮겨 적으세요. "완전 수집"이 아닌데 "기간 내 자료 전부"인 것처럼 쓰지 마세요.)';
+      '\n(위 [근거 준비 상태] 줄을 결과 맨 앞에 그대로 옮겨 적으세요. "완전 수집"이 아닌데 "기간 내 자료 전부"인 것처럼 쓰지 마세요.)' +
+      '\n(duplicateCount는 이미 코드로 병합된 개수입니다 — 3단계 게이트의 중복 카운트로 그대로 쓰세요.)' +
+      '\n(vector 필드는 통계적 벡터화(해싱 트릭) 결과입니다 — 다음 단계(res 등)로 넘길 때를 위한 것이니, ' +
+      '피드백 번들 본문에 숫자 벡터를 그대로 나열하거나 설명하지 마세요. 번들은 사람이 읽는 문서 형태 그대로 유지하세요.)';
   }
 
-  const messages = [{ role: 'user', content: inputText + steamBlock }];
+  const messages = [{ role: 'user', content: inputText + evidenceBlock }];
   const tools = [
     {
       type: 'web_search_20260209',
@@ -350,22 +192,26 @@ async function callAgent(inputText, options = {}) {
     }
   }
 
-  // 스팀 수집 상태는 Claude의 서술에 맡기지 않고, 코드가 직접 결과 맨 앞에 못박아 둔다
+  // 근거 준비 상태는 Claude의 서술에 맡기지 않고, 코드가 직접 결과 맨 앞에 못박아 둔다
   // (모델이 빠뜨리거나 완곡하게 바꿔 써도 사용자가 항상 진짜 상태를 볼 수 있도록)
-  const steamStatusPrefix = steamStatusLine ? steamStatusLine + '\n\n' : '';
+  const statusPrefix = evidenceStatusLine ? evidenceStatusLine + '\n\n' : '';
+  // 다음 단계(res 등)로 실제로 넘어가는 벡터화 결과 — 텍스트 번들과 별도로 항상 같이 반환한다.
+  const evidence = evidenceResult && evidenceResult.evidence ? evidenceResult.evidence : [];
 
   if (cutOff) {
     // 지금 설정(최대 출력 토큰 상한 기준)대로 끝까지 갔을 때의 이론상 최대 비용 — 검색/조회 도구가 추가로 읽어들이는 내용은
     // 미리 알 수 없어 포함하지 않았으므로, 실제 필요 금액은 이보다 더 클 수 있다.
     const theoreticalCeiling = estimatedInputCost + (MAX_OUTPUT_TOKENS / 1e6) * PRICING.output;
-    return (
-      steamStatusPrefix +
-      text +
-      '\n\n[비용 상한 도달로 중단됨]\n' +
-      `- 이유: 여기까지 실제로 쓴 비용(약 $${costAtCutoff.toFixed(4)})이 설정한 상한($${costLimitUsd.toFixed(4)})에 닿아서 중단했습니다.\n` +
-      `- 지금 설정으로 끝까지 갔을 때 이론상 최대 비용은 약 $${theoreticalCeiling.toFixed(4)}입니다(검색·조회 도구가 읽어오는 내용에 따라 이보다 더 늘 수 있습니다).\n` +
-      `- 해당 기간의 모든 자료를 빠짐없이 다 보는 데 정확히 얼마가 필요한지는 실제 게시물 수에 따라 달라 미리 정확한 금액을 알려드릴 수 없습니다. 상한을 위 최대 비용보다 넉넉히(예: 2~3배) 올려서 다시 시도해 보시는 것을 권장합니다.`
-    );
+    return {
+      text:
+        statusPrefix +
+        text +
+        '\n\n[비용 상한 도달로 중단됨]\n' +
+        `- 이유: 여기까지 실제로 쓴 비용(약 $${costAtCutoff.toFixed(4)})이 설정한 상한($${costLimitUsd.toFixed(4)})에 닿아서 중단했습니다.\n` +
+        `- 지금 설정으로 끝까지 갔을 때 이론상 최대 비용은 약 $${theoreticalCeiling.toFixed(4)}입니다(검색·조회 도구가 읽어오는 내용에 따라 이보다 더 늘 수 있습니다).\n` +
+        `- 해당 기간의 모든 자료를 빠짐없이 다 보는 데 정확히 얼마가 필요한지는 실제 게시물 수에 따라 달라 미리 정확한 금액을 알려드릴 수 없습니다. 상한을 위 최대 비용보다 넉넉히(예: 2~3배) 올려서 다시 시도해 보시는 것을 권장합니다.`,
+      evidence,
+    };
   }
 
   const finalMessage = await stream.finalMessage();
@@ -373,10 +219,10 @@ async function callAgent(inputText, options = {}) {
     .filter((block) => block.type === 'text')
     .map((block) => block.text)
     .join('\n');
-  return steamStatusPrefix + finalText;
+  return { text: statusPrefix + finalText, evidence };
 }
 
-module.exports = { callAgent, fetchSteamReviews, resolveSteamAppId, describeSteamCollectionStatus, STEAM_LANGUAGES };
+module.exports = { callAgent, resolveSteamAppId, STEAM_LANGUAGES };
 
 if (require.main === module) {
   const chunks = [];
@@ -388,8 +234,9 @@ if (require.main === module) {
       process.exit(1);
     }
     try {
-      const result = await callAgent(inputText);
-      console.log(result);
+      const { text: resultText, evidence } = await callAgent(inputText);
+      console.log(resultText);
+      console.error(`(참고: 벡터화된 근거 ${evidence.length}건도 반환값에 함께 담겨 있습니다 — CLI에서는 텍스트만 출력)`);
     } catch (err) {
       console.error('담당자 호출 실패:', err.message);
       process.exit(1);

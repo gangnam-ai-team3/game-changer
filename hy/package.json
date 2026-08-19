@@ -1,7 +1,7 @@
 {
-  "name": "hy-call-agent",
+  "name": "hy-voc-pipeline",
   "private": true,
-  "description": "hy 담당자(.claude/agents/hy.md)를 실제로 호출하는 스크립트",
+  "description": "hy 수집 담당 파트 — 스팀 리뷰 수집·기간필터·중복제거·벡터화(API 불필요) + 선택적 Claude 보고서 생성",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1"
   }

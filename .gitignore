@@ -2,3 +2,14 @@
 .DS_Store
 .playwright-mcp/
 node_modules/
+
+# hy 파트 — 개인정보(원본 steamid) 보호용: 절대 커밋/공유하지 않음
+hy/.hash-salt
+hy/steam-reviews.db
+hy/steam-reviews.db-shm
+hy/steam-reviews.db-wal
+
+# hy 파트 — 비식별화 사본(공유해도 안전하지만 100MB 넘어 git push 자체가 안 됨, Release로만 공유)
+hy/steam-reviews.anon.db
+hy/steam-reviews.anon.db-shm
+hy/steam-reviews.anon.db-wal

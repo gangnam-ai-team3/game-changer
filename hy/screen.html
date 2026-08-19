@@ -155,27 +155,6 @@
     padding: 0;
   }
 
-  .amount-row {
-    display: flex;
-    gap: 8px;
-  }
-  .amount-row input[type="number"] {
-    flex: 1;
-    min-width: 0;
-  }
-  .amount-row select {
-    flex-shrink: 0;
-    width: 100px;
-    cursor: pointer;
-  }
-
-  .fx-note {
-    margin-top: 8px;
-    font-size: 13px;
-    color: var(--text-secondary);
-    min-height: 18px;
-  }
-
   button#collect-btn {
     display: inline-block;
     margin-top: 36px;
@@ -196,25 +175,6 @@
     opacity: 0.78;
   }
 
-  button#steam-preview-btn {
-    display: inline-block;
-    margin-top: 36px;
-    margin-left: 10px;
-    padding: 11px 22px;
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--accent);
-    background: var(--accent-surface);
-    border: none;
-    border-radius: 10px;
-    cursor: pointer;
-    transition: opacity 0.15s ease;
-  }
-  button#steam-preview-btn:hover {
-    opacity: 0.85;
-  }
-
-
   #result-section {
     display: none;
     margin-top: 16px;
@@ -229,76 +189,6 @@
     letter-spacing: 0.02em;
     margin: 0 0 24px;
     text-transform: uppercase;
-  }
-
-  .result-body h1 {
-    font-size: 21px;
-    font-weight: 700;
-    letter-spacing: -0.01em;
-    color: var(--text);
-    margin: 0 0 16px;
-  }
-  .result-body h2 {
-    font-size: 16px;
-    font-weight: 700;
-    color: var(--text);
-    margin: 40px 0 14px;
-  }
-  .result-body h2:first-of-type {
-    margin-top: 32px;
-  }
-  .result-body h3 {
-    font-size: 15px;
-    font-weight: 600;
-    margin: 24px 0 8px;
-  }
-  .result-body p {
-    color: var(--text);
-    margin: 8px 0;
-    line-height: 1.75;
-  }
-  .result-body code {
-    font-size: 0.92em;
-    background: var(--accent-surface);
-    color: var(--accent);
-    padding: 1px 6px;
-    border-radius: 5px;
-  }
-  .result-body ul {
-    margin: 8px 0;
-    padding-left: 20px;
-  }
-  .result-body li {
-    margin: 6px 0;
-    line-height: 1.7;
-  }
-
-  table {
-    border-collapse: collapse;
-    width: 100%;
-    margin: 4px 0 8px;
-    font-size: 14px;
-  }
-  th, td {
-    border-bottom: 1px solid var(--border);
-    padding: 11px 14px;
-    text-align: left;
-    vertical-align: top;
-  }
-  th {
-    color: var(--text-secondary);
-    font-weight: 600;
-    font-size: 12.5px;
-    letter-spacing: 0.02em;
-    border-bottom: 1px solid var(--border);
-    border-top: 1px solid var(--border);
-  }
-  tbody tr:last-child td {
-    border-bottom: none;
-  }
-  .table-wrap {
-    overflow-x: auto;
-    margin: 4px 0 28px;
   }
 
   .lang-hint {
@@ -343,17 +233,93 @@
     padding: 0;
   }
 
-  #result-output {
-    margin: 0;
-    font-family: inherit;
+  .result-summary {
     font-size: 15px;
-    line-height: 1.75;
+    line-height: 1.7;
+    color: var(--text);
+    margin-bottom: 20px;
+  }
+  .result-summary.loading {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--text-secondary);
+  }
+  .spinner {
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .accordion-item {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 8px;
+    overflow: hidden;
+  }
+  button.accordion-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 14px 16px;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    background: var(--surface);
+    border: none;
+    text-align: left;
+    cursor: pointer;
+  }
+  button.accordion-header:hover {
+    background: var(--accent-surface);
+  }
+  .accordion-header .accordion-arrow {
+    color: var(--text-secondary);
+    font-size: 12px;
+    flex-shrink: 0;
+    width: 12px;
+  }
+  .accordion-header .accordion-warning {
+    color: var(--text-secondary);
+    font-weight: 400;
+    font-size: 12.5px;
+  }
+  .accordion-body {
+    padding: 4px 16px 16px;
+    border-top: 1px solid var(--border);
+  }
+  .accordion-body-meta {
+    font-size: 12.5px;
+    color: var(--text-secondary);
+    margin: 12px 0;
+  }
+  .evidence-row {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .evidence-row:last-child {
+    border-bottom: none;
+  }
+  .evidence-meta {
+    font-size: 12.5px;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+  }
+  .evidence-text {
+    font-size: 14px;
+    line-height: 1.65;
     color: var(--text);
     white-space: pre-wrap;
     word-break: break-word;
-  }
-  #result-output.loading {
-    color: var(--text-secondary);
   }
 </style>
 
@@ -365,11 +331,6 @@
 
   <div class="panel">
     <div class="notice" style="margin-bottom: 20px;">대상 게임: PUBG: BATTLEGROUNDS(고정)</div>
-
-    <div class="field">
-      <label for="event-keyword">이벤트 키워드</label>
-      <textarea id="event-keyword" rows="1" placeholder="이벤트 키워드를 붙여넣으세요"></textarea>
-    </div>
 
     <div class="field">
       <label for="collect-period-start-text">게시물 등록기간(데이터 수집기간)</label>
@@ -399,31 +360,14 @@
       </div>
     </div>
 
-    <div class="field">
-      <label for="cost-limit">상한 비용</label>
-      <div class="amount-row">
-        <input type="number" id="cost-limit" placeholder="상한 비용을 입력하세요" min="0" step="any">
-        <select id="currency-select">
-          <option value="USD" selected>USD</option>
-          <option value="KRW">KRW</option>
-          <option value="JPY">JPY</option>
-          <option value="EUR">EUR</option>
-          <option value="CNY">CNY</option>
-        </select>
-      </div>
-      <div class="fx-note" id="fx-note"></div>
-    </div>
-
     <button id="collect-btn">[데이터 수집]</button>
-    <button id="steam-preview-btn">[스팀 원본만 확인 · Claude 호출 없음]</button>
   </div>
 
   <div id="result-section">
     <div class="panel">
       <h2 class="result-title">결과</h2>
-      <div class="result-body">
-        <pre id="result-output"></pre>
-      </div>
+      <div id="result-summary" class="result-summary"></div>
+      <div id="result-accordion"></div>
     </div>
   </div>
 
@@ -564,70 +508,98 @@
   }
 
   var FIXED_GAME_NAME = 'PUBG: BATTLEGROUNDS';
+  var LANG_LABEL = {};
+  STEAM_LANGUAGES.forEach(function (l) { LANG_LABEL[l.code] = l.label; });
 
-  function buildInputText() {
-    var lines = [];
-    lines.push('대상 게임: ' + FIXED_GAME_NAME);
-    lines.push('이벤트ID/키워드: ' + document.getElementById('event-keyword').value);
-    lines.push('수집 기간: ' + document.getElementById('collect-period-start').value + ' ~ ' + document.getElementById('collect-period-end').value);
-    lines.push('비용 상한: ' + document.getElementById('cost-limit').value + ' ' + document.getElementById('currency-select').value);
-    return lines.join('\n');
+  function renderResult(data) {
+    var summaryEl = document.getElementById('result-summary');
+    var accordionEl = document.getElementById('result-accordion');
+    summaryEl.classList.remove('loading');
+    accordionEl.innerHTML = '';
+
+    if (!data.found) {
+      summaryEl.textContent = '게임을 찾지 못했습니다: ' + data.gameName;
+      return;
+    }
+    if (data.dbMissing) {
+      summaryEl.textContent = 'DB가 아직 없습니다. hy/collector.js를 먼저 실행해서 수집해야 합니다.';
+      return;
+    }
+
+    summaryEl.textContent = data.matchedName + ' · 원본 ' + data.totalRaw + '건 → 짧은 리뷰 제거 + 중복 병합 후 최종 ' + data.totalFinal + '건';
+
+    var evidenceByLang = {};
+    data.evidence.forEach(function (item) {
+      if (!evidenceByLang[item.language]) evidenceByLang[item.language] = [];
+      evidenceByLang[item.language].push(item);
+    });
+
+    data.perLanguage.forEach(function (p) {
+      var item = document.createElement('div');
+      item.className = 'accordion-item';
+
+      var header = document.createElement('button');
+      header.type = 'button';
+      header.className = 'accordion-header';
+      var langName = LANG_LABEL[p.language] || p.language;
+      header.innerHTML = '<span class="accordion-arrow">▸</span>' +
+        '<span>' + langName + ' 총 ' + p.finalCount + '건</span>' +
+        (p.collectionComplete ? '' : '<span class="accordion-warning">⚠️ 수집 미완료</span>');
+
+      var body = document.createElement('div');
+      body.className = 'accordion-body';
+      body.hidden = true;
+      var rendered = false;
+
+      header.addEventListener('click', function () {
+        var willOpen = body.hidden;
+        body.hidden = !willOpen;
+        header.querySelector('.accordion-arrow').textContent = willOpen ? '▾' : '▸';
+        if (willOpen && !rendered) {
+          rendered = true;
+          var meta = document.createElement('div');
+          meta.className = 'accordion-body-meta';
+          meta.textContent = '원본 ' + p.rawInPeriod + '건 · 너무 짧아서 제외 ' + p.tooShortRemoved + '건 · 중복 병합 ' + p.duplicatesMerged + '건 · 최종 ' + p.finalCount + '건';
+          body.appendChild(meta);
+
+          var list = evidenceByLang[p.language] || [];
+          list.forEach(function (r) {
+            var row = document.createElement('div');
+            row.className = 'evidence-row';
+            var metaLine = document.createElement('div');
+            metaLine.className = 'evidence-meta';
+            var date = new Date(r.timestamp_created * 1000).toISOString().slice(0, 10);
+            metaLine.textContent = date + ' · ' + (r.voted_up ? '추천' : '비추천') + (r.duplicateCount > 1 ? ' · 중복 ' + r.duplicateCount + '건 병합' : '');
+            var textLine = document.createElement('div');
+            textLine.className = 'evidence-text';
+            textLine.textContent = r.review;
+            row.appendChild(metaLine);
+            row.appendChild(textLine);
+            body.appendChild(row);
+          });
+        }
+      });
+
+      item.appendChild(header);
+      item.appendChild(body);
+      accordionEl.appendChild(item);
+    });
   }
 
   document.getElementById('collect-btn').addEventListener('click', function () {
     var resultSection = document.getElementById('result-section');
-    var resultOutput = document.getElementById('result-output');
+    var summaryEl = document.getElementById('result-summary');
+    var accordionEl = document.getElementById('result-accordion');
     var btn = document.getElementById('collect-btn');
 
     resultSection.style.display = 'block';
     resultSection.scrollIntoView({ behavior: 'smooth' });
-    resultOutput.textContent = '부르는 중...';
-    resultOutput.classList.add('loading');
+    accordionEl.innerHTML = '';
+    summaryEl.innerHTML = '<span class="spinner"></span><span>데이터 수집중</span>';
+    summaryEl.classList.add('loading');
     btn.disabled = true;
 
-    fetch('/call-agent', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        text: buildInputText(),
-        costLimitAmount: parseFloat(document.getElementById('cost-limit').value),
-        costLimitCurrency: document.getElementById('currency-select').value,
-        gameName: FIXED_GAME_NAME,
-        periodStartMs: new Date(document.getElementById('collect-period-start').value).getTime(),
-        periodEndMs: new Date(document.getElementById('collect-period-end').value).getTime(),
-        languages: getSelectedLanguages()
-      })
-    })
-      .then(function (res) { return res.json().then(function (data) { return { ok: res.ok, data: data }; }); })
-      .then(function (r) {
-        resultOutput.classList.remove('loading');
-        if (r.ok) {
-          resultOutput.textContent = r.data.result;
-        } else {
-          resultOutput.textContent = '오류: ' + (r.data.error || '알 수 없는 오류');
-        }
-      })
-      .catch(function (err) {
-        resultOutput.classList.remove('loading');
-        resultOutput.textContent = '오류: ' + err.message;
-      })
-      .finally(function () {
-        btn.disabled = false;
-      });
-  });
-
-  document.getElementById('steam-preview-btn').addEventListener('click', function () {
-    var resultSection = document.getElementById('result-section');
-    var resultOutput = document.getElementById('result-output');
-    var btn = document.getElementById('steam-preview-btn');
-
-    resultSection.style.display = 'block';
-    resultSection.scrollIntoView({ behavior: 'smooth' });
-    resultOutput.textContent = '스팀에서 긁는 중... (Claude 호출 없음, 비용 없음)';
-    resultOutput.classList.add('loading');
-    btn.disabled = true;
-
-    fetch('/steam-preview', {
+    fetch('/evidence', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -639,48 +611,20 @@
     })
       .then(function (res) { return res.json().then(function (data) { return { ok: res.ok, data: data }; }); })
       .then(function (r) {
-        resultOutput.classList.remove('loading');
         if (r.ok) {
-          resultOutput.textContent = r.data.status + '\n\n(키워드 필터링은 Claude가 하는 단계라 여기선 적용 안 됨 — 이건 스팀에서 실제로 긁힌 원본입니다)\n\n' + JSON.stringify(r.data.steamResult, null, 2);
+          renderResult(r.data);
         } else {
-          resultOutput.textContent = '오류: ' + (r.data.error || '알 수 없는 오류');
+          summaryEl.classList.remove('loading');
+          summaryEl.textContent = '오류: ' + (r.data.error || '알 수 없는 오류');
         }
       })
       .catch(function (err) {
-        resultOutput.classList.remove('loading');
-        resultOutput.textContent = '오류: ' + err.message;
+        summaryEl.classList.remove('loading');
+        summaryEl.textContent = '오류: ' + err.message;
       })
       .finally(function () {
         btn.disabled = false;
       });
   });
 
-  function autoGrow(el) {
-    el.style.height = 'auto';
-    el.style.height = el.scrollHeight + 'px';
-  }
-  ['event-keyword'].forEach(function (id) {
-    var el = document.getElementById(id);
-    el.addEventListener('input', function () { autoGrow(el); });
-  });
-
-  // 고정 환율(예시값, 오프라인 파일이라 실시간 환율을 받아오지 않음) — 1단위당 원화
-  var FX_RATES_TO_KRW = { USD: 1380, JPY: 9.2, EUR: 1490, CNY: 190 };
-  var costInput = document.getElementById('cost-limit');
-  var currencySelect = document.getElementById('currency-select');
-  var fxNote = document.getElementById('fx-note');
-
-  function updateFxNote() {
-    var currency = currencySelect.value;
-    var amount = parseFloat(costInput.value);
-    if (currency === 'KRW' || costInput.value.trim() === '' || isNaN(amount)) {
-      fxNote.textContent = '';
-      return;
-    }
-    var rate = FX_RATES_TO_KRW[currency];
-    var krw = Math.round(amount * rate);
-    fxNote.textContent = '약 ' + krw.toLocaleString('ko-KR') + '원 (고정 환율 1 ' + currency + ' = ' + rate.toLocaleString('ko-KR') + '원 기준, 예시 값)';
-  }
-  costInput.addEventListener('input', updateFxNote);
-  currencySelect.addEventListener('change', updateFxNote);
 </script>

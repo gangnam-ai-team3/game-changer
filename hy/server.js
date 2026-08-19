@@ -3,7 +3,8 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { callAgent, fetchSteamReviews, describeSteamCollectionStatus } = require('./call-agent.js');
+const { callAgent } = require('./call-agent.js');
+const { prepareEvidence } = require('./prepare-evidence.js');
 
 const PORT = process.env.PORT || 8787;
 const SCREEN_HTML_PATH = path.join(__dirname, 'screen.html');
@@ -37,8 +38,9 @@ const server = http.createServer((req, res) => {
           sendJson(res, 400, { error: '입력이 비어 있습니다.' });
           return;
         }
-        const result = await callAgent(text, { costLimitAmount, costLimitCurrency, gameName, periodStartMs, periodEndMs, languages });
-        sendJson(res, 200, { result });
+        const { text: result, evidence } = await callAgent(text, { costLimitAmount, costLimitCurrency, gameName, periodStartMs, periodEndMs, languages });
+        // evidence: 벡터화(해싱 트릭)까지 끝난 근거 배열 — 다음 단계(res 등)로 그대로 넘길 수 있는 형태
+        sendJson(res, 200, { result, evidence });
       } catch (err) {
         sendJson(res, 500, { error: err.message });
       }
@@ -46,7 +48,7 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  if (req.method === 'POST' && req.url === '/steam-preview') {
+  if (req.method === 'POST' && req.url === '/evidence') {
     let body = '';
     req.on('data', (chunk) => { body += chunk; });
     req.on('end', async () => {
@@ -56,10 +58,9 @@ const server = http.createServer((req, res) => {
           sendJson(res, 400, { error: '게임이름/기간이 필요합니다.' });
           return;
         }
-        // Claude(Anthropic API)를 전혀 거치지 않는다 — 순수 스팀 공식 API 호출만 수행
-        const steamResult = await fetchSteamReviews({ gameName, periodStartMs, periodEndMs, languages });
-        const status = describeSteamCollectionStatus(steamResult);
-        sendJson(res, 200, { status, steamResult });
+        // Claude(Anthropic API)를 전혀 거치지 않는다 — 기간필터+짧은리뷰제거+중복병합+벡터화까지 전부 로컬 계산
+        const evidenceResult = await prepareEvidence({ gameName, periodStartMs, periodEndMs, languages });
+        sendJson(res, 200, evidenceResult);
       } catch (err) {
         sendJson(res, 500, { error: err.message });
       }
