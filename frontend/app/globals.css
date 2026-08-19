@@ -83,6 +83,10 @@ h2 { margin:0; font-size:23px; letter-spacing:-.035em; }
 .source-mode { min-height:98px; }
 .source-fields { margin-top:16px; }
 .source-toggle { align-self:end; margin-top:0; }
+.corpus-note { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; border:1px solid #c7c9ed; border-radius:8px; background:#fafaff; padding:12px 14px; }
+.corpus-note p { flex:1 1 520px; margin:0; }
+.corpus-date-action { flex:0 0 auto; border:1px solid var(--accent); border-radius:7px; background:#fff; color:var(--accent); padding:9px 12px; font:inherit; font-size:12px; font-weight:750; cursor:pointer; }
+.corpus-date-action:hover { background:#f2f3ff; }.corpus-date-action:focus-visible { outline:3px solid #5e6ad233; outline-offset:2px; }
 .prelaunch-notice { border:1px solid #c7c9ed; border-radius:8px; background:#fafaff; color:#4b568c; margin:18px 0 0; padding:13px 14px; font-size:13px; line-height:1.5; }
 .live-panel { margin-top:26px; }
 .update-results { margin-top:26px; }

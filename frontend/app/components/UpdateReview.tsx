@@ -4,6 +4,7 @@ import { ChangeEvent, FormEvent, useState } from "react";
 
 import { AgentEvent, AgentPipeline } from "./AgentPipeline";
 import { businessKorean, businessKoreanJson } from "./businessKorean";
+import { corpusDemoDates, isFutureUtcDate } from "./corpusDemoDates";
 import { utcWallClockToIso } from "./utcWallClock";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -358,6 +359,16 @@ export function UpdateReview() {
     setError("");
   };
 
+  const applyCorpusDemoDates = () => {
+    const dates = corpusDemoDates();
+    setForm((previous) => ({
+      ...previous,
+      cutoff_on: dates.cutoffOn,
+      planned_on: dates.startsOn,
+    }));
+    setError("");
+  };
+
   const handleCsv = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -381,6 +392,10 @@ export function UpdateReview() {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (sourceMode === "corpus" && !isFutureUtcDate(form.cutoff_on)) {
+      setError("사전 구축 코퍼스를 사용하려면 자료 기준일을 오늘(UTC)보다 뒤로 설정해 주세요.");
+      return;
+    }
     if (sourceMode === "import" && !csvData) {
       setError("승인 CSV 파일을 선택해 주세요.");
       return;
@@ -767,9 +782,12 @@ export function UpdateReview() {
             </p>
           )}
           {sourceMode === "corpus" && (
-            <p className="source-note">
-              현재 데모 코퍼스는 2026년 8월 19일 11:41(UTC)까지 수집한 자료입니다. 자료 기준일과 검토 대상의 시작일을 2026년 8월 20일 이후로 입력해 주세요. 코퍼스에는 한국어와 영어 비식별 요약과 분류값만 저장됩니다. 리뷰 원문은 표시하거나 저장하지 않습니다.
-            </p>
+            <div className="source-note corpus-note">
+              <p>자료 기준일은 내일(UTC), 검토 대상 시작일은 그다음 날로 설정합니다. 코퍼스에는 한국어와 영어 비식별 요약과 분류값만 저장되며, 리뷰 원문은 포함하지 않습니다.</p>
+              <button type="button" className="corpus-date-action" onClick={applyCorpusDemoDates}>
+                코퍼스 데모 날짜 적용
+              </button>
+            </div>
           )}
           {sourceMode === "live" && (
             <div className="grid two source-fields">

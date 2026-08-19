@@ -168,12 +168,20 @@ def test_both_modes_offer_safe_corpus_and_team_agent_choice():
         assert '사전 구축 Steam 코퍼스' in source
         assert '한국어와 영어 리뷰에서 파생한 비식별 요약' in source
         assert '리뷰 원문은 포함하지 않습니다' in source
-        assert '현재 데모 코퍼스는 2026년 8월 19일 11:41(UTC)' in source
-        assert '검토 대상의 시작일을 2026년 8월 20일 이후로' in source
+        assert '코퍼스 데모 날짜 적용' in source
+        assert 'onClick={applyCorpusDemoDates}' in source
+        assert 'cutoff_on: dates.cutoffOn' in source
+        assert 'isFutureUtcDate(form.cutoff_on)' in source
+        assert '자료 기준일을 오늘(UTC)보다 뒤로' in source
+        assert '2026년 8월 19일' not in source
         assert '{sourceMode === "live" && (' in source
         assert '{sourceMode === "import" && (' in source
         assert '정아현(Jelly) 위험 점검과 승진배 근거 검증 에이전트' in source
         assert '저장된 코퍼스와 코드 정책만 사용' in source
+
+    assert 'starts_on: dates.startsOn' in event_source
+    assert 'ends_on: dates.endsOn' in event_source
+    assert 'planned_on: dates.startsOn' in update_source
 
 
 def test_pipeline_names_corpus_and_team_agent_nodes():
@@ -188,3 +196,40 @@ def test_pipeline_names_corpus_and_team_agent_nodes():
         "jinbae_probe_checked",
     ):
         assert f"{node}:" in source
+
+
+def test_corpus_demo_dates_follow_browser_utc_day():
+    script = """
+import { corpusDemoDates, isFutureUtcDate } from "./frontend/app/components/corpusDemoDates.ts";
+
+const now = new Date("2026-08-19T23:59:59Z");
+process.stdout.write(JSON.stringify({
+  dates: corpusDemoDates(now),
+  todayAllowed: isFutureUtcDate("2026-08-19", now),
+  tomorrowAllowed: isFutureUtcDate("2026-08-20", now),
+}));
+"""
+    completed = subprocess.run(
+        [
+            "node",
+            "--no-warnings",
+            "--experimental-strip-types",
+            "--input-type=module",
+            "--eval",
+            script,
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert json.loads(completed.stdout) == {
+        "dates": {
+            "cutoffOn": "2026-08-20",
+            "startsOn": "2026-08-21",
+            "endsOn": "2026-08-28",
+        },
+        "todayAllowed": False,
+        "tomorrowAllowed": True,
+    }
