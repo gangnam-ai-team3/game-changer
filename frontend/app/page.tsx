@@ -26,6 +26,7 @@ const initialForm = {
 };
 
 type FormState = typeof initialForm;
+type SourceMode = "fixture" | "corpus" | "live" | "import";
 
 const fixturePresets: Record<string, FormState> = {
   black_market_2025: initialForm,
@@ -273,7 +274,7 @@ function ResultInsights({ result }: { result: RunResult }) {
 
 function EventReview() {
   const [form, setForm] = useState<FormState>(initialForm);
-  const [sourceMode, setSourceMode] = useState("fixture");
+  const [sourceMode, setSourceMode] = useState<SourceMode>("fixture");
   const [fixtureCase, setFixtureCase] = useState("black_market_2025");
   const [steamAppId, setSteamAppId] = useState("578080");
   const [useSteam, setUseSteam] = useState(true);
@@ -290,6 +291,11 @@ function EventReview() {
   const update = (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const name = event.target.name as keyof FormState;
     setForm((previous) => ({ ...previous, [name]: event.target.value }) as FormState);
+  };
+
+  const selectSourceMode = (next: SourceMode) => {
+    setSourceMode(next);
+    setError("");
   };
 
   const handleCsv = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -457,14 +463,44 @@ function EventReview() {
               <p>저장 자료로 안정적으로 시연하고, 필요할 때 실시간 자료를 선택합니다.</p>
             </div>
           </header>
-          <label className="field">
-            <span>자료 출처</span>
-            <select value={sourceMode} onChange={(event) => setSourceMode(event.target.value)}>
-              <option value="fixture">검증된 저장 데이터와 시연 사례</option>
-              <option value="live">Steam과 X 실시간 갱신</option>
-              <option value="import">승인 CSV 가져오기</option>
-            </select>
-          </label>
+          <div className="source-mode-grid" role="group" aria-label="이벤트 자료 출처">
+            <button
+              type="button"
+              className="source-mode"
+              aria-pressed={sourceMode === "fixture"}
+              onClick={() => selectSourceMode("fixture")}
+            >
+              <strong>검증된 저장 데이터</strong>
+              <span>공식 공개 규칙을 바탕으로 만든 합성 사례로 안정적으로 시연합니다.</span>
+            </button>
+            <button
+              type="button"
+              className="source-mode"
+              aria-pressed={sourceMode === "corpus"}
+              onClick={() => selectSourceMode("corpus")}
+            >
+              <strong>사전 구축 Steam 코퍼스</strong>
+              <span>한국어와 영어 리뷰에서 파생한 비식별 요약을 미리 분류해 관련 근거를 찾습니다. 리뷰 원문은 포함하지 않습니다.</span>
+            </button>
+            <button
+              type="button"
+              className="source-mode"
+              aria-pressed={sourceMode === "live"}
+              onClick={() => selectSourceMode("live")}
+            >
+              <strong>Steam과 X 실시간 갱신</strong>
+              <span>Steam만, X만, 또는 두 자료를 함께 수집합니다.</span>
+            </button>
+            <button
+              type="button"
+              className="source-mode"
+              aria-pressed={sourceMode === "import"}
+              onClick={() => selectSourceMode("import")}
+            >
+              <strong>승인 CSV 가져오기</strong>
+              <span>개인정보와 원문 열이 없는 승인된 CSV만 사용합니다.</span>
+            </button>
+          </div>
           {sourceMode === "fixture" && (
             <label className="field">
               <span>시연 사례</span>
@@ -483,6 +519,11 @@ function EventReview() {
               </select>
               <small className="field-help">공식 공개 규칙을 바탕으로 만든 비식별 합성 의견입니다.</small>
             </label>
+          )}
+          {sourceMode === "corpus" && (
+            <p className="source-note">
+              코퍼스에는 한국어와 영어 비식별 요약과 분류값만 저장됩니다. 리뷰 원문은 표시하거나 저장하지 않습니다.
+            </p>
           )}
           {sourceMode === "live" && (
             <div className="source-fields">
@@ -538,8 +579,14 @@ function EventReview() {
           )}
           <label className="toggle">
             <input type="checkbox" checked={useClaude} onChange={(event) => setUseClaude(event.target.checked)} />
-            <span>Claude로 자연어 설명 보강</span>
-            <small>{useClaude ? "근거와 최종 판정은 코드가 다시 검증합니다." : "결정론적 경로만 실행합니다."}</small>
+            <span>{sourceMode === "corpus" ? "팀 에이전트로 추가 검증" : "Claude로 자연어 설명 보강"}</span>
+            <small>{sourceMode === "corpus"
+              ? useClaude
+                ? "정아현(Jelly) 위험 점검과 승진배 근거 검증 에이전트를 Claude로 실행합니다."
+                : "저장된 코퍼스와 코드 정책만 사용하며 두 에이전트의 Claude 호출은 생략합니다."
+              : useClaude
+                ? "근거와 최종 판정은 코드가 다시 검증합니다."
+                : "결정론적 경로만 실행합니다."}</small>
           </label>
           <p className="source-note">
             저장 데이터는 공식 자료를 바탕으로 만든 합성 시연 사례입니다. 이벤트 조건과 근거 자료를 함께 바꿔 비교할 수 있습니다. API 키는 이 화면에 노출하지 않습니다. 분석 설명은 한국어로 제공하고, 비식별 근거 요약은 왜곡을 막기 위해 출처 언어를 유지합니다.

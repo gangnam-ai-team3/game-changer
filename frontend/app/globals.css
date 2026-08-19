@@ -79,7 +79,7 @@ h2 { margin:0; font-size:23px; letter-spacing:-.035em; }
 .update-heading h2 { max-width:720px; font-size:28px; }
 .update-heading > p:last-child { color:var(--muted); line-height:1.6; max-width:720px; }
 .update-types { grid-template-columns:repeat(3,minmax(0,1fr)); }
-.source-mode-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
+.source-mode-grid { grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); }
 .source-mode { min-height:98px; }
 .source-fields { margin-top:16px; }
 .source-toggle { align-self:end; margin-top:0; }

@@ -156,3 +156,33 @@ def test_live_datetime_payload_keeps_utc_wall_clock_in_non_utc_timezones():
     }
     assert _live_period_payload_in_timezone("America/New_York") == expected
     assert _live_period_payload_in_timezone("Asia/Seoul") == expected
+
+
+def test_both_modes_offer_safe_corpus_and_team_agent_choice():
+    event_source = (ROOT / "page.tsx").read_text(encoding="utf-8")
+    update_source = (ROOT / "components" / "UpdateReview.tsx").read_text(encoding="utf-8")
+
+    for source in (event_source, update_source):
+        assert 'type SourceMode = "fixture" | "corpus" | "live" | "import"' in source
+        assert 'aria-pressed={sourceMode === "corpus"}' in source
+        assert '사전 구축 Steam 코퍼스' in source
+        assert '한국어와 영어 리뷰에서 파생한 비식별 요약' in source
+        assert '리뷰 원문은 포함하지 않습니다' in source
+        assert '{sourceMode === "live" && (' in source
+        assert '{sourceMode === "import" && (' in source
+        assert '정아현(Jelly) 위험 점검과 승진배 근거 검증 에이전트' in source
+        assert '저장된 코퍼스와 코드 정책만 사용' in source
+
+
+def test_pipeline_names_corpus_and_team_agent_nodes():
+    source = (ROOT / "components" / "AgentPipeline.tsx").read_text(encoding="utf-8")
+
+    for node in (
+        "corpus_selected",
+        "corpus_retrieved",
+        "jelly_sidecar_started",
+        "jelly_output_checked",
+        "jinbae_probe_started",
+        "jinbae_probe_checked",
+    ):
+        assert f"{node}:" in source

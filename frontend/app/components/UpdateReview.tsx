@@ -9,7 +9,7 @@ import { utcWallClockToIso } from "./utcWallClock";
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 type UpdateType = "weapon_balance" | "ui_ux" | "system_rules";
-type SourceMode = "fixture" | "live" | "import";
+type SourceMode = "fixture" | "corpus" | "live" | "import";
 
 type Evidence = {
   evidence_id: string;
@@ -735,6 +735,15 @@ export function UpdateReview() {
             <button
               type="button"
               className="source-mode"
+              aria-pressed={sourceMode === "corpus"}
+              onClick={() => selectSourceMode("corpus")}
+            >
+              <strong>사전 구축 Steam 코퍼스</strong>
+              <span>한국어와 영어 리뷰에서 파생한 비식별 요약을 미리 분류해 관련 근거를 찾습니다. 리뷰 원문은 포함하지 않습니다.</span>
+            </button>
+            <button
+              type="button"
+              className="source-mode"
               aria-pressed={sourceMode === "live"}
               onClick={() => selectSourceMode("live")}
             >
@@ -755,6 +764,11 @@ export function UpdateReview() {
           {sourceMode === "fixture" && (
             <p className="source-note">
               모든 근거는 합성 비교 참고 자료이며 실제 이용자 여론이나 사후 결과가 아닙니다.
+            </p>
+          )}
+          {sourceMode === "corpus" && (
+            <p className="source-note">
+              코퍼스에는 한국어와 영어 비식별 요약과 분류값만 저장됩니다. 리뷰 원문은 표시하거나 저장하지 않습니다.
             </p>
           )}
           {sourceMode === "live" && (
@@ -813,11 +827,15 @@ export function UpdateReview() {
               checked={useClaude}
               onChange={(event) => setUseClaude(event.target.checked)}
             />
-            <span>Claude로 한국어 설명 보강</span>
+            <span>{sourceMode === "corpus" ? "팀 에이전트로 추가 검증" : "Claude로 한국어 설명 보강"}</span>
             <small>
-              {useClaude
-                ? "근거 ID, 위험, 최종 판정은 코드 정책으로 다시 검증합니다."
-                : "결정론적 분석 경로만 실행합니다."}
+              {sourceMode === "corpus"
+                ? useClaude
+                  ? "정아현(Jelly) 위험 점검과 승진배 근거 검증 에이전트를 Claude로 실행합니다."
+                  : "저장된 코퍼스와 코드 정책만 사용하며 두 에이전트의 Claude 호출은 생략합니다."
+                : useClaude
+                  ? "근거 ID, 위험, 최종 판정은 코드 정책으로 다시 검증합니다."
+                  : "결정론적 분석 경로만 실행합니다."}
             </small>
           </label>
           <p className="prelaunch-notice">

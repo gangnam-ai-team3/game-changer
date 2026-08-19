@@ -82,6 +82,8 @@ const updateAgents: Record<(typeof agentOrder)[number], AgentInfo> = {
 
 const nodeLabels: Record<string, string> = {
   source_selected: "자료 출처 확인",
+  corpus_selected: "사전 구축 코퍼스 확인",
+  corpus_retrieved: "관련 비식별 근거 검색",
   cutoff_checked: "검토 기준일 확인",
   period_checked: "자료 기간 구분",
   anonymized: "개인정보 보호 처리",
@@ -113,6 +115,10 @@ const nodeLabels: Record<string, string> = {
   persona_panel_built: "이용자별 영향 정리",
   claude_narrative: "Claude 설명 생성",
   claude_output_checked: "Claude 결과 안전성 확인",
+  jelly_sidecar_started: "정아현 위험 점검 실행",
+  jelly_output_checked: "정아현 분석 결과 확인",
+  jinbae_probe_started: "승진배 근거 검증 실행",
+  jinbae_probe_checked: "승진배 인용 결과 확인",
   fallback: "결정론적 안전 경로 전환",
 };
 
