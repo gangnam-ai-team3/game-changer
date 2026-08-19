@@ -8,15 +8,77 @@ from pathlib import Path
 
 from agents.audit_strategy import AuditStrategyAgent
 from agents.event_redteam import EventRedteamAgent
-from agents.structured import StructuredModelError, require_native_business_korean
+from agents.structured import (
+    ClaudeBudget,
+    StructuredModelError,
+    require_native_business_korean,
+)
 from contracts import ErrorCode
-from seungjinbae.app.judge import judge_claim
+from seungjinbae.app.judge import JUDGE_TOOL, judge_claim
 from update_review.audit import UpdateAuditAgent
 from update_review.redteam import UpdateRedteamAgent
 
 
 _ROOT = Path(__file__).resolve().parents[1]
+_JELLY_ROLE_PATH = _ROOT / ".claude" / "agents" / "jelly.md"
 _JELLY_TRENDS = {"긍정", "중립", "부정", "위험"}
+_JELLY_TREND_METRICS = {
+    "긍정": "positive",
+    "중립": "neutral",
+    "부정": "negative",
+    "위험": "risk",
+}
+_JELLY_USER_PREFIX = (
+    "아래는 화면의 [정보 입력] 표에서 넘어온 근거 행 목록입니다(JSON 배열). 각 행은 index로 구분됩니다.\n"
+    "각 행마다 근거 내용(content)을 보고 동향(긍정/중립/부정/위험 중 하나), 원인(한 문장), "
+    "개선 방향(한 문장, 판단하기 어려우면 빈 문자열)을 정하세요. "
+    "원인과 개선 방향 문장은 완전한 문장으로 쓰고 반드시 마침표(.)로 끝내세요. "
+    "근거 내용이 비어 있는 행은 동향을 중립으로 두고 원인·개선 방향은 빈 문자열로 두세요.\n"
+    "그리고 전체 행을 종합한 개선 방향(synthesis)을 하나의 긴 문단이 아니라, "
+    "가장 근거가 많고 시급한 것부터 순서대로 2~4개의 항목으로 나눠 작성하세요. "
+    "각 항목은 title(5~15자 정도의 짧은 테마명, 마침표 없이)과 description(1~2문장, 마침표로 끝냄)으로 구성합니다.\n\n"
+)
+_JELLY_OUTPUT_CONFIG = {
+    "format": {
+        "type": "json_schema",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "rows": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "index": {"type": "integer"},
+                            "trend": {
+                                "type": "string",
+                                "enum": ["긍정", "중립", "부정", "위험"],
+                            },
+                            "cause": {"type": "string"},
+                            "fix": {"type": "string"},
+                        },
+                        "required": ["index", "trend", "cause", "fix"],
+                        "additionalProperties": False,
+                    },
+                },
+                "synthesis": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                            "description": {"type": "string"},
+                        },
+                        "required": ["title", "description"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "required": ["rows", "synthesis"],
+            "additionalProperties": False,
+        },
+    }
+}
 _NODE_BRIDGE = r"""
 const { analyzeRows } = require("./jelly/call-agent.js");
 let body = "";
@@ -47,13 +109,38 @@ def _team_unavailable(name: str) -> StructuredModelError:
     )
 
 
+def _model_from_env(name: str, default: str) -> str:
+    return os.getenv(name, "").strip() or default
+
+
+def _jelly_user_text(rows: list[dict]) -> str:
+    return _JELLY_USER_PREFIX + json.dumps(rows, ensure_ascii=False, indent=2)
+
+
+def _jinbae_prompt(claim_text: str, candidate_chunks: list[dict]) -> str:
+    chunks_block = "\n\n".join(
+        f"[{chunk['id']}] {chunk['text']}" for chunk in candidate_chunks
+    )
+    return (
+        "Given the claim and candidate source chunks below, judge whether the claim is "
+        "grounded in the chunks. Cite the chunk ids that support your verdict.\n\n"
+        f"Claim: {claim_text}\n\nCandidate chunks:\n{chunks_block}"
+    )
+
+
 class JellyRunner:
     """Run Jelly's exported analyzer once without exposing a sidecar or raw errors."""
 
-    def __init__(self, timeout_seconds: float = 45) -> None:
+    def __init__(
+        self,
+        timeout_seconds: float = 45,
+        *,
+        budget: ClaudeBudget | None = None,
+    ) -> None:
         if type(timeout_seconds) not in {int, float} or timeout_seconds <= 0:
             raise _jelly_schema_error()
         self.timeout_seconds = timeout_seconds
+        self.budget = budget if budget is not None else ClaudeBudget()
 
     def run(self, rows: list[dict]) -> dict:
         if (
@@ -72,11 +159,41 @@ class JellyRunner:
             or [row["index"] for row in rows] != list(range(len(rows)))
         ):
             raise _jelly_schema_error()
+        serialized = json.dumps(rows, ensure_ascii=False)
+        try:
+            system_chars = len(_JELLY_ROLE_PATH.read_text(encoding="utf-8"))
+        except OSError:
+            raise _team_unavailable("Jelly") from None
+        if self.budget.max_tokens < 1:
+            raise StructuredModelError(
+                ErrorCode.BUDGET_EXCEEDED,
+                "Jelly 출력 토큰 예산이 부족합니다.",
+            )
+        model = _model_from_env("CLAUDE_REDTEAM_MODEL", "claude-haiku-4-5")
+        self.budget.reserve(
+            len(_jelly_user_text(rows))
+            + len(
+                json.dumps(
+                    _JELLY_OUTPUT_CONFIG,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+            ),
+            system_chars=system_chars,
+            model=model,
+        )
         try:
             completed = subprocess.run(
                 ["node", "-e", _NODE_BRIDGE],
-                input=json.dumps(rows, ensure_ascii=False),
+                input=serialized,
                 cwd=_ROOT,
+                env={
+                    **os.environ,
+                    "CLAUDE_REDTEAM_MODEL": model,
+                    "CLAUDE_MAX_OUTPUT_TOKENS": str(
+                        max(1, min(self.budget.max_tokens, 3000))
+                    ),
+                },
                 capture_output=True,
                 text=True,
                 timeout=self.timeout_seconds,
@@ -91,7 +208,7 @@ class JellyRunner:
         except Exception:
             result = None
         if type(result) is not dict:
-            raise _jelly_schema_error()
+            raise _team_unavailable("Jelly")
         return result
 
 
@@ -114,7 +231,7 @@ def _safe_jelly_rows(risks, evidence) -> list[dict]:
     return rows
 
 
-def _validated_jelly_narratives(result: dict, count: int) -> dict[int, tuple[str, str]]:
+def _validated_jelly_trends(result: dict, count: int) -> dict[str, int]:
     if (
         type(result) is not dict
         or set(result) != {"rows", "synthesis"}
@@ -123,7 +240,8 @@ def _validated_jelly_narratives(result: dict, count: int) -> dict[int, tuple[str
         or len(result["rows"]) != count
     ):
         raise _jelly_schema_error()
-    parsed = {}
+    indexes = set()
+    trend_counts = {metric: 0 for metric in _JELLY_TREND_METRICS.values()}
     prose = []
     for row in result["rows"]:
         if (
@@ -138,18 +256,18 @@ def _validated_jelly_narratives(result: dict, count: int) -> dict[int, tuple[str
             or not row["fix"].strip()
         ):
             raise _jelly_schema_error()
-        if row["index"] in parsed:
+        if row["index"] in indexes:
             raise _jelly_schema_error()
-        cause, fix = row["cause"].strip(), row["fix"].strip()
-        parsed[row["index"]] = (cause, fix)
-        prose.extend((cause, fix))
-    if set(parsed) != set(range(count)):
+        indexes.add(row["index"])
+        trend_counts[_JELLY_TREND_METRICS[row["trend"]]] += 1
+        prose.extend((row["cause"].strip(), row["fix"].strip()))
+    if indexes != set(range(count)):
         raise _jelly_schema_error()
     try:
         require_native_business_korean(prose)
     except StructuredModelError:
         raise _jelly_schema_error() from None
-    return parsed
+    return trend_counts
 
 
 def _run_jelly(base, evidence, runner, on_event):
@@ -158,9 +276,9 @@ def _run_jelly(base, evidence, runner, on_event):
     notify = on_event or (lambda _node, _message, _metrics: None)
     rows = _safe_jelly_rows(base.risks, evidence)
     notify(
-        "jelly_rows_sent",
+        "jelly_sidecar_started",
         "정아현 분석기에 안전한 근거 요약을 전달합니다.",
-        {"rows": len(rows)},
+        {},
     )
     try:
         result = runner.run(rows)
@@ -170,30 +288,35 @@ def _run_jelly(base, evidence, runner, on_event):
         result = None
     if result is None:
         raise _team_unavailable("Jelly")
-    narratives = _validated_jelly_narratives(result, len(rows))
-    risks = list(base.risks)
-    for index, (failure_path, revision_question) in narratives.items():
-        risks[index] = risks[index].model_copy(
-            update={
-                "failure_path": failure_path,
-                "revision_question": revision_question,
-            }
-        )
+    try:
+        trend_counts = _validated_jelly_trends(result, len(rows))
+    except StructuredModelError:
+        raise _team_unavailable("Jelly") from None
     notify(
         "jelly_output_checked",
-        "정아현 분석기의 행 연결과 한국어 문장을 확인했습니다.",
-        {"rows": len(narratives), "overlaid_fields": len(narratives) * 2},
+        "정아현 분석기의 행 연결과 한국어 문장을 확인하고 코드 결과를 유지했습니다.",
+        trend_counts,
     )
-    return base.model_copy(update={"risks": risks})
+    return base
 
 
 class EventJellyRedteamAdapter:
-    def __init__(self, *, base=None, runner=None) -> None:
+    def __init__(
+        self,
+        *,
+        base=None,
+        runner=None,
+        budget: ClaudeBudget | None = None,
+        enabled: bool = False,
+    ) -> None:
         self.base = base if base is not None else EventRedteamAgent()
-        self.runner = runner if runner is not None else JellyRunner()
+        self.runner = runner if runner is not None else JellyRunner(budget=budget)
+        self.enabled = enabled
 
     def run(self, event, pack, on_event=None):
         base = self.run_deterministic(event, pack, on_event=on_event)
+        if not self.enabled:
+            return base
         return _run_jelly(base, pack.evidence, self.runner, on_event)
 
     def run_deterministic(self, event, pack, on_event=None):
@@ -201,12 +324,22 @@ class EventJellyRedteamAdapter:
 
 
 class UpdateJellyRedteamAdapter:
-    def __init__(self, *, base=None, runner=None) -> None:
+    def __init__(
+        self,
+        *,
+        base=None,
+        runner=None,
+        budget: ClaudeBudget | None = None,
+        enabled: bool = False,
+    ) -> None:
         self.base = base if base is not None else UpdateRedteamAgent()
-        self.runner = runner if runner is not None else JellyRunner()
+        self.runner = runner if runner is not None else JellyRunner(budget=budget)
+        self.enabled = enabled
 
     def run(self, brief, pack, on_event=None):
         base = self.run_deterministic(brief, pack, on_event=on_event)
+        if not self.enabled:
+            return base
         return _run_jelly(base, pack.evidence, self.runner, on_event)
 
     def run_deterministic(self, brief, pack, on_event=None):
@@ -223,8 +356,9 @@ def _jinbae_schema_error() -> StructuredModelError:
 class JinbaeProbe:
     """Make one call through Seungjinbae's judge and enforce local citation IDs."""
 
-    def __init__(self, *, client=None) -> None:
+    def __init__(self, *, client=None, budget: ClaudeBudget | None = None) -> None:
         self.client = client
+        self.budget = budget if budget is not None else ClaudeBudget()
 
     async def arun(self, claim_text: str, candidate_chunks: list[dict]) -> dict:
         if (
@@ -246,26 +380,47 @@ class JinbaeProbe:
         supplied_ids = [chunk["id"] for chunk in candidate_chunks]
         if len(supplied_ids) != len(set(supplied_ids)):
             raise _jinbae_schema_error()
+        if self.budget.max_tokens < 512:
+            raise StructuredModelError(
+                ErrorCode.BUDGET_EXCEEDED,
+                "승진배 근거 판정기 출력 토큰 예산이 부족합니다.",
+            )
+        model = _model_from_env("CLAUDE_AUDIT_MODEL", "claude-haiku-4-5")
+        self.budget.reserve(
+            len(_jinbae_prompt(claim_text, candidate_chunks))
+            + len(json.dumps(JUDGE_TOOL, ensure_ascii=False)),
+            model=model,
+        )
         client = self.client
+        owns_client = client is None
         if client is None:
             try:
                 from anthropic import AsyncAnthropic
 
-                client = AsyncAnthropic(max_retries=0)
+                client = AsyncAnthropic(max_retries=0, timeout=30)
             except Exception:
                 client = None
             if client is None:
                 raise _team_unavailable("승진배")
         try:
-            result = await judge_claim(
-                client,
-                model=os.getenv("CLAUDE_AUDIT_MODEL", "claude-haiku-4-5"),
-                claim_text=claim_text,
-                candidate_chunks=candidate_chunks,
-                max_retries=0,
+            result = await asyncio.wait_for(
+                judge_claim(
+                    client,
+                    model=model,
+                    claim_text=claim_text,
+                    candidate_chunks=candidate_chunks,
+                    max_retries=0,
+                ),
+                timeout=35,
             )
         except Exception:
             result = None
+        finally:
+            if owns_client:
+                try:
+                    await client.close()
+                except Exception:
+                    pass
         if result is None:
             raise _team_unavailable("승진배")
         if (
@@ -342,6 +497,10 @@ def _run_jinbae_probe(base, evidence, probe, on_event):
     )
     try:
         probe.run(claim, chunks)
+    except StructuredModelError as exc:
+        if exc.code is ErrorCode.BUDGET_EXCEEDED:
+            raise
+        failed = True
     except Exception:
         failed = True
     else:
@@ -357,9 +516,17 @@ def _run_jinbae_probe(base, evidence, probe, on_event):
 
 
 class EventJinbaeAuditAdapter:
-    def __init__(self, *, base=None, probe=None) -> None:
+    def __init__(
+        self,
+        *,
+        base=None,
+        probe=None,
+        budget: ClaudeBudget | None = None,
+        enabled: bool = False,
+    ) -> None:
         self.base = base if base is not None else AuditStrategyAgent()
-        self.probe = probe if probe is not None else JinbaeProbe()
+        self.probe = probe if probe is not None else JinbaeProbe(budget=budget)
+        self.enabled = enabled
 
     def run(
         self,
@@ -377,6 +544,8 @@ class EventJinbaeAuditAdapter:
             analysis_incomplete=analysis_incomplete,
             on_event=on_event,
         )
+        if not self.enabled:
+            return base
         return _run_jinbae_probe(base, pack.evidence, self.probe, on_event)
 
     def run_deterministic(
@@ -401,9 +570,17 @@ class EventJinbaeAuditAdapter:
 
 
 class UpdateJinbaeAuditAdapter:
-    def __init__(self, *, base=None, probe=None) -> None:
+    def __init__(
+        self,
+        *,
+        base=None,
+        probe=None,
+        budget: ClaudeBudget | None = None,
+        enabled: bool = False,
+    ) -> None:
         self.base = base if base is not None else UpdateAuditAgent()
-        self.probe = probe if probe is not None else JinbaeProbe()
+        self.probe = probe if probe is not None else JinbaeProbe(budget=budget)
+        self.enabled = enabled
 
     def run(
         self,
@@ -421,6 +598,8 @@ class UpdateJinbaeAuditAdapter:
             analysis_incomplete=analysis_incomplete,
             on_event=on_event,
         )
+        if not self.enabled:
+            return base
         return _run_jinbae_probe(base, pack.evidence, self.probe, on_event)
 
     def run_deterministic(

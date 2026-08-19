@@ -5,10 +5,19 @@ const http = require("http");
 const ROOT_DIR = path.join(__dirname, "..");
 const ENV_PATH = path.join(ROOT_DIR, ".env");
 const ROLE_PATH = path.join(__dirname, "..", ".claude", "agents", "jelly.md");
-const MODEL = "claude-opus-5";
+const MODEL = process.env.CLAUDE_REDTEAM_MODEL?.trim() || "claude-haiku-4-5";
+const configuredMaxTokens = Number(process.env.CLAUDE_MAX_OUTPUT_TOKENS || "3000");
+const MAX_TOKENS = Number.isSafeInteger(configuredMaxTokens) && configuredMaxTokens > 0
+  ? Math.min(configuredMaxTokens, 3000)
+  : 3000;
 const PORT = process.env.CALL_AGENT_PORT || 8787;
 
 function loadApiKey() {
+  const environmentKey = process.env.ANTHROPIC_API_KEY?.trim();
+  if (environmentKey) return environmentKey;
+  if (!fs.existsSync(ENV_PATH)) {
+    throw new Error(`ANTHROPIC_API_KEY가 ${ENV_PATH} 에 없습니다.`);
+  }
   const envText = fs.readFileSync(ENV_PATH, "utf8");
   for (const line of envText.split("\n")) {
     const trimmed = line.trim();
@@ -40,7 +49,7 @@ async function callAgent(inputText) {
     },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 16000,
+      max_tokens: MAX_TOKENS,
       system: rolePrompt,
       messages: [{ role: "user", content: inputText }],
     }),
@@ -121,7 +130,7 @@ async function analyzeRows(rows) {
     },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 16000,
+      max_tokens: MAX_TOKENS,
       system: rolePrompt,
       messages: [{ role: "user", content: userText }],
       output_config: { format: { type: "json_schema", schema: ANALYZE_SCHEMA } },
