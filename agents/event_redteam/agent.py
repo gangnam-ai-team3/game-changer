@@ -58,7 +58,9 @@ class EventRedteamAgent:
                 notify = on_event or (lambda _node, _message, _metrics: None)
                 notify("claude_narrative", "Claude가 위험 설명과 실패 경로를 작성합니다.", {"provider": "claude"})
                 narrative = parse_claude_structured(
-                    model=os.getenv("CLAUDE_REDTEAM_MODEL", "claude-haiku-4-5"),
+                    model=os.getenv(
+                        "CLAUDE_REDTEAM_MODEL", "claude-haiku-4-5-20251001"
+                    ),
                     prompt_path=self.prompt_path,
                     output_type=RedteamNarrative,
                     payload=base,

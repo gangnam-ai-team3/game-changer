@@ -530,7 +530,10 @@ class UpdateCollectorAgent:
                 ],
             }
             batch = parse_claude_structured(
-                model=os.getenv("CLAUDE_UPDATE_COLLECTOR_MODEL", "claude-haiku-4-5"),
+                model=os.getenv(
+                    "CLAUDE_UPDATE_COLLECTOR_MODEL",
+                    "claude-haiku-4-5-20251001",
+                ),
                 prompt_path=self.prompt_path,
                 output_type=ClassifiedRawBatch,
                 payload=payload,

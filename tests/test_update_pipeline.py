@@ -329,8 +329,8 @@ def test_claude_accepts_prospective_templates_without_overwriting_code_owned_art
     assert result.fallback_used is False
     assert [call["model"] for call in fake.messages.calls] == [
         "claude-sonnet-4-6",
-        "claude-haiku-4-5",
-        "claude-haiku-4-5",
+        "claude-haiku-4-5-20251001",
+        "claude-haiku-4-5-20251001",
     ]
 
 

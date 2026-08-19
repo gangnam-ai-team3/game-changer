@@ -91,7 +91,9 @@ class UpdateAuditAgent:
             {"provider": "claude"},
         )
         narrative = parse_claude_structured(
-            model=os.getenv("CLAUDE_UPDATE_AUDIT_MODEL", "claude-haiku-4-5"),
+            model=os.getenv(
+                "CLAUDE_UPDATE_AUDIT_MODEL", "claude-haiku-4-5-20251001"
+            ),
             prompt_path=self.prompt_path,
             output_type=AuditNarrative,
             payload={

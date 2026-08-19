@@ -80,7 +80,7 @@ class ClaudeBudget:
         payload_chars: int,
         *,
         system_chars: int = 0,
-        model: str = "claude-haiku-4-5",
+        model: str = "claude-haiku-4-5-20251001",
     ) -> None:
         if self.requests >= self.max_requests:
             raise StructuredModelError(ErrorCode.BUDGET_EXCEEDED, "Claude 요청 한도에 도달했습니다.")

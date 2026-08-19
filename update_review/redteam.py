@@ -112,7 +112,9 @@ class UpdateRedteamAgent:
             for risk in base.risks
         }
         narrative = parse_claude_structured(
-            model=os.getenv("CLAUDE_UPDATE_REDTEAM_MODEL", "claude-haiku-4-5"),
+            model=os.getenv(
+                "CLAUDE_UPDATE_REDTEAM_MODEL", "claude-haiku-4-5-20251001"
+            ),
             prompt_path=self.prompt_path,
             output_type=RedteamNarrative,
             payload={

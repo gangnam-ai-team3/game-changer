@@ -65,7 +65,9 @@ class AuditStrategyAgent:
                 notify = on_event or (lambda _node, _message, _metrics: None)
                 notify("claude_narrative", "Claude가 최종 설명과 개선안 문구를 작성합니다.", {"provider": "claude"})
                 narrative = parse_claude_structured(
-                    model=os.getenv("CLAUDE_AUDIT_MODEL", "claude-haiku-4-5"),
+                    model=os.getenv(
+                        "CLAUDE_AUDIT_MODEL", "claude-haiku-4-5-20251001"
+                    ),
                     prompt_path=self.prompt_path,
                     output_type=AuditNarrative,
                     payload=base,
