@@ -1,0 +1,952 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>jelly - 동향 분석 리포트 에이전트</title>
+<style>
+  :root {
+    --bg: #eceef1;
+    --panel: #ffffff;
+    --line: #1c1c1f;
+    --border: #d7d9dd;
+    --text: #1c1c1f;
+    --muted: #63666d;
+    --accent: #3554e1;
+    --pos: #16a34a;
+    --neg: #d97706;
+    --neu: #eab308;
+    --risk: #dc2626;
+    --pos-bg: #dcfce7;
+    --neg-bg: #fef3c7;
+    --neu-bg: #e9eaec;
+    --risk-bg: #fee2e2;
+    --danger: #d8362a;
+    --danger-bg: #fbe3e0;
+    --accent-bg: #e1e7fc;
+  }
+  * { box-sizing: border-box; font-family: inherit; }
+  body {
+    margin: 0;
+    font-family: "Malgun Gothic", "맑은 고딕", -apple-system, "Segoe UI", sans-serif;
+    letter-spacing: -0.02em;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+  }
+  h1 {
+    font-size: 20px; margin: 0 0 20px; padding: 14px 16px;
+    background: var(--text); color: #fff;
+  }
+  .layout { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 1000px) { .layout { grid-template-columns: 1fr; } }
+  .panel {
+    background: var(--panel);
+    border: 2px solid var(--line);
+    padding: 16px;
+  }
+  .panel h2 {
+    font-size: 13px; margin: -16px -16px 14px; padding: 8px 16px;
+    background: var(--accent); color: #fff; letter-spacing: .02em;
+  }
+  .panel h3 {
+    font-size: 16px; font-weight: 800; margin: 22px 0 10px; padding: 0 0 6px;
+    border-bottom: 2px solid var(--accent); color: var(--text);
+  }
+  .result-section:first-of-type h3 { margin-top: 0; }
+  h3.report-title { font-size: 20px; font-weight: 800; margin: 0 0 18px; padding: 0 0 10px; border-bottom: 3px solid var(--text); }
+  .summary-stats { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+  .priority-flow { display: flex; flex-direction: column; margin: 2px 0 4px; }
+  .priority-step { display: flex; gap: 12px; position: relative; padding-bottom: 16px; }
+  .priority-step:last-child { padding-bottom: 0; }
+  .priority-num {
+    flex: none; width: 26px; height: 26px; border-radius: 50%;
+    background: var(--accent); color: #fff; font-weight: 800; font-size: 12px;
+    display: flex; align-items: center; justify-content: center; position: relative; z-index: 1;
+  }
+  .priority-step:not(:last-child) .priority-num::after {
+    content: ""; position: absolute; top: 26px; left: 50%; width: 2px; height: calc(100% - 10px);
+    background: var(--border); transform: translateX(-50%);
+  }
+  .priority-body { flex: 1; padding-top: 2px; }
+  .priority-title { margin: 0 0 4px; font-size: 14px; font-weight: 800; color: var(--text); }
+  .priority-desc { margin: 0; font-size: 13px; color: var(--text); line-height: 1.5; }
+  .table-scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { border: 1px solid var(--line); padding: 6px; text-align: left; vertical-align: top; }
+  th { background: var(--text); color: #fff; font-weight: 600; white-space: nowrap; }
+  input[type=text], select {
+    width: 100%; border: 1px solid var(--border); background: var(--panel);
+    padding: 4px 6px; font-size: 12px; font-family: inherit; color: var(--text);
+  }
+  input[type=text]:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .row-actions { display: flex; gap: 6px; margin-top: 8px; }
+  button {
+    border: 2px solid var(--line); background: #fff; color: var(--text);
+    padding: 6px 10px; font-size: 12px; font-family: inherit; cursor: pointer; font-weight: 600;
+  }
+  button:hover { background: var(--neu-bg); }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.primary:hover { background: #2842b8; }
+  button.btn-danger { color: var(--danger); border-color: var(--danger); }
+  button.btn-danger:hover { background: var(--danger); color: #fff; }
+  #trendTable td.del-cell, #trendTable th.del-cell { border: none; background: transparent; padding: 6px 10px; width: 1%; }
+  .icon-btn {
+    border: none; background: var(--danger-bg); color: var(--danger); cursor: pointer;
+    width: 26px; height: 26px; border-radius: 50%; font-size: 13px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: transform .15s ease, background .15s ease;
+  }
+  .icon-btn:hover { background: var(--danger); color: #fff; transform: scale(1.15) rotate(-8deg); }
+  .icon-btn.icon-copy { background: var(--accent-bg); color: var(--accent); }
+  .icon-btn.icon-copy:hover { background: var(--accent); color: #fff; transform: scale(1.15); }
+  .row-actions-cell { display: flex; gap: 4px; }
+  .manual-form {
+    display: none; flex-direction: column; gap: 8px;
+    padding: 10px; margin-bottom: 8px; background: var(--neu-bg); border: 1px solid var(--border);
+  }
+  .manual-form.open { display: flex; }
+  .manual-form label { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+  .manual-form label span { width: 80px; flex: none; }
+  .manual-form label input { flex: 1; }
+  .mf-field { display: flex; flex-direction: column; gap: 4px; }
+  .preset-bar { display: flex; flex-wrap: wrap; gap: 4px; padding-left: 88px; align-items: center; }
+  .preset-item { display: inline-flex; align-items: stretch; }
+  .preset-chip {
+    border: 1px solid var(--border); border-right: none; background: var(--panel); color: var(--muted);
+    padding: 3px 9px; font-size: 11px; border-radius: 12px 0 0 12px; cursor: pointer; font-weight: 600;
+  }
+  .preset-chip:hover { background: var(--neu-bg); color: var(--text); border-color: var(--line); }
+  .preset-remove {
+    border: 1px solid var(--border); background: var(--panel); color: var(--muted);
+    padding: 3px 8px; font-size: 11px; border-radius: 0 12px 12px 0; cursor: pointer; font-weight: 700;
+  }
+  .preset-remove:hover { background: var(--danger-bg); color: var(--danger); border-color: var(--danger); }
+  .preset-add {
+    border: 1px solid var(--accent); background: var(--accent-bg); color: var(--accent);
+    padding: 3px 10px; font-size: 11px; border-radius: 12px; cursor: pointer; font-weight: 700;
+  }
+  .preset-add:hover { background: var(--accent); color: #fff; }
+  .lang-combo-btn {
+    flex: 1; display: flex; align-items: center;
+    border: 1px solid var(--border); background: var(--panel); color: var(--text);
+    padding: 4px 4px 4px 6px; font-size: 12px; font-family: inherit; font-weight: normal; cursor: pointer;
+    -webkit-appearance: none; appearance: none;
+  }
+  .lang-combo-btn::-moz-focus-inner { border: 0; padding: 0; }
+  #langComboLabel { flex: 1; min-width: 0; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lang-combo-arrow {
+    display: inline-block; width: 14px; flex: none; text-align: center;
+    color: var(--muted); font-size: 12px; line-height: 1; margin-left: 6px;
+    transition: transform .15s ease;
+  }
+  .lang-combo-btn.open .lang-combo-arrow { transform: rotate(180deg); }
+  .lang-combo-list {
+    margin-left: 88px; max-height: 180px; overflow-y: auto;
+    border: 1px solid var(--border); background: var(--panel);
+  }
+  .lang-combo-list[hidden] { display: none; }
+  .lang-combo-list button {
+    display: block; width: 100%; text-align: left; border: none; background: none;
+    padding: 6px 8px; font-size: 12px; font-weight: normal; cursor: pointer;
+  }
+  .lang-combo-list button:hover { background: var(--neu-bg); }
+  .empty-note { color: var(--muted); font-size: 12px; }
+  .table-empty {
+    display: none; padding: 24px; text-align: center; color: var(--muted); font-size: 12px;
+    background: var(--neu-bg); border: 1px solid var(--border);
+  }
+  .tag { display: inline-block; padding: 2px 8px; font-size: 11px; font-weight: 700; }
+  .tag.긍정 { background: var(--pos); color: #fff; }
+  .tag.부정 { background: var(--neg); color: #fff; }
+  .tag.중립 { background: var(--neu); color: var(--text); }
+  .tag.위험 { background: var(--risk); color: #fff; }
+  .trend-dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+  .trend-dot.긍정 { background: var(--pos); }
+  .trend-dot.부정 { background: var(--neg); }
+  .trend-dot.중립 { background: var(--neu); }
+  .trend-dot.위험 { background: var(--risk); }
+  .missing { color: var(--muted); }
+  .summary-text { font-size: 13px; margin: 0 0 8px; }
+  .result-section { margin-bottom: 20px; }
+  .pie-row { display: flex; gap: 28px; align-items: flex-start; flex-wrap: wrap; }
+  .chart-col { flex: 1 1 220px; min-width: 220px; }
+  .chart-col .pie-inner { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+  .chart-label {
+    font-size: 13px; font-weight: 700; color: var(--text); margin: 0 0 10px;
+    padding-bottom: 4px; border-bottom: 1px solid var(--border);
+  }
+  .legend { list-style: none; margin: 0; padding: 0; font-size: 12px; }
+  .legend li { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+  .swatch { width: 12px; height: 12px; flex: none; border: 1px solid var(--line); }
+  .lang-bars { display: flex; flex-direction: column; gap: 10px; }
+  .lang-bar-row { font-size: 12px; }
+  .lang-bar-name { margin-bottom: 3px; font-weight: 600; }
+  .lang-bar-track {
+    display: flex; height: 14px; border-radius: 3px; overflow: hidden;
+    background: var(--neu-bg); border: 1px solid var(--line);
+  }
+  .lang-bar-seg { height: 100%; }
+  .lang-alert {
+    margin-top: 8px; padding: 8px 10px; font-size: 12px; font-weight: 600;
+    background: var(--risk-bg); color: var(--risk); border: 1px solid var(--risk); border-radius: 4px;
+  }
+  .issue-block { margin-bottom: 12px; }
+  .full-width { grid-column: 1 / -1; }
+  .content-block { margin-bottom: 22px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+  .content-block > h4 { margin: 0 0 10px; font-size: 18px; font-weight: 800; color: var(--text); }
+  .content-block .issue-block { margin-left: 10px; }
+  .content-block .issue-block h5 {
+    margin: 20px 0 6px; padding-bottom: 4px; font-size: 15px; font-weight: 700; color: var(--text);
+    border-bottom: 1px solid var(--border);
+  }
+  .badge-block { margin: 0 0 8px; }
+  .info-badge {
+    display: inline-block; color: #fff; font-size: 10px; font-weight: 700;
+    padding: 2px 8px; border-radius: 3px; letter-spacing: .02em;
+  }
+  .info-badge.gray { background: var(--muted); }
+  .info-badge.slate { background: #5b7c8d; }
+  .info-badge.blue { background: var(--accent); }
+  .badge-text { margin: 4px 0 0; font-size: 13px; font-weight: 400; color: var(--text); }
+  .badge-text.missing { color: var(--muted); }
+  ul.evidence-list { margin: 4px 0 12px; padding-left: 18px; font-size: 12px; font-weight: 400; color: var(--muted); }
+  ul.evidence-list li { margin-bottom: 6px; display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+  ul.evidence-list li .evidence-text { flex: 1; min-width: 0; }
+  .scope-badge { flex: none; font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 10px; white-space: nowrap; }
+  .scope-badge.specific { background: var(--risk-bg); color: var(--risk); }
+  .scope-badge.common { background: var(--neu-bg); color: var(--muted); }
+  .info-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 14px; height: 14px; border-radius: 50%; background: var(--neu-bg); color: var(--muted);
+    font-size: 10px; margin-left: 2px; cursor: default; vertical-align: middle;
+    position: relative; top: -1px;
+  }
+  .pie-tooltip {
+    position: fixed; display: none; pointer-events: none; z-index: 50;
+    background: var(--text); color: #fff; font-size: 11px; padding: 6px 10px;
+    border-radius: 4px; white-space: pre-line; max-width: 240px; line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+
+<h1>jelly - 동향 분석 리포트 에이전트</h1>
+<p class="empty-note" style="margin:-12px 0 20px;">실제로 담당자를 부릅니다</p>
+
+<div class="layout">
+
+  <!-- 입력 패널 -->
+  <div class="panel full-width">
+    <h2>정보 입력</h2>
+    <div class="row-actions" style="margin-bottom:8px;">
+      <button class="primary" onclick="loadFromRes()">정보 불러오기</button>
+      <button id="manualFormToggle" onclick="toggleManualForm()">+ 직접 추가하기</button>
+    </div>
+    <div id="manualForm" class="manual-form">
+      <label><span>콘텐츠</span><input id="mfFeature" type="text" /></label>
+      <label><span>이슈</span><input id="mfIssue" type="text" /></label>
+      <label><span>근거 ID</span><input id="mfEvidenceId" type="text" /></label>
+      <label><span>근거 내용</span><input id="mfContent" type="text" /></label>
+      <label><span>언어</span>
+        <button type="button" class="lang-combo-btn" id="langComboBtn" onclick="toggleLanguageDropdown()">
+          <span id="langComboLabel">선택 안 함</span>
+          <span class="lang-combo-arrow">▾</span>
+        </button>
+      </label>
+      <div class="lang-combo-list" id="langComboList" hidden></div>
+      <input type="hidden" id="mfLanguage" />
+      <div class="mf-field">
+        <label><span>출처</span><input id="mfSource" type="text" placeholder="직접 입력" /></label>
+        <div class="preset-bar" id="sourcePresetBar"></div>
+      </div>
+      <div class="row-actions" style="margin-top:0;">
+        <button type="button" onclick="pasteRow()">붙여넣기</button>
+        <button type="button" onclick="clearManualForm()">지우기</button>
+        <button class="primary" style="margin-left:auto;" onclick="submitManualForm()">추가</button>
+      </div>
+    </div>
+    <div class="table-scroll" id="trendTableWrap">
+      <table id="trendTable">
+        <thead>
+          <tr><th>콘텐츠</th><th>이슈</th><th>근거 ID</th><th>근거 내용</th><th>언어</th><th>출처</th><th class="del-cell"></th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div id="trendEmpty" class="table-empty">정보를 불러오거나 직접 추가하세요.</div>
+
+    <div class="row-actions" style="margin-top:16px;">
+      <button class="primary" id="generateBtn" onclick="generate()">분석하기</button>
+      <button class="btn-danger" style="margin-left:auto;" onclick="clearAllRows()">모두 지우기</button>
+    </div>
+  </div>
+
+  <!-- 결과 패널 -->
+  <div class="panel full-width">
+    <h2>분석 리포트</h2>
+    <div id="resultView">
+      <p class="empty-note">아직 생성하지 않았습니다.</p>
+    </div>
+  </div>
+
+</div>
+
+<div id="pieTooltip" class="pie-tooltip"></div>
+
+<script>
+// call-agent.js 가 로컬에서 열어 두는 서버 주소입니다(열쇠는 call-agent.js 쪽에만 있습니다).
+const AGENT_ANALYZE_URL = "http://localhost:8787/analyze";
+
+let trendRows = [];
+
+// res 담당자(../res)가 정리한 input-sample.md + result.md 실습 결과를 옮겨 온 값입니다.
+// voc-003(중복 출처), voc-006(cutoff_at 이후 자료)은 res의 검사에서 이미 제외되어 여기 포함하지 않습니다.
+// feature는 근거들이 속한 콘텐츠(이벤트명), content는 res의 리뷰 원문(summary), cause는 res의 구조적 원인 태그(mechanism_tags)입니다.
+// game은 res/input-sample.md 상단 메타데이터(game: PUBG: BATTLEGROUNDS)에서 그대로 옮긴 값입니다.
+// res는 국가를 추정하지 않고 게시물 언어(language)만 기록하므로, 여기서도 국가가 아니라 언어 코드를 그대로 씁니다.
+const RES_TREND_ROWS = [
+  { game: "PUBG: BATTLEGROUNDS", feature: "Black Market 2025", issue: "무작위 보상과 불투명한 진행", evidenceId: "voc-001", language: "en", source: "steam",
+    content: "무작위 보상이라 원하는 아이템까지 필요한 횟수를 알기 어렵다는 의견", cause: "random_bonus, opaque_progress" },
+  { game: "PUBG: BATTLEGROUNDS", feature: "Black Market 2025", issue: "시간 압박과 만료 재화", evidenceId: "voc-002", language: "ko", source: "reddit_import",
+    content: "매일 미션을 놓치면 보상을 따라잡기 어렵다는 의견", cause: "grind_pressure, time_cost" },
+  { game: "PUBG: BATTLEGROUNDS", feature: "Black Market 2025", issue: "시간 압박과 만료 재화", evidenceId: "voc-004", language: "pt-BR", source: "reddit_import",
+    content: "이벤트 종료 뒤 토큰이 사라지면 남은 재화가 손실된다는 의견", cause: "expiring_currency, fairness" },
+  { game: "PUBG: BATTLEGROUNDS", feature: "Black Market 2025", issue: "유료 시간 단축과 공정성", evidenceId: "voc-005", language: "zh-CN", source: "steam",
+    content: "유료 패스로 시간을 줄이는 구조가 불공정하게 느껴질 수 있다는 의견", cause: "monetization, fairness" },
+];
+
+// 콘텐츠·이슈를 포함한 모든 칸이 비어 있는 행입니다. 이런 행은 결과에 반영하지 않습니다.
+function isBlankRow(r) {
+  return !r.feature && !r.issue && !r.evidenceId && !r.language && !r.source && !r.content;
+}
+
+function removeTrend(i) { trendRows.splice(i, 1); renderInputs(); }
+function clearAllRows() { trendRows = []; renderInputs(); }
+
+// 복사 버튼으로 담아 둔 행입니다. 직접 추가하기의 '붙여넣기'가 이 값을 폼에 채웁니다.
+let copiedRow = null;
+function copyRow(i) {
+  copiedRow = { ...trendRows[i] };
+}
+function pasteRow() {
+  if (!copiedRow) return;
+  document.getElementById("mfFeature").value = copiedRow.feature ?? "";
+  document.getElementById("mfIssue").value = copiedRow.issue ?? "";
+  document.getElementById("mfEvidenceId").value = copiedRow.evidenceId ?? "";
+  document.getElementById("mfContent").value = copiedRow.content ?? "";
+  document.getElementById("mfSource").value = copiedRow.source ?? "";
+  setLanguageValue(copiedRow.language);
+}
+
+// 직접 추가하기 폼의 모든 값을 지웁니다.
+const MANUAL_TEXT_FIELD_IDS = ["mfFeature", "mfIssue", "mfEvidenceId", "mfContent", "mfSource"];
+function clearManualForm() {
+  MANUAL_TEXT_FIELD_IDS.forEach(id => { document.getElementById(id).value = ""; });
+  setLanguageValue("");
+}
+
+// res 데이터로 맨 윗행부터 덮어쓰고, 직접 추가한 행(res에 없는 근거 ID)은 그 아래로 내립니다.
+function loadFromRes() {
+  const resIds = new Set(RES_TREND_ROWS.map(r => r.evidenceId));
+  const others = trendRows.filter(r => !isBlankRow(r) && !(r.evidenceId && resIds.has(r.evidenceId)));
+  trendRows = [...RES_TREND_ROWS.map(r => ({ ...r })), ...others];
+  renderInputs();
+}
+
+function toggleManualForm() {
+  const open = document.getElementById("manualForm").classList.toggle("open");
+  document.getElementById("manualFormToggle").textContent = open ? "- 직접 추가하기" : "+ 직접 추가하기";
+}
+
+// 출처 하단의 프리셋 바 버튼을 누르면 그 값을 입력칸에 채웁니다. 직접 타이핑도 그대로 됩니다(직접 입력이 기본값).
+function setPreset(inputId, value) {
+  document.getElementById(inputId).value = value;
+}
+
+// 출처 프리셋 목록입니다. 각 칩 우측의 '−'로 지우고, 맨 끝의 '+'로 mfSource에 입력된 값을 새 프리셋으로 추가합니다.
+let sourcePresets = ["steam", "reddit_import", "x"];
+function renderSourcePresets() {
+  const bar = document.getElementById("sourcePresetBar");
+  if (!bar) return;
+  bar.innerHTML = sourcePresets.map((p, i) => `
+    <span class="preset-item">
+      <button type="button" class="preset-chip" onclick="setPreset('mfSource','${jsStr(esc(p))}')">${esc(p)}</button>
+      <button type="button" class="preset-remove" onclick="removeSourcePreset(${i})" title="프리셋 삭제" aria-label="프리셋 삭제">−</button>
+    </span>
+  `).join("") + `<button type="button" class="preset-add" onclick="addSourcePreset()" title="입력한 값을 프리셋으로 추가" aria-label="프리셋 추가">+</button>`;
+}
+function removeSourcePreset(i) {
+  sourcePresets.splice(i, 1);
+  renderSourcePresets();
+}
+function addSourcePreset() {
+  const val = document.getElementById("mfSource").value.trim();
+  if (!val || sourcePresets.includes(val)) return;
+  sourcePresets.push(val);
+  renderSourcePresets();
+}
+
+// 직접 추가하기 폼의 값을 표의 새 행으로 추가하고, 폼은 비웁니다.
+function submitManualForm() {
+  const val = id => document.getElementById(id).value;
+  const row = {
+    feature: val("mfFeature"), issue: val("mfIssue"), evidenceId: val("mfEvidenceId"),
+    content: val("mfContent"), language: val("mfLanguage"), source: val("mfSource"), cause: "",
+  };
+  if (isBlankRow(row)) return;
+  trendRows.push(row);
+  renderInputs();
+  clearManualForm();
+}
+
+function readCell(v) {
+  const s = (v ?? "").toString().trim();
+  return s ? esc(s) : '<span class="missing">–</span>';
+}
+
+// 표는 읽기 전용입니다. 값을 바꾸려면 정보 불러오기 또는 직접 추가하기를 사용하고,
+// 행을 지우려면 휴지통 버튼을 누릅니다. 아무 정보가 없으면 표 대신 패널 폭에 맞는 안내 박스를 보여줍니다.
+function renderInputs() {
+  const wrap = document.getElementById("trendTableWrap");
+  const empty = document.getElementById("trendEmpty");
+  const trendBody = document.querySelector("#trendTable tbody");
+  if (trendRows.length === 0) {
+    trendBody.innerHTML = "";
+    wrap.style.display = "none";
+    empty.style.display = "block";
+    return;
+  }
+  wrap.style.display = "";
+  empty.style.display = "none";
+  trendBody.innerHTML = trendRows.map((r, i) => `
+    <tr>
+      <td>${readCell(r.feature)}</td>
+      <td>${readCell(r.issue)}</td>
+      <td>${readCell(r.evidenceId)}</td>
+      <td>${readCell(r.content)}</td>
+      <td>${readCell(r.language)}</td>
+      <td>${readCell(r.source)}</td>
+      <td class="del-cell"><div class="row-actions-cell">
+        <button class="icon-btn icon-copy" onclick="copyRow(${i})" title="복사" aria-label="복사">📋</button>
+        <button class="icon-btn" onclick="removeTrend(${i})" title="삭제" aria-label="삭제">🗑</button>
+      </div></td>
+    </tr>
+  `).join("");
+}
+
+function esc(s) {
+  return String(s ?? "").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+function fallback(v) {
+  const s = (v ?? "").trim();
+  return s === "" ? "근거 부족" : s;
+}
+function hasValue(v) { return !!(v ?? "").toString().trim(); }
+
+// 결과 패널 표시용 코드 → 이름 매핑이자, 직접 추가하기의 언어 콤보 목록입니다.
+// language는 res가 실제로 기록하는 게시물 언어이지 국가가 아니므로, 국가명이 아닌 언어명으로 표시합니다.
+const LANGUAGE_OPTIONS = [
+  ["en", "영어"], ["ko", "한국어"], ["ja", "일본어"], ["zh-CN", "중국어(간체)"], ["zh-TW", "중국어(번체)"],
+  ["es", "스페인어"], ["pt-BR", "포르투갈어(브라질)"], ["pt-PT", "포르투갈어(포르투갈)"], ["fr", "프랑스어"],
+  ["de", "독일어"], ["it", "이탈리아어"], ["ru", "러시아어"], ["ar", "아랍어"], ["hi", "힌디어"],
+  ["id", "인도네시아어"], ["th", "태국어"], ["vi", "베트남어"], ["tr", "튀르키예어"], ["pl", "폴란드어"],
+  ["nl", "네덜란드어"], ["sv", "스웨덴어"], ["uk", "우크라이나어"],
+];
+const LANGUAGE_NAMES = Object.fromEntries(LANGUAGE_OPTIONS);
+const SOURCE_NAMES = { "steam": "Steam", "reddit_import": "Reddit", "x": "X(트위터)" };
+
+// 언어 콤보 버튼의 값과 라벨을 함께 갱신합니다.
+function setLanguageValue(code) {
+  const c = (code ?? "").trim();
+  document.getElementById("mfLanguage").value = c;
+  document.getElementById("langComboLabel").textContent = c ? `${c} — ${LANGUAGE_NAMES[c] || c}` : "선택 안 함";
+}
+
+// 화살표(또는 콤보 버튼)를 누르면 열리고, 다시 누르면 닫힙니다. 이미 선택된 값이 있어도 항상 전체 목록을 보여줍니다.
+function toggleLanguageDropdown() {
+  const list = document.getElementById("langComboList");
+  const btn = document.getElementById("langComboBtn");
+  const willOpen = list.hidden;
+  list.hidden = !willOpen;
+  btn.classList.toggle("open", willOpen);
+}
+
+function selectLanguage(code) {
+  setLanguageValue(code);
+  document.getElementById("langComboList").hidden = true;
+  document.getElementById("langComboBtn").classList.remove("open");
+}
+
+// 언어 콤보 목록(langComboList)을 전체 언어 코드로 채웁니다.
+function populateLanguageOptions() {
+  const list = document.getElementById("langComboList");
+  if (!list) return;
+  LANGUAGE_OPTIONS.forEach(([code, name]) => {
+    const opt = document.createElement("button");
+    opt.type = "button";
+    opt.textContent = `${code} — ${name}`;
+    opt.onclick = () => selectLanguage(code);
+    list.appendChild(opt);
+  });
+}
+function displayName(map, code) {
+  const c = (code ?? "").trim();
+  if (!c) return "";
+  return map[c] || c;
+}
+
+// 근거 ID ⓘ 아이콘이 쓰는 일반 텍스트 툴팁입니다.
+function showTooltip(evt, text) {
+  const tip = document.getElementById("pieTooltip");
+  if (!tip) return;
+  tip.textContent = text;
+  tip.style.left = (evt.clientX + 14) + "px";
+  tip.style.top = (evt.clientY + 14) + "px";
+  tip.style.display = "block";
+}
+// 파이/막대 그래프가 쓰는 서식 있는(굵게 표시 등) 툴팁입니다. html은 이미 안전하게 이스케이프된 내용이어야 합니다.
+function showRichTooltip(evt, html) {
+  const tip = document.getElementById("pieTooltip");
+  if (!tip) return;
+  tip.innerHTML = html;
+  tip.style.left = (evt.clientX + 14) + "px";
+  tip.style.top = (evt.clientY + 14) + "px";
+  tip.style.display = "block";
+}
+function hidePieTooltip() {
+  const tip = document.getElementById("pieTooltip");
+  if (tip) tip.style.display = "none";
+}
+
+// "동향 · N건 (pct%)" 머리글 다음, 콘텐츠별로 <strong>콘텐츠명</strong> 줄과 그 아래 상세 줄을
+// <br>로 이어 붙입니다. 파이(전체)·막대(언어 별) 그래프 호버가 공통으로 이 서식을 씁니다.
+function buildTooltipHTML(label, count, pct, byFeatureDetail) {
+  const lines = [esc(`${label} · ${count}건 (${pct}%)`)];
+  byFeatureDetail.forEach((detailText, feature) => {
+    lines.push(`<strong>${esc(feature)}</strong>`);
+    lines.push(esc(detailText));
+  });
+  return lines.join("<br>");
+}
+
+// HTML 속성 안의 작은따옴표 JS 문자열 리터럴에 안전하게 넣기 위한 이스케이프입니다.
+// 줄바꿈은 실제 개행이 아니라 이스케이프된 \n으로 넣어야 인라인 스크립트가 깨지지 않습니다.
+function jsStr(s) {
+  return String(s ?? "").replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\n/g, "\\n");
+}
+
+// 동향(긍정/부정/중립/위험) 비율을 SVG 파이 조각으로 그립니다.
+// 조각마다 마우스 오버 시 동향/건수/퍼센티지와 그 조각에 포함된 콘텐츠·이슈 목록을 보여줍니다.
+function pointOnCircle(cx, cy, r, angleDeg) {
+  const rad = angleDeg * Math.PI / 180;
+  return [cx + r * Math.sin(rad), cy - r * Math.cos(rad)];
+}
+const TREND_CATEGORY_VARS = { 긍정: "pos", 중립: "neu", 부정: "neg", 위험: "risk" };
+function buildPieSVG(groups, total) {
+  const cx = 70, cy = 70, r = 68;
+  const entries = Object.keys(TREND_CATEGORY_VARS)
+    .map(label => ({ label, varName: TREND_CATEGORY_VARS[label], rows: groups[label] || [] }))
+    .filter(e => e.rows.length > 0);
+
+  // 콘텐츠별로 이슈를 묶어 <strong>콘텐츠</strong> 다음 줄에 이슈 목록을 보여줍니다.
+  function hoverAttrs(e) {
+    const pct = Math.round(e.rows.length / total * 100);
+    const byFeature = new Map();
+    e.rows.forEach(r => {
+      const f = (r.feature ?? "").trim() || "콘텐츠 미입력";
+      const iss = (r.issue ?? "").trim() || "이슈 미입력";
+      if (!byFeature.has(f)) byFeature.set(f, new Set());
+      byFeature.get(f).add(iss);
+    });
+    const byFeatureDetail = new Map([...byFeature.entries()].map(([f, issues]) => [f, [...issues].join(", ")]));
+    const html = jsStr(buildTooltipHTML(e.label, e.rows.length, pct, byFeatureDetail));
+    return `onmousemove="showRichTooltip(event,'${html}')" onmouseleave="hidePieTooltip()"`;
+  }
+
+  let svg = `<svg class="pie-svg" width="140" height="140" viewBox="0 0 140 140">`;
+  if (entries.length === 1) {
+    const e = entries[0];
+    svg += `<circle cx="${cx}" cy="${cy}" r="${r}" style="fill:var(--${e.varName})" ${hoverAttrs(e)}></circle>`;
+  } else {
+    let angle = 0;
+    entries.forEach(e => {
+      const sweep = e.rows.length / total * 360;
+      const [sx, sy] = pointOnCircle(cx, cy, r, angle);
+      const [ex, ey] = pointOnCircle(cx, cy, r, angle + sweep);
+      const largeArc = sweep > 180 ? 1 : 0;
+      angle += sweep;
+      const d = `M ${cx} ${cy} L ${sx.toFixed(2)} ${sy.toFixed(2)} A ${r} ${r} 0 ${largeArc} 1 ${ex.toFixed(2)} ${ey.toFixed(2)} Z`;
+      svg += `<path d="${d}" style="fill:var(--${e.varName})" ${hoverAttrs(e)}></path>`;
+    });
+  }
+  svg += `</svg>`;
+  return svg;
+}
+
+// 언어별로 행을 묶고, 그 안에서 다시 동향(긍정/중립/부정/위험)별로 나눕니다.
+function groupByLanguageTrend(rows) {
+  const order = [];
+  const map = new Map();
+  rows.forEach(r => {
+    const lang = (r.language ?? "").trim() || "(언어 미입력)";
+    if (!map.has(lang)) { map.set(lang, []); order.push(lang); }
+    map.get(lang).push(r);
+  });
+  return order.map(lang => {
+    const langRows = map.get(lang);
+    const groups = { 긍정: [], 중립: [], 부정: [], 위험: [] };
+    langRows.forEach(r => {
+      groups[hasValue(r.content) ? (r._trend || "중립") : "중립"].push(r);
+    });
+    const label = lang === "(언어 미입력)" ? lang : displayName(LANGUAGE_NAMES, lang);
+    return { lang, label, groups, total: langRows.length };
+  });
+}
+
+// 콘텐츠별로 근거 내용을 묶습니다(근거 ID는 제외). 전체 원 그래프의 "콘텐츠: 이슈" 자리에,
+// 언어별 막대에서는 근거 내용을 보여줍니다.
+function contentEvidenceDetail(rows) {
+  const byFeature = new Map();
+  rows.forEach(r => {
+    const f = (r.feature ?? "").trim() || "콘텐츠 미입력";
+    if (!byFeature.has(f)) byFeature.set(f, new Set());
+    if (hasValue(r.content)) byFeature.get(f).add(r.content.trim());
+  });
+  return new Map([...byFeature.entries()].map(([f, contents]) => [f, contents.size ? [...contents].join(" / ") : "근거 부족"]));
+}
+
+// 언어별 동향을 가로 막대 그래프로 그립니다. 전체 원 그래프와 같은 형식(동향·건수·퍼센티지 +
+// 콘텐츠별 상세)으로 막대 조각에 마우스를 올리면 보여줍니다.
+function buildLanguageBarsHTML(rows) {
+  const langs = groupByLanguageTrend(rows);
+  if (!langs.length) return `<p class="empty-note">[확인 대상 없음]</p>`;
+  const bars = langs.map(l => {
+    const segs = Object.keys(TREND_CATEGORY_VARS).map(cat => {
+      const segRows = l.groups[cat];
+      const n = segRows.length;
+      if (!n) return "";
+      const pct = Math.round(n / l.total * 100);
+      const width = (n / l.total * 100).toFixed(2);
+      const html = jsStr(buildTooltipHTML(cat, n, pct, contentEvidenceDetail(segRows)));
+      return `<div class="lang-bar-seg" style="width:${width}%; background:var(--${TREND_CATEGORY_VARS[cat]})" onmousemove="showRichTooltip(event,'${html}')" onmouseleave="hidePieTooltip()"></div>`;
+    }).join("");
+    return `<div class="lang-bar-row"><div class="lang-bar-name">${esc(l.label)} - ${l.total}건</div><div class="lang-bar-track">${segs}</div></div>`;
+  }).join("");
+  return `<div class="lang-bars">${bars}</div>`;
+}
+
+// 4번 종합의 개선 방향을 우선순위 순서도(번호 원 → 세로선 → 다음 번호)로 그립니다.
+// items는 [{title, description}, ...] 형태이며, 배열 순서가 곧 우선순위입니다.
+function buildPriorityFlowHTML(items) {
+  if (!items || !items.length) return `<p class="badge-text missing">근거 부족</p>`;
+  const steps = items.map((item, i) => `
+    <div class="priority-step">
+      <div class="priority-num">${i + 1}</div>
+      <div class="priority-body">
+        <h4 class="priority-title">${esc(item.title || `우선순위 ${i + 1}`)}</h4>
+        <p class="priority-desc">${esc(item.description || "근거 부족")}</p>
+      </div>
+    </div>
+  `).join("");
+  return `<div class="priority-flow">${steps}</div>`;
+}
+
+// 근거 내용이 있으면 +0.7, 근거 ID·언어·출처가 채워질 때마다 +0.1씩 더해 0~1로 계산합니다.
+// 근거 내용이 없으면 나머지 세 항목을 다 채워도 0.3을 넘지 않습니다.
+function evidenceConfidence(r) {
+  let score = 0;
+  if (hasValue(r.content)) score += 0.7;
+  if (hasValue(r.evidenceId)) score += 0.1;
+  if (hasValue(r.language)) score += 0.1;
+  if (hasValue(r.source)) score += 0.1;
+  return Math.round(score * 100) / 100;
+}
+
+// 동향·원인·개선 판단은 이제 실제 담당자(call-agent, Claude 호출)가 내려주는 값을 씁니다.
+// generate()가 analyzeRows 결과를 각 행에 r._trend / r._cause / r._fix 로 채워 넣고,
+// 아래 함수들은 그 값을 가지고 화면만 그립니다.
+
+// 콘텐츠가 같으면 같은 콘텐츠로, 그 안에서 이슈 명이 같으면 같은 이슈로 묶습니다.
+function buildFeatureGroups(rows) {
+  const featureOrder = [];
+  const featureMap = new Map();
+  rows.forEach(r => {
+    const f = (r.feature ?? "").trim() || "(콘텐츠 미입력)";
+    if (!featureMap.has(f)) { featureMap.set(f, []); featureOrder.push(f); }
+    featureMap.get(f).push(r);
+  });
+  return featureOrder.map(feature => {
+    const featureRows = featureMap.get(feature);
+    const issueOrder = [];
+    const issueMap = new Map();
+    featureRows.forEach(r => {
+      const iss = (r.issue ?? "").trim() || "(이슈 미입력)";
+      if (!issueMap.has(iss)) { issueMap.set(iss, []); issueOrder.push(iss); }
+      issueMap.get(iss).push(r);
+    });
+    return { feature, issues: issueOrder.map(issue => ({ issue, rows: issueMap.get(issue) })) };
+  });
+}
+
+// 콘텐츠/이슈가 같은 행이 표에서 이어지도록 펼치면서, 칸 합치기(rowspan)에 쓸 값을 함께 계산합니다.
+function buildIssueRows(rows) {
+  const out = [];
+  buildFeatureGroups(rows).forEach(fg => {
+    const featureTotal = fg.issues.reduce((sum, ig) => sum + ig.rows.length, 0);
+    fg.issues.forEach((ig, issueIdx) => {
+      ig.rows.forEach((r, evIdx) => {
+        out.push({
+          feature: fg.feature,
+          issue: ig.issue,
+          row: r,
+          featureSpan: (issueIdx === 0 && evIdx === 0) ? featureTotal : 0,
+          issueSpan: evIdx === 0 ? ig.rows.length : 0,
+        });
+      });
+    });
+  });
+  return out;
+}
+
+// 한 이슈 안에서 '위험' 신호가 특정 언어(문화권)에서만 나오는지, 그 이슈에 근거가 있는 언어
+// 전체에 걸쳐 공통으로 나오는지 구분합니다. 언어가 2개 이상 있고 그 전부에서 위험이 나오면
+// "common"(공통 이슈라 특정 언어 대응은 불필요), 일부 언어에서만 나오면 "specific"으로 봅니다.
+// 근거 언어가 1개뿐이면 공통 여부를 판단할 비교 대상이 없으므로 "specific"으로 보수적으로 둡니다.
+function issueRiskScope(rows) {
+  const evidenceRows = rows.filter(r => hasValue(r.content));
+  const issueLangs = [...new Set(evidenceRows.map(r => fallback(displayName(LANGUAGE_NAMES, r.language))))];
+  const riskLangs = [...new Set(evidenceRows.filter(r => r._trend === "위험").map(r => fallback(displayName(LANGUAGE_NAMES, r.language))))];
+  if (riskLangs.length === 0) return { scope: "none", riskLangs, issueLangs };
+  if (issueLangs.length >= 2 && riskLangs.length === issueLangs.length) return { scope: "common", riskLangs, issueLangs };
+  return { scope: "specific", riskLangs, issueLangs };
+}
+
+async function generate() {
+  const view = document.getElementById("resultView");
+  const btn = document.getElementById("generateBtn");
+  const activeRows = trendRows.filter(r => !isBlankRow(r));
+
+  if (activeRows.length === 0) {
+    view.innerHTML = '<p class="empty-note">[확인 대상 없음]</p>';
+    return;
+  }
+
+  // 표에 있는 행을 그대로 담당자(call-agent)에게 넘길 수 있게 index를 붙여 정리합니다.
+  const payloadRows = activeRows.map((r, i) => ({
+    index: i,
+    feature: r.feature || "",
+    issue: r.issue || "",
+    evidenceId: r.evidenceId || "",
+    content: r.content || "",
+    language: r.language || "",
+    source: r.source || "",
+  }));
+
+  btn.disabled = true;
+  view.innerHTML = '<p class="empty-note">부르는 중...</p>';
+
+  let synthesis = [];
+  try {
+    const res = await fetch(AGENT_ANALYZE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rows: payloadRows }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "호출에 실패했습니다.");
+
+    // index로 응답을 원래 행에 되돌려 붙입니다. 담당자가 어떤 행을 놓쳤으면 중립/근거 부족으로 둡니다.
+    const byIndex = new Map((data.result.rows || []).map(x => [x.index, x]));
+    activeRows.forEach((r, i) => {
+      const m = byIndex.get(i) || {};
+      r._trend = m.trend || "중립";
+      r._cause = (m.cause || "").trim();
+      r._fix = (m.fix || "").trim();
+    });
+    synthesis = data.result.synthesis || [];
+  } catch (err) {
+    view.innerHTML = `<p class="empty-note">호출 실패: ${esc(err.message)} (call-agent 서버가 실행 중인지 확인하세요 — jelly 폴더에서 node call-agent.js serve)</p>`;
+    btn.disabled = false;
+    return;
+  }
+
+  let html = "";
+
+  // 게임명이 있으면(res에서 불러온 행) 결과 패널 맨 위에 타이틀로 보여줍니다.
+  // 여러 게임이 섞여 있으면 함께 표시하고, 게임명이 없는(직접 추가한) 행뿐이면 생략합니다.
+  const gameNames = [...new Set(activeRows.map(r => (r.game || "").trim()).filter(Boolean))];
+  if (gameNames.length > 0) {
+    html += `<h3 class="report-title">${esc(gameNames.join(" · "))}</h3>`;
+  }
+
+  // 1. 동향 요약 — 콘텐츠·이슈가 같은 행은 칸을 합쳐서 보여줍니다. 근거 ID의 정보가
+  // 다 채워져 있지 않아도 동향/근거 내용/원인은 알 수 있는 만큼 먼저 보여주고,
+  // 신뢰도만 낮춥니다.
+  html += `<div class="result-section"><h3>1. 동향 요약</h3>`;
+  html += `<div class="table-scroll"><table><thead><tr><th>콘텐츠</th><th>이슈</th><th>동향</th><th>근거 내용</th><th>원인</th><th>언어</th><th>출처</th><th>신뢰도</th></tr></thead><tbody>`;
+  buildIssueRows(activeRows).forEach(entry => {
+    const r = entry.row;
+    const trendCat = hasValue(r.content) ? (r._trend || "중립") : "중립";
+    const cause = r._cause ? r._cause : "근거 부족";
+    const evidenceText = hasValue(r.content) ? `[${fallback(r.evidenceId)}] ${r.content.trim()}` : "근거 부족";
+    const language = fallback(displayName(LANGUAGE_NAMES, r.language));
+    const source = fallback(displayName(SOURCE_NAMES, r.source));
+    const confidence = evidenceConfidence(r).toFixed(2);
+
+    let row = "<tr>";
+    if (entry.featureSpan > 0) {
+      row += `<td rowspan="${entry.featureSpan}" class="${entry.feature === "(콘텐츠 미입력)" ? "missing" : ""}">${esc(entry.feature)}</td>`;
+    }
+    if (entry.issueSpan > 0) {
+      row += `<td rowspan="${entry.issueSpan}" class="${entry.issue === "(이슈 미입력)" ? "missing" : ""}">${esc(entry.issue)}</td>`;
+    }
+    row += `<td><span class="tag ${trendCat}">${trendCat}</span></td>`;
+    row += `<td class="${evidenceText === "근거 부족" ? "missing" : ""}">${esc(evidenceText)}</td>`;
+    row += `<td class="${cause === "근거 부족" ? "missing" : ""}">${esc(cause)}</td>`;
+    row += `<td class="${language === "근거 부족" ? "missing" : ""}">${esc(language)}</td>`;
+    row += `<td class="${source === "근거 부족" ? "missing" : ""}">${esc(source)}</td>`;
+    row += `<td>${esc(confidence)}</td>`;
+    row += "</tr>";
+    html += row;
+  });
+  html += `</tbody></table></div>`;
+  html += `</div>`;
+
+  // 2. 동향 그래프 — 왼쪽은 전체 동향(긍정/부정/중립/위험) 원 그래프, 오른쪽은 언어별 동향을
+  // 막대 그래프로 보여줍니다.
+  const trendGroups = { 긍정: [], 중립: [], 부정: [], 위험: [] };
+  activeRows.forEach(r => {
+    trendGroups[hasValue(r.content) ? (r._trend || "중립") : "중립"].push(r);
+  });
+  const totalTrend = activeRows.length;
+  html += `<div class="result-section"><h3>2. 동향 그래프</h3>`;
+  html += `<div class="pie-row">`;
+  html += `<div class="chart-col"><div class="chart-label">전체</div><div class="pie-inner">`;
+  html += buildPieSVG(trendGroups, totalTrend);
+  html += `<ul class="legend">${Object.keys(TREND_CATEGORY_VARS).map(label => {
+    const n = trendGroups[label].length;
+    const pct = Math.round(n / totalTrend * 100);
+    return `<li><span class="swatch" style="background:var(--${TREND_CATEGORY_VARS[label]})"></span>${label} ${n}건 (${pct}%)</li>`;
+  }).join("")}</ul>`;
+  html += `</div></div>`;
+  html += `<div class="chart-col"><div class="chart-label">언어 별</div>`;
+  html += buildLanguageBarsHTML(activeRows);
+  html += `</div>`;
+  html += `</div>`;
+  html += `</div>`;
+
+  // 3. 컨텐츠 별 동향 분석 — 콘텐츠 → 이슈 → 원인 → 근거 → 개선 순으로 정리합니다.
+  // 원인·개선은 항목마다 번호를 붙인 문단으로, 근거는 동향 색 아이콘이 붙은 문단으로 보여줍니다.
+  // 근거 ID는 바로 노출하지 않고 ⓘ 아이콘에 마우스를 올렸을 때만 보여줍니다.
+  // 이슈 안에 '위험'으로 분류된 근거가 있으면, 그 이슈에 근거가 있는 언어 중 일부에서만
+  // 위험이 나오는지(특정 언어 대응 필요) 근거 언어 전체에 공통인지(전체 대응 필요)를
+  // issueRiskScope로 나눠 경고로 알려줍니다.
+  html += `<div class="result-section"><h3>3. 컨텐츠 별 동향 분석</h3>`;
+  buildFeatureGroups(activeRows).forEach(fg => {
+    html += `<div class="content-block"><h4>${esc(fg.feature)}</h4>`;
+    fg.issues.forEach(ig => {
+      const causeDescs = [...new Set(ig.rows.map(r => (r._cause || "").trim()).filter(Boolean))];
+      const fixes = [...new Set(ig.rows.map(r => (r._fix || "").trim()).filter(Boolean))];
+      const evidenceRows = ig.rows.filter(r => hasValue(r.content));
+      const riskInfo = issueRiskScope(ig.rows);
+      html += `<div class="issue-block"><h5>${esc(ig.issue)}</h5>`;
+      html += `<div class="badge-block"><span class="info-badge slate">원인</span>`;
+      html += causeDescs.length
+        ? causeDescs.map((d, i) => `<p class="badge-text">${i + 1}. ${esc(d)}</p>`).join("")
+        : `<p class="badge-text missing">근거 부족</p>`;
+      html += `</div>`;
+      html += `<div class="badge-block"><span class="info-badge gray">근거</span><ul class="evidence-list">`;
+      if (evidenceRows.length) {
+        evidenceRows.forEach(r => {
+          const cat = r._trend || "중립";
+          const langLabel = fallback(displayName(LANGUAGE_NAMES, r.language));
+          const tipText = jsStr(esc(`근거 ID: ${fallback(r.evidenceId)}\n언어: ${langLabel}`));
+          // 위험으로 분류된 근거만, 그 이슈의 위험 범위(특정 언어/공통)를 오른쪽에 작은 배지로 보여줍니다.
+          const scopeBadge = cat === "위험" && riskInfo.scope === "specific" ? `<span class="scope-badge specific">문화권 특이</span>`
+            : cat === "위험" && riskInfo.scope === "common" ? `<span class="scope-badge common">공통</span>`
+            : "";
+          html += `<li><span class="evidence-text"><span class="trend-dot ${cat}"></span>${esc(r.content.trim())} <span class="info-icon" onmousemove="showTooltip(event,'${tipText}')" onmouseleave="hidePieTooltip()">ⓘ</span></span>${scopeBadge}</li>`;
+        });
+      } else {
+        html += `<li class="missing">근거 부족</li>`;
+      }
+      html += `</ul></div>`;
+      html += `<div class="badge-block"><span class="info-badge blue">개선</span>`;
+      html += fixes.length
+        ? fixes.map((f, i) => `<p class="badge-text">${i + 1}. ${esc(f)}</p>`).join("")
+        : `<p class="badge-text missing">근거 부족</p>`;
+      html += `</div>`;
+      if (riskInfo.scope === "specific") {
+        html += `<div class="lang-alert">⚠ ${esc(riskInfo.riskLangs.join(", "))} 언어권에서만 위험 신호가 확인되어 별도 대응이 필요합니다.</div>`;
+      } else if (riskInfo.scope === "common") {
+        html += `<div class="lang-alert">⚠ 근거가 있는 모든 언어권(${esc(riskInfo.issueLangs.join(", "))})에서 공통으로 위험 신호가 확인되어, 특정 언어가 아닌 전체 차원의 대응이 필요합니다.</div>`;
+      }
+      html += `</div>`;
+    });
+    html += `</div>`;
+  });
+  html += `</div>`;
+
+  // 4. 종합 — 동향 통계를 배지로 먼저 보여주고, 한 줄 판단 → 개선 방향(담당자 종합) → 위험 신호
+  // 순서로 라벨을 붙여 구분해, 표를 다시 훑지 않아도 리포트만 읽고 파악할 수 있게 합니다.
+  html += `<div class="result-section"><h3>4. 종합</h3>`;
+  const topTrend = Object.keys(TREND_CATEGORY_VARS)
+    .map(label => ({ label, n: trendGroups[label].length }))
+    .sort((a, b) => b.n - a.n)[0];
+  if (topTrend && topTrend.n > 0) {
+    const topPct = Math.round(topTrend.n / totalTrend * 100);
+
+    html += `<div class="summary-stats">` + Object.keys(TREND_CATEGORY_VARS)
+      .filter(label => trendGroups[label].length > 0)
+      .map(label => {
+        const n = trendGroups[label].length;
+        const pct = Math.round(n / totalTrend * 100);
+        return `<span class="tag ${label}">${label} ${n}건 (${pct}%)</span>`;
+      }).join("") + `</div>`;
+
+    html += `<p class="summary-text">전체 ${totalTrend}건 중 <strong>${esc(topTrend.label)}</strong> 반응이 ${topTrend.n}건(${topPct}%)으로 가장 많습니다.</p>`;
+
+    html += `<div class="badge-block"><span class="info-badge blue">개선 방향</span></div>`;
+    html += buildPriorityFlowHTML(synthesis);
+
+    // 이슈별로 위험 신호가 특정 언어에서만 나오는지, 근거 언어 전체에 공통인지 나눠서 종합합니다.
+    // 공통 이슈는 특정 언어 대응이 필요하지 않으므로 언어를 짚어 리포팅하지 않습니다.
+    const specificRiskByLang = new Map();
+    let hasCommonRisk = false;
+    buildFeatureGroups(activeRows).forEach(fg => {
+      fg.issues.forEach(ig => {
+        const riskInfo = issueRiskScope(ig.rows);
+        if (riskInfo.scope === "specific") {
+          riskInfo.riskLangs.forEach(lang => {
+            if (!specificRiskByLang.has(lang)) specificRiskByLang.set(lang, new Set());
+            specificRiskByLang.get(lang).add(ig.issue);
+          });
+        } else if (riskInfo.scope === "common") {
+          hasCommonRisk = true;
+        }
+      });
+    });
+    if (specificRiskByLang.size) {
+      const parts = [...specificRiskByLang.entries()].map(([lang, issues]) => `${lang}(${[...issues].join(", ")})`);
+      html += `<div class="lang-alert">⚠ ${esc(parts.join(", "))}에서만 위험 신호가 확인되어 별도 대응이 필요합니다.</div>`;
+    }
+    if (hasCommonRisk) {
+      html += `<div class="lang-alert">⚠ 일부 위험 신호는 여러 언어권에 공통으로 나타나 특정 언어가 아닌 전체 차원의 대응이 필요합니다.</div>`;
+    }
+  } else {
+    html += `<p class="empty-note">[확인 대상 없음]</p>`;
+  }
+  html += `</div>`;
+
+  view.innerHTML = html;
+  btn.disabled = false;
+}
+
+renderInputs();
+populateLanguageOptions();
+renderSourcePresets();
+</script>
+
+</body>
+</html>
