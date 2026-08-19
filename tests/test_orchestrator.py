@@ -6,7 +6,14 @@ from agents.collector import CollectionOptions, CollectorAgent
 from agents.evidence_rag import EvidenceRagAgent
 from agents.structured import StructuredModelError
 from connectors import ConnectorError
-from contracts import Decision, ErrorCode, InputMode, Producer
+from contracts import (
+    ArtifactStatus,
+    Decision,
+    ErrorCode,
+    InputMode,
+    PipelineError,
+    Producer,
+)
 from evaluation.backtest import evaluate_black_market
 from evaluation.fixtures import load_demo_event
 from execution import AGENT_ORDER, ExecutionState
@@ -140,6 +147,33 @@ def test_live_llm_failure_returns_hold_without_loading_fixture(event):
     assert result.brief.decision == Decision.HOLD
     assert result.analysis_incomplete is True
     assert result.brief.evidence == []
+
+
+def test_partial_corpus_runs_end_to_end_as_incomplete_hold(event, feedback):
+    partial = feedback.model_copy(
+        update={
+            "status": ArtifactStatus.PARTIAL,
+            "input_mode": InputMode.CORPUS,
+            "errors": [
+                PipelineError(
+                    code=ErrorCode.INSUFFICIENT_EVIDENCE,
+                    message="한국어 관련 근거를 더 확보해야 합니다.",
+                )
+            ],
+        }
+    )
+
+    class PartialCorpusCollector:
+        def run(self, _event, _options, on_event=None):
+            return partial
+
+    result = EventPreflightOrchestrator(collector=PartialCorpusCollector()).run(
+        event, CollectionOptions()
+    )
+
+    assert result.feedback.status is ArtifactStatus.PARTIAL
+    assert result.analysis_incomplete is True
+    assert result.brief.decision is Decision.HOLD
 
 
 def test_fixture_run_still_succeeds_after_live_collection_failure(event):

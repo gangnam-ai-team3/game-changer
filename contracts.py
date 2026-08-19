@@ -58,6 +58,7 @@ class InputMode(StrEnum):
     FIXTURE = "fixture"
     LIVE = "live"
     IMPORT = "import"
+    CORPUS = "corpus"
 
 
 class Decision(StrEnum):

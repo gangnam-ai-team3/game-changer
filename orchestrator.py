@@ -142,6 +142,10 @@ class EventPreflightOrchestrator:
             event.run_id,
             {event.ref},
         )
+        analysis_incomplete = (
+            feedback.input_mode == InputMode.CORPUS
+            and feedback.status == ArtifactStatus.PARTIAL
+        )
         self._write(feedback, log_path)
         try:
             evidence = self._stage(
