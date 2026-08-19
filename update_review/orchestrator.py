@@ -126,7 +126,7 @@ class UpdateReviewOrchestrator:
                     if can_retry:
                         fallback_used = True
                         force_deterministic = True
-                        if options.input_mode == InputMode.LIVE:
+                        if options.input_mode != InputMode.FIXTURE:
                             analysis_incomplete = True
                         emit(
                             agent,
@@ -148,7 +148,7 @@ class UpdateReviewOrchestrator:
                     else:
                         fallback_used = True
                         force_deterministic = True
-                        if options.input_mode == InputMode.LIVE:
+                        if options.input_mode != InputMode.FIXTURE:
                             analysis_incomplete = True
                         emit(
                             agent,

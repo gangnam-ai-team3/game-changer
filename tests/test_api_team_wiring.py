@@ -3,10 +3,10 @@ from __future__ import annotations
 import pytest
 
 from agents.evidence_rag import EvidenceRagAgent
-from agents.structured import ClaudeBudget
+from agents.structured import ClaudeBudget, StructuredModelError
 import backend.app.main as api_main
 from backend.app.schemas import PipelineRunRequest, UpdateRunRequest
-from contracts import InputMode
+from contracts import ErrorCode, InputMode
 from evaluation.fixtures import load_feedback_fixture
 from orchestrator import EventPreflightOrchestrator
 from res.team_adapters import (
@@ -214,3 +214,41 @@ def test_non_corpus_llm_requests_do_not_construct_team_sidecars(monkeypatch, pip
         if pipeline == "event"
         else {"use_llm", "collector"}
     )
+
+
+def test_update_corpus_team_quota_failure_is_an_incomplete_hold(
+    monkeypatch, tmp_path
+):
+    jelly_calls, probe_calls = [], []
+
+    class QuotaJellyRunner:
+        def __init__(self, *, budget):
+            pass
+
+        def run(self, rows):
+            jelly_calls.append(rows)
+            raise StructuredModelError(ErrorCode.BUDGET_EXCEEDED, "quota")
+
+    class UnusedJinbaeProbe:
+        def __init__(self, *, budget):
+            pass
+
+        def run(self, claim_text, candidate_chunks):
+            probe_calls.append((claim_text, candidate_chunks))
+
+    _FixtureCorpusCollector.instances = []
+    monkeypatch.setattr(api_main, "ROOT", tmp_path)
+    monkeypatch.setattr(api_main, "UpdateCorpusCollector", _FixtureCorpusCollector)
+    monkeypatch.setattr(api_main, "JellyRunner", QuotaJellyRunner)
+    monkeypatch.setattr(api_main, "JinbaeProbe", UnusedJinbaeProbe)
+
+    result = api_main._run_update(
+        _request("update", use_llm=True), "update-quota-failure"
+    )
+
+    assert len(jelly_calls) == 1
+    assert probe_calls == []
+    assert result.fallback_used is True
+    assert result.analysis_incomplete is True
+    assert result.brief.decision.value == "Hold"
+    assert (result.llm_requested, result.llm_provider) == (True, "claude")
