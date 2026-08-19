@@ -169,7 +169,9 @@ class JellyRunner:
                 ErrorCode.BUDGET_EXCEEDED,
                 "Jelly 출력 토큰 예산이 부족합니다.",
             )
-        model = _model_from_env("CLAUDE_REDTEAM_MODEL", "claude-haiku-4-5")
+        model = _model_from_env(
+            "CLAUDE_REDTEAM_MODEL", "claude-haiku-4-5-20251001"
+        )
         self.budget.reserve(
             len(_jelly_user_text(rows))
             + len(
@@ -385,7 +387,9 @@ class JinbaeProbe:
                 ErrorCode.BUDGET_EXCEEDED,
                 "승진배 근거 판정기 출력 토큰 예산이 부족합니다.",
             )
-        model = _model_from_env("CLAUDE_AUDIT_MODEL", "claude-haiku-4-5")
+        model = _model_from_env(
+            "CLAUDE_AUDIT_MODEL", "claude-haiku-4-5-20251001"
+        )
         self.budget.reserve(
             len(_jinbae_prompt(claim_text, candidate_chunks))
             + len(json.dumps(JUDGE_TOOL, ensure_ascii=False)),

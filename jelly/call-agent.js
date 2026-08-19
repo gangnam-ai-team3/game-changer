@@ -5,7 +5,7 @@ const http = require("http");
 const ROOT_DIR = path.join(__dirname, "..");
 const ENV_PATH = path.join(ROOT_DIR, ".env");
 const ROLE_PATH = path.join(__dirname, "..", ".claude", "agents", "jelly.md");
-const MODEL = process.env.CLAUDE_REDTEAM_MODEL?.trim() || "claude-haiku-4-5";
+const MODEL = process.env.CLAUDE_REDTEAM_MODEL?.trim() || "claude-haiku-4-5-20251001";
 const configuredMaxTokens = Number(process.env.CLAUDE_MAX_OUTPUT_TOKENS || "3000");
 const MAX_TOKENS = Number.isSafeInteger(configuredMaxTokens) && configuredMaxTokens > 0
   ? Math.min(configuredMaxTokens, 3000)

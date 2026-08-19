@@ -352,7 +352,7 @@ def test_jelly_runner_uses_one_bounded_node_process_with_stdin_json(monkeypatch)
     assert json.loads(kwargs["input"]) == rows
     assert kwargs["timeout"] == 7
     assert kwargs["cwd"].name == "game-changer"
-    assert kwargs["env"]["CLAUDE_REDTEAM_MODEL"] == "claude-haiku-4-5"
+    assert kwargs["env"]["CLAUDE_REDTEAM_MODEL"] == "claude-haiku-4-5-20251001"
     assert kwargs["env"]["CLAUDE_MAX_OUTPUT_TOKENS"] == "512"
 
 
@@ -376,7 +376,7 @@ def test_jelly_runner_never_leaks_subprocess_output(monkeypatch):
 @pytest.mark.parametrize(
     ("configured_model", "configured_tokens", "expected_model", "expected_tokens"),
     [
-        (None, None, "claude-haiku-4-5", 3000),
+        (None, None, "claude-haiku-4-5-20251001", 3000),
         ("claude-config-test", "9000", "claude-config-test", 3000),
         ("claude-config-test", "512", "claude-config-test", 512),
     ],
