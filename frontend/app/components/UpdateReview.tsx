@@ -392,6 +392,14 @@ export function UpdateReview() {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!form.cutoff_on || !form.planned_on) {
+      setError("자료 기준일과 출시 예정일을 모두 입력해 주세요.");
+      return;
+    }
+    if (form.cutoff_on > form.planned_on) {
+      setError("자료 기준일은 출시 예정일과 같거나 앞선 날짜로 설정해 주세요.");
+      return;
+    }
     if (sourceMode === "corpus" && !isFutureUtcDate(form.cutoff_on)) {
       setError("사전 구축 코퍼스를 사용하려면 자료 기준일을 오늘(UTC)보다 뒤로 설정해 주세요.");
       return;

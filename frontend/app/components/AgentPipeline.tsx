@@ -130,6 +130,68 @@ const stateLabels: Record<string, string> = {
   failed: "확인 필요",
 };
 
+const metricLabels: Record<string, string> = {
+  evidence: "근거",
+  samples: "표본",
+  corpus_version: "코퍼스 버전",
+  input_mode: "자료 입력 방식",
+  remaining: "기준일 통과 근거",
+  insufficient: "표본 부족 언어권",
+  languages: "언어권",
+  visible: "결론 공개 언어권",
+  issues: "반복 문제",
+  signals: "반응 신호",
+  positive: "긍정 신호",
+  neutral: "중립 신호",
+  negative: "우려 신호",
+  risk: "위험 신호",
+  mixed: "혼합 신호",
+  personas: "이용자 유형",
+  risks: "위험",
+  linked_risks: "연결된 위험",
+  validated: "검증된 위험",
+  rejected: "제외된 위험",
+  metrics: "확인 지표",
+  recommendations: "실행 권고",
+  revisions: "수정안",
+  decision: "최종 판정",
+  analysis_incomplete: "분석 미완료",
+  update_type: "업데이트 유형",
+  accepted: "사용 근거",
+  errors: "오류",
+  comparable_reference: "비교 참고 근거",
+  metrics_complete: "검증 지표 충족",
+  provider: "설명 생성 도구",
+  claims: "검증 주장",
+  chunks: "검토 근거",
+  calls: "호출 횟수",
+  verdict: "근거 판정",
+};
+
+const metricValueLabels: Record<string, string> = {
+  Go: "출시 가능",
+  Revise: "수정 후 재검토",
+  Test: "테스트 후 출시",
+  Hold: "판정 보류",
+  claude: "Claude",
+  fixture: "검증된 저장 데이터",
+  live: "실시간 자료",
+  import: "승인 CSV",
+  corpus: "사전 구축 코퍼스",
+  weapon_balance: "무기 밸런스",
+  ui_ux: "UI와 UX",
+  system_rules: "시스템 규칙",
+  positive: "긍정",
+  neutral: "중립",
+  negative: "우려",
+  risk: "위험",
+  grounded: "근거 확인",
+  partially_grounded: "일부 근거 확인",
+  not_grounded: "근거 부족",
+  true: "예",
+  false: "아니오",
+};
+
 export function AgentPipeline({
   events,
   active = false,
@@ -216,9 +278,9 @@ export function AgentPipeline({
                     <p>
                       <b>정의된 값</b>{" "}
                       {Object.entries(event.metrics)
-                        .map(([key, value]) => `${key}=${String(value)}`)
-                        .map(businessKorean)
-                        .join(", ") || "추가 지표 없음"}
+                        .filter(([key]) => metricLabels[key])
+                        .map(([key, value]) => `${metricLabels[key]} ${metricValueLabels[String(value)] ?? String(value)}`)
+                        .join(", ") || "처리 결과를 확인했습니다."}
                     </p>
                     <p>
                       <b>처리 상태</b> {stateLabels[event.state] ?? event.state}

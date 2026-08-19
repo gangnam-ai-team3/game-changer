@@ -330,6 +330,18 @@ function EventReview() {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!form.cutoff_on || !form.starts_on || !form.ends_on) {
+      setError("자료 기준일, 이벤트 시작일과 종료일을 모두 입력해 주세요.");
+      return;
+    }
+    if (form.cutoff_on > form.starts_on) {
+      setError("자료 기준일은 이벤트 시작일과 같거나 앞선 날짜로 설정해 주세요.");
+      return;
+    }
+    if (form.starts_on >= form.ends_on) {
+      setError("이벤트 종료일은 시작일 이후로 설정해 주세요.");
+      return;
+    }
     if (sourceMode === "corpus" && !isFutureUtcDate(form.cutoff_on)) {
       setError("사전 구축 코퍼스를 사용하려면 자료 기준일을 오늘(UTC)보다 뒤로 설정해 주세요.");
       return;
@@ -745,7 +757,7 @@ function EventReview() {
           <div className="risk-section">
             <div className="section-title">
               <h2>확인된 위험</h2>
-              <p>위험의 내용을 직접 보여줍니다. 연결된 비식별 의견은 카드를 펼쳐 확인할 수 있습니다.</p>
+              <p>연결 근거는 비식별 요약이며, 이용자의 직접 인용이 아닙니다.</p>
             </div>
             <div className="risk-grid">
               {result.brief.top_risks.map((risk) => (
@@ -757,14 +769,14 @@ function EventReview() {
                     위험 수준 {severityLabels[risk.severity] ?? risk.severity}, 근거 {risk.evidence_ids.length}건, 신뢰도 {Math.round(risk.confidence * 100)}%
                   </small>
                   <details>
-                    <summary>연결된 비식별 의견 보기</summary>
-                    <p>개인정보 보호를 위해 사용자 원문은 저장하지 않고 비식별 요약만 제공합니다. 분석 설명은 한국어로 제공하며, 비식별 근거 요약은 왜곡을 막기 위해 출처 언어를 유지합니다.</p>
+                    <summary>연결된 파생 요약 보기</summary>
+                    <p>아래 내용은 비식별 요약입니다. 이용자의 문장을 직접 인용한 내용이 아니며, 원문은 저장하거나 표시하지 않습니다.</p>
                     {result.feedback.evidence
                       .filter((item) => risk.evidence_ids.includes(String(item.evidence_id)))
                       .map((item) => (
-                        <blockquote key={String(item.evidence_id)}>
+                        <div className="derived-evidence" key={String(item.evidence_id)}>
                           <b>{String(item.evidence_id)}</b> {businessKorean(item.summary)}
-                        </blockquote>
+                        </div>
                       ))}
                   </details>
                 </article>

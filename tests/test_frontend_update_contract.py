@@ -198,6 +198,64 @@ def test_pipeline_names_corpus_and_team_agent_nodes():
         assert f"{node}:" in source
 
 
+def test_clients_validate_manual_review_dates():
+    event_source = (ROOT / "page.tsx").read_text(encoding="utf-8")
+    update_source = (ROOT / "components" / "UpdateReview.tsx").read_text(encoding="utf-8")
+
+    assert "form.cutoff_on > form.starts_on" in event_source
+    assert "form.starts_on >= form.ends_on" in event_source
+    assert "자료 기준일은 이벤트 시작일과 같거나 앞선 날짜" in event_source
+    assert "이벤트 종료일은 시작일 이후" in event_source
+    assert "form.cutoff_on > form.planned_on" in update_source
+    assert "자료 기준일은 출시 예정일과 같거나 앞선 날짜" in update_source
+
+
+def test_event_evidence_is_presented_as_derived_summary_not_quote():
+    source = (ROOT / "page.tsx").read_text(encoding="utf-8")
+    styles = (ROOT / "globals.css").read_text(encoding="utf-8")
+
+    assert "이용자의 직접 인용이 아닙니다" in source
+    assert "연결된 파생 요약 보기" in source
+    assert "<blockquote" not in source
+    assert 'className="derived-evidence"' in source
+    assert ".risk-card .derived-evidence" in styles
+
+
+def test_pipeline_translates_closed_team_metrics_and_focus_is_opaque():
+    pipeline = (ROOT / "components" / "AgentPipeline.tsx").read_text(encoding="utf-8")
+    styles = (ROOT / "globals.css").read_text(encoding="utf-8")
+
+    for label in (
+        'corpus_version: "코퍼스 버전"',
+        'neutral: "중립 신호"',
+        'risk: "위험 신호"',
+        'claims: "검증 주장"',
+        'chunks: "검토 근거"',
+        'calls: "호출 횟수"',
+        'verdict: "근거 판정"',
+        'grounded: "근거 확인"',
+        'partially_grounded: "일부 근거 확인"',
+        'not_grounded: "근거 부족"',
+        'input_mode: "자료 입력 방식"',
+        'remaining: "기준일 통과 근거"',
+        'insufficient: "표본 부족 언어권"',
+        'linked_risks: "연결된 위험"',
+        'analysis_incomplete: "분석 미완료"',
+        'revisions: "수정안"',
+        'update_type: "업데이트 유형"',
+        'accepted: "사용 근거"',
+        'errors: "오류"',
+        'comparable_reference: "비교 참고 근거"',
+        'metrics_complete: "검증 지표 충족"',
+        'corpus: "사전 구축 코퍼스"',
+        'weapon_balance: "무기 밸런스"',
+    ):
+        assert label in pipeline
+    assert ".corpus-date-action:focus-visible" in styles
+    assert "outline:3px solid var(--accent)" in styles
+    assert "outline:3px solid #5e6ad233" not in styles
+
+
 def test_corpus_demo_dates_follow_browser_utc_day():
     script = """
 import { corpusDemoDates, isFutureUtcDate } from "./frontend/app/components/corpusDemoDates.ts";
