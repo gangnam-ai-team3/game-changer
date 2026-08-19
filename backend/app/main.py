@@ -17,11 +17,23 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from agents.collector import CollectionOptions
+from agents.evidence_rag import EvidenceRagAgent
+from agents.structured import ClaudeBudget
 from contracts import ArtifactStatus, EventBrief, Producer
 from execution import ExecutionEvent
 from orchestrator import EventPreflightOrchestrator, PipelineStopped
+from res.corpus_collectors import EventCorpusCollector, UpdateCorpusCollector
+from res.team_adapters import (
+    EventJellyRedteamAdapter,
+    EventJinbaeAuditAdapter,
+    JellyRunner,
+    JinbaeProbe,
+    UpdateJellyRedteamAdapter,
+    UpdateJinbaeAuditAdapter,
+)
 from update_review.collector import UpdateCollectionOptions
 from update_review.contracts import UpdateBrief
+from update_review.evidence import UpdateEvidenceAgent
 from update_review.orchestrator import UpdateReviewOrchestrator
 
 from .schemas import (
@@ -121,6 +133,11 @@ def _csv_bytes(value: str | None) -> bytes | None:
         raise HTTPException(status_code=422, detail="imported_csv must be base64 encoded") from exc
 
 
+def _team_sidecars():
+    budget = ClaudeBudget(max_requests=2)
+    return JellyRunner(budget=budget), JinbaeProbe(budget=budget)
+
+
 def _run(
     request: PipelineRunRequest,
     run_id: str,
@@ -136,9 +153,25 @@ def _run(
         x_query=request.x_query,
         x_estimated_total_cost_usd=request.x_estimated_total_cost_usd,
     )
+    collector = (
+        EventCorpusCollector(ROOT / ".data" / "corpus" / "pubg_steam.sqlite3")
+        if request.source_mode == "corpus"
+        else None
+    )
+    team_mode = request.source_mode == "corpus" and request.use_llm
+    team = {}
+    if team_mode:
+        runner, probe = _team_sidecars()
+        team = {
+            "evidence_rag": EvidenceRagAgent(),
+            "redteam": EventJellyRedteamAdapter(runner=runner, enabled=True),
+            "audit": EventJinbaeAuditAdapter(probe=probe, enabled=True),
+        }
     result = EventPreflightOrchestrator(
         use_llm=request.use_llm,
-        llm_provider=request.llm_provider,
+        llm_provider="claude" if team_mode else request.llm_provider,
+        collector=collector,
+        **team,
     ).run(
         event,
         options,
@@ -220,7 +253,24 @@ def _run_update(
         period_end=request.period_end if request.source_mode == "live" else None,
         x_estimated_total_cost_usd=request.x_estimated_total_cost_usd,
     )
-    result = UpdateReviewOrchestrator(use_llm=request.use_llm).run(
+    collector = (
+        UpdateCorpusCollector(ROOT / ".data" / "corpus" / "pubg_steam.sqlite3")
+        if request.source_mode == "corpus"
+        else None
+    )
+    team = {}
+    if request.source_mode == "corpus" and request.use_llm:
+        runner, probe = _team_sidecars()
+        team = {
+            "evidence": UpdateEvidenceAgent(),
+            "redteam": UpdateJellyRedteamAdapter(runner=runner, enabled=True),
+            "audit": UpdateJinbaeAuditAdapter(probe=probe, enabled=True),
+        }
+    result = UpdateReviewOrchestrator(
+        use_llm=request.use_llm,
+        collector=collector,
+        **team,
+    ).run(
         brief,
         options,
         on_event=on_event,
