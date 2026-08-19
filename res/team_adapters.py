@@ -500,7 +500,7 @@ def _run_jinbae_probe(base, evidence, probe, on_event):
         {"claims": 1, "risks": len(base.validated_risks), "chunks": len(chunks)},
     )
     try:
-        probe.run(claim, chunks)
+        result = probe.run(claim, chunks)
     except StructuredModelError as exc:
         if exc.code is ErrorCode.BUDGET_EXCEEDED:
             raise
@@ -508,13 +508,21 @@ def _run_jinbae_probe(base, evidence, probe, on_event):
     except Exception:
         failed = True
     else:
-        failed = False
+        failed = (
+            not isinstance(result, dict)
+            or result.get("verdict")
+            not in {"grounded", "partially_grounded", "not_grounded"}
+        )
     if failed:
         raise _team_unavailable("승진배")
     notify(
         "jinbae_probe_checked",
         "승진배 근거 판정기의 인용 ID를 확인하고 코드 판정을 유지했습니다.",
-        {"calls": 1, "decision": base.decision.value},
+        {
+            "calls": 1,
+            "verdict": result["verdict"],
+            "decision": base.decision.value,
+        },
     )
     return base
 

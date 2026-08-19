@@ -685,6 +685,8 @@ def test_event_jinbae_verdict_cannot_change_code_owned_decision_and_payload_is_s
     serialized = json.dumps(chunks, ensure_ascii=False)
     assert not any(item.source_url in serialized for item in pack.evidence)
     assert {node for node, _ in events} >= {"jinbae_probe_started", "jinbae_probe_checked"}
+    checked = next(metrics for node, metrics in events if node == "jinbae_probe_checked")
+    assert checked["verdict"] == "not_grounded"
 
 
 def test_update_jinbae_verdict_cannot_change_test_decision():
