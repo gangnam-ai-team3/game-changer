@@ -3,7 +3,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { callAgent } = require('./call-agent.js');
+const { callAgent, fetchSteamReviews, describeSteamCollectionStatus } = require('./call-agent.js');
 
 const PORT = process.env.PORT || 8787;
 const SCREEN_HTML_PATH = path.join(__dirname, 'screen.html');
@@ -39,6 +39,27 @@ const server = http.createServer((req, res) => {
         }
         const result = await callAgent(text, { costLimitAmount, costLimitCurrency, gameName, periodStartMs, periodEndMs, languages });
         sendJson(res, 200, { result });
+      } catch (err) {
+        sendJson(res, 500, { error: err.message });
+      }
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/steam-preview') {
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const { gameName, periodStartMs, periodEndMs, languages } = JSON.parse(body || '{}');
+        if (!gameName || !Number.isFinite(periodStartMs) || !Number.isFinite(periodEndMs)) {
+          sendJson(res, 400, { error: '게임이름/기간이 필요합니다.' });
+          return;
+        }
+        // Claude(Anthropic API)를 전혀 거치지 않는다 — 순수 스팀 공식 API 호출만 수행
+        const steamResult = await fetchSteamReviews({ gameName, periodStartMs, periodEndMs, languages });
+        const status = describeSteamCollectionStatus(steamResult);
+        sendJson(res, 200, { status, steamResult });
       } catch (err) {
         sendJson(res, 500, { error: err.message });
       }

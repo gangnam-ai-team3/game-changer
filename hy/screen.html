@@ -196,6 +196,24 @@
     opacity: 0.78;
   }
 
+  button#steam-preview-btn {
+    display: inline-block;
+    margin-top: 36px;
+    margin-left: 10px;
+    padding: 11px 22px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--accent-surface);
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: opacity 0.15s ease;
+  }
+  button#steam-preview-btn:hover {
+    opacity: 0.85;
+  }
+
 
   #result-section {
     display: none;
@@ -397,6 +415,7 @@
     </div>
 
     <button id="collect-btn">[데이터 수집]</button>
+    <button id="steam-preview-btn">[스팀 원본만 확인 · Claude 호출 없음]</button>
   </div>
 
   <div id="result-section">
@@ -584,6 +603,45 @@
         resultOutput.classList.remove('loading');
         if (r.ok) {
           resultOutput.textContent = r.data.result;
+        } else {
+          resultOutput.textContent = '오류: ' + (r.data.error || '알 수 없는 오류');
+        }
+      })
+      .catch(function (err) {
+        resultOutput.classList.remove('loading');
+        resultOutput.textContent = '오류: ' + err.message;
+      })
+      .finally(function () {
+        btn.disabled = false;
+      });
+  });
+
+  document.getElementById('steam-preview-btn').addEventListener('click', function () {
+    var resultSection = document.getElementById('result-section');
+    var resultOutput = document.getElementById('result-output');
+    var btn = document.getElementById('steam-preview-btn');
+
+    resultSection.style.display = 'block';
+    resultSection.scrollIntoView({ behavior: 'smooth' });
+    resultOutput.textContent = '스팀에서 긁는 중... (Claude 호출 없음, 비용 없음)';
+    resultOutput.classList.add('loading');
+    btn.disabled = true;
+
+    fetch('/steam-preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        gameName: FIXED_GAME_NAME,
+        periodStartMs: new Date(document.getElementById('collect-period-start').value).getTime(),
+        periodEndMs: new Date(document.getElementById('collect-period-end').value).getTime(),
+        languages: getSelectedLanguages()
+      })
+    })
+      .then(function (res) { return res.json().then(function (data) { return { ok: res.ok, data: data }; }); })
+      .then(function (r) {
+        resultOutput.classList.remove('loading');
+        if (r.ok) {
+          resultOutput.textContent = r.data.status + '\n\n(키워드 필터링은 Claude가 하는 단계라 여기선 적용 안 됨 — 이건 스팀에서 실제로 긁힌 원본입니다)\n\n' + JSON.stringify(r.data.steamResult, null, 2);
         } else {
           resultOutput.textContent = '오류: ' + (r.data.error || '알 수 없는 오류');
         }
