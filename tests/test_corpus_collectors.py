@@ -1,10 +1,12 @@
 import hashlib
 from datetime import UTC, datetime, timedelta
 
+import res.corpus_collectors as corpus_collectors
 from agents.evidence_rag import EvidenceRagAgent
 from contracts import ArtifactStatus, EventBrief, InputMode
 from hy.corpus import (
     BehaviorCode,
+    CorpusRecord,
     EphemeralSteamReview,
     Quality,
     ReasonCode,
@@ -125,3 +127,62 @@ def test_corpus_newer_than_cutoff_fails_closed(tmp_path, event):
     assert feedback.status is ArtifactStatus.FAILED
     assert feedback.evidence == []
     assert feedback.input_mode is InputMode.CORPUS
+
+
+def test_relevance_rank_restarts_for_each_language_when_korean_has_fewer_than_20(
+    monkeypatch, tmp_path, event
+):
+    observed_at = event.cutoff_at - timedelta(days=1)
+
+    def records(language: str, count: int):
+        return [
+            CorpusRecord(
+                evidence_id=hashlib.sha256(f"{language}:{index}".encode()).hexdigest()[:24],
+                language=language,
+                created_at=observed_at.isoformat(),
+                updated_at=observed_at.isoformat(),
+                stance="negative",
+                summary="무기 밸런스에 대한 비식별 의견입니다.",
+                reason_codes=("balance",),
+                behavior_codes=("wait_and_see",),
+                topic_tags=("weapon_balance",),
+                confidence=0.9,
+            )
+            for index in range(count)
+        ]
+
+    rows = {"ko": records("ko", 5), "en": records("en", 20)}
+    monkeypatch.setattr(
+        corpus_collectors,
+        "corpus_status",
+        lambda _path: {
+            "status": "active",
+            "snapshot_at": (event.cutoff_at - timedelta(days=2)).isoformat(),
+            "corpus_version": "test-corpus",
+            "ko_count": "100",
+            "en_count": "100",
+        },
+    )
+    monkeypatch.setattr(
+        corpus_collectors,
+        "search_corpus",
+        lambda _query, *, language, **_kwargs: rows[language],
+    )
+
+    feedback = EventCorpusCollector(tmp_path / "unused.sqlite3").run(event)
+    relevance = {
+        language: [
+            item.relevance
+            for item in feedback.evidence
+            if item.language.value == language
+        ]
+        for language in ("ko", "en")
+    }
+
+    assert [len(relevance[language]) for language in ("ko", "en")] == [5, 20]
+    assert relevance["ko"][0] == relevance["en"][0] == 0.9
+    assert all(
+        first >= second
+        for values in relevance.values()
+        for first, second in zip(values, values[1:])
+    )

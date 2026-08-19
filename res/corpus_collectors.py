@@ -61,9 +61,9 @@ class EventCorpusCollector:
                 observed_at=datetime.fromisoformat(record.updated_at),
                 summary=record.summary,
                 mechanism_tags=_event_tags(record, query),
-                relevance=_rank_confidence(record, index),
+                relevance=relevance,
             )
-            for index, record in enumerate(records)
+            for record, relevance in _ranked_records(records)
         ]
         samples, errors = _samples_and_errors(evidence, manifest)
         notify(
@@ -117,9 +117,9 @@ class UpdateCorpusCollector:
                 sentiment=Sentiment(record.stance),
                 summary=record.summary,
                 mechanism_tags=_update_tags(record),
-                relevance=_rank_confidence(record, index),
+                relevance=relevance,
             )
-            for index, record in enumerate(records)
+            for record, relevance in _ranked_records(records)
         ]
         samples, errors = _samples_and_errors(evidence, manifest)
         notify(
@@ -278,7 +278,15 @@ def _update_tags(record: CorpusRecord) -> list[str]:
 
 
 def _rank_confidence(record: CorpusRecord, index: int) -> float:
-    return max(0.0, min(1.0, record.confidence - (index % 20) * 0.005))
+    return max(0.0, min(1.0, record.confidence - index * 0.005))
+
+
+def _ranked_records(records: list[CorpusRecord]):
+    indexes = {language: 0 for language in CORPUS_LANGUAGES}
+    for record in records:
+        index = indexes[record.language]
+        yield record, _rank_confidence(record, index)
+        indexes[record.language] = index + 1
 
 
 def _failed_event_bundle(event: EventBrief, _reason: str) -> FeedbackBundle:
