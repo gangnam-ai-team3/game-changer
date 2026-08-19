@@ -8,6 +8,22 @@
 
 이 저장소의 에이전트 정의는 팀이 함께 쓰는 프로젝트 설정입니다. 현재는 담당자별 자리만 만들고, 내용은 각 담당자가 자신의 브랜치에서 작성해 PR합니다.
 
+### 출시 전 업데이트 점검
+
+자료 모드는 검증용 `fixture`, Steam과 X의 `live`, 승인된 CSV의 `import`, 미리 분류한 Steam `corpus`를 지원합니다. 자료가 부족하거나 외부 에이전트 검증이 끝나지 않으면 `PARTIAL`로 기록하고 판정 보류(Hold) 또는 결정론적 안전 경로로 전환합니다.
+
+```bash
+uv sync --extra dev --locked
+uv run python -m evaluation.verify_update_success
+uv run python -m hy.corpus build --db .data/corpus/pubg_steam.sqlite3 --target-per-language 500 --batch-size 20 --max-pages 20 --resume
+uv run --env-file backend/.env uvicorn backend.app.main:app --reload --port 8000
+cd frontend && npm install && npm run dev
+```
+
+Steam 코퍼스 생성은 ChatGPT 구독으로 로그인한 Codex CLI를 사용합니다. 생성된 `.data/`는 로컬 시연 자료로만 유지하며 Git에 올리지 않습니다.
+
+프론트엔드 배포 빌드는 `cd frontend && npm run build`로 확인합니다. API 키는 `backend/.env` 내부에만 보관하고 화면, 로그, Git에 남기지 않습니다.
+
 ```text
 .claude/agents/        Claude Code가 읽는 역할 지시문
 ├─ hy.md               정현예 담당
