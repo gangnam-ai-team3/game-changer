@@ -27,7 +27,7 @@ const STEAM_LANGUAGES = [
   { code: 'dutch', label: '네덜란드어' },
   { code: 'turkish', label: '터키어' },
   { code: 'thai', label: '태국어' },
-  { code: 'vi', label: '베트남어' },
+  { code: 'vietnamese', label: '베트남어' },
   { code: 'indonesian', label: '인도네시아어' },
   { code: 'malay', label: '말레이어' },
   { code: 'arabic', label: '아랍어' },

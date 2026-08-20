@@ -83,13 +83,14 @@ function describeEvidenceStatus(evidenceResult) {
     `대상: ${evidenceResult.matchedName}(appid ${evidenceResult.appid}) · 조회한 언어 ${evidenceResult.perLanguage.length}개 · ` +
     `원본 ${evidenceResult.totalRaw}건 → 짧은 리뷰 제거·중복 병합 후 최종 ${evidenceResult.totalFinal}건`;
 
-  const incomplete = evidenceResult.perLanguage.filter((p) => !p.collectionComplete);
-  if (incomplete.length === 0) {
+  // collectionStatus: 'complete' | 'partial'(직전 수집/동기화에 오류 있었음) | 'incomplete'(더 과거 쪽 아직 미수집) | 'unknown'(기록 없음)
+  const notComplete = evidenceResult.perLanguage.filter((p) => p.collectionStatus !== 'complete');
+  if (notComplete.length === 0) {
     return `[근거 준비 상태: 완전 수집] 조회한 모든 언어권의 DB 수집이 이 기간에 대해 완료된 상태입니다. ${base}`;
   }
-  const detail = incomplete.map((p) => p.language).join(', ');
+  const detail = notComplete.map((p) => `${p.language}(${p.collectionStatus})`).join(', ');
   return (
-    `[근거 준비 상태: 일부만 수집됨(미완료)] 다음 언어권은 DB 수집 자체가 아직 이 기간(더 과거 쪽)까지 안 끝났습니다 — ${detail}. ` +
+    `[근거 준비 상태: 일부만 수집됨(미완료/오류/기록없음)] 다음 언어권은 신뢰할 수 없습니다 — ${detail}. ` +
     `지금 있는 게 이 기간의 "전부"라는 보장이 없습니다(hy/collector.js를 더 돌리면 채워집니다). ${base}`
   );
 }

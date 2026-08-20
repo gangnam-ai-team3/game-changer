@@ -28,7 +28,11 @@ const HASH_SALT_PATH = path.join(__dirname, '.hash-salt');
 
 function loadOrCreateHashSalt() {
   try {
-    return fs.readFileSync(HASH_SALT_PATH, 'utf8').trim();
+    const existing = fs.readFileSync(HASH_SALT_PATH, 'utf8').trim();
+    // 형식이 깨진(잘리거나 손상된) salt를 그대로 쓰면 해시가 뒤죽박죽되므로, 64자리 hex가
+    // 아니면 손상된 것으로 보고 새로 만든다(조용히 잘못된 값을 쓰지 않는다).
+    if (/^[0-9a-f]{64}$/.test(existing)) return existing;
+    throw new Error('salt 형식이 올바르지 않음');
   } catch (err) {
     const salt = crypto.randomBytes(32).toString('hex');
     fs.writeFileSync(HASH_SALT_PATH, salt, { mode: 0o600 });
@@ -85,19 +89,54 @@ function jaccardSimilarity(setA, setB) {
   return union === 0 ? 0 : intersection / union;
 }
 
+// 리뷰가 많은 언어(영어 등)에서 전체를 서로 한 번씩 비교(O(n²))하면 너무 느려진다(4,000건이면
+// 약 800만 회 비교). 그래서 먼저 ①완전히 같은 텍스트는 해시로 즉시 병합(O(n))하고, ②남은 건
+// "같은 언어 + 작성 시각 순으로 정렬 후 바로 인접한 N건까지만" 문자 유사도를 비교한다(근접중복은
+// 보통 비슷한 시기에 몰려서 올라오므로, 멀리 떨어진 건까지 비교할 필요가 적다). 그래도 비교 횟수가
+// 상한을 넘으면 truncated=true로 표시하고 중단한다(감으로 자르지 않고, 숫자 상한으로 자름).
+const NEAR_DUP_WINDOW = 50;
+const MAX_COMPARISONS = 200000;
+
+// 완전히 같은 정규화 텍스트끼리 먼저 묶는다 — 이 안에서는 트라이그램 비교가 필요 없다(이미 100% 동일).
+function exactDuplicateGroups(rows) {
+  const byText = new Map();
+  for (const r of rows) {
+    const key = normalizeForSimilarity(r.review);
+    if (!byText.has(key)) byText.set(key, []);
+    byText.get(key).push(r);
+  }
+  const exactPairs = [];
+  for (const group of byText.values()) {
+    for (let i = 1; i < group.length; i += 1) {
+      exactPairs.push({ a: group[0].recommendationid, b: group[i].recommendationid, reason: 'exactMatch' });
+    }
+  }
+  return exactPairs;
+}
+
 // 같은 언어권 안에서만 비교한다(번역돼서 다른 언어로 재게시되는 경우는 범위 밖).
+// 반환값: { pairs, truncated } — truncated=true면 비교 상한에 걸려 일부 근접중복을 못 찾았을 수 있음.
 function findSimilarPairs(rows) {
-  const grams = rows.map((r) => trigramSet(r.review));
+  const sorted = [...rows].sort((a, b) => a.timestamp_created - b.timestamp_created);
+  const grams = sorted.map((r) => trigramSet(r.review));
   const pairs = [];
-  for (let i = 0; i < rows.length; i += 1) {
-    for (let j = i + 1; j < rows.length; j += 1) {
+  let comparisons = 0;
+  let truncated = false;
+  for (let i = 0; i < sorted.length && !truncated; i += 1) {
+    const upper = Math.min(i + 1 + NEAR_DUP_WINDOW, sorted.length);
+    for (let j = i + 1; j < upper; j += 1) {
+      if (comparisons >= MAX_COMPARISONS) {
+        truncated = true;
+        break;
+      }
+      comparisons += 1;
       const sim = jaccardSimilarity(grams[i], grams[j]);
       if (sim >= SIMILARITY_THRESHOLD) {
-        pairs.push({ a: rows[i].recommendationid, b: rows[j].recommendationid, similarity: Math.round(sim * 1000) / 1000 });
+        pairs.push({ a: sorted[i].recommendationid, b: sorted[j].recommendationid, similarity: Math.round(sim * 1000) / 1000 });
       }
     }
   }
-  return pairs;
+  return { pairs, truncated };
 }
 
 // 같은 작성자(해시 기준)가 짧은 시간 안에 또 올린 경우도 중복 후보로 잡는다 — 문자 유사도가 낮아도
@@ -204,27 +243,63 @@ function detectAuthorColumn(db) {
   throw new Error('reviews 테이블에 steamid/author_hash 컬럼이 모두 없습니다 — DB 스키마를 확인하세요.');
 }
 
-// ②③④를 한 언어권에 대해 실행한다.
-function prepareLanguage({ db, appid, language, periodStartMs, periodEndMs, authorColumn }) {
-  const periodStartSec = Math.floor(periodStartMs / 1000);
-  const periodEndSec = Math.floor(periodEndMs / 1000);
+// hy가 지금 수집하는 게임은 PUBG 하나뿐이다. 다른 appid가 들어오면 "리뷰 0건이라 완료됨"처럼
+// 착각하기 쉬운 결과를 주지 않고, 아예 지원하지 않는 대상이라고 명확히 알려준다.
+const SUPPORTED_APPID = 578080;
 
-  const stateStmt = db.prepare('SELECT done FROM collector_state WHERE language = ?');
+// 수집 상태를 단순 boolean이 아니라 네 가지로 구분한다:
+//  - complete   : 이 언어권이 요청 기간까지 완전히 수집됨(또는 이미 끝까지 백필 완료)
+//  - partial    : 지난 수집/동기화 실행에서 오류가 있었음(일부만 믿을 수 있음)
+//  - incomplete : 아직 요청 기간까지 수집이 안 끝남(더 과거 쪽)
+//  - unknown    : 이 언어권에 대한 수집 상태 기록 자체가 없음(한 번도 수집 안 함)
+function computeCollectionStatus({ state, earliestMs, periodStartMs }) {
+  if (!state) return 'unknown';
+  if (state.last_run_had_errors) return 'partial';
+  if (state.done || earliestMs === null || periodStartMs >= earliestMs) return 'complete';
+  return 'incomplete';
+}
+
+// collector_state의 last_run_had_errors 컬럼은 이번 개정에서 새로 추가됐다. collector.js를
+// 아직 다시 안 돌려서 예전 스키마 그대로인 DB(또는 그런 DB로 만든 사본)를 읽기 전용으로 열어도
+// 깨지지 않도록, 있으면 쓰고 없으면 빠진 컬럼 취급(항상 0)한다 — detectAuthorColumn과 같은 패턴.
+function detectCollectorStateHasErrorTracking(db) {
+  const columns = db.prepare('PRAGMA table_info(collector_state)').all().map((c) => c.name);
+  return columns.includes('last_run_had_errors');
+}
+
+// ②③④를 한 언어권에 대해 실행한다.
+function prepareLanguage({ db, appid, language, periodStartMs, periodEndMs, authorColumn, hasErrorTracking }) {
+  const periodStartSec = Math.floor(periodStartMs / 1000);
+  const periodEndSec = Math.floor(periodEndMs / 1000); // 기준일(cutoff) — 이 시각은 포함하지 않는다.
+
+  const stateStmt = db.prepare(
+    hasErrorTracking
+      ? 'SELECT done, last_run_had_errors, last_synced_at FROM collector_state WHERE language = ?'
+      : 'SELECT done, 0 AS last_run_had_errors, last_synced_at FROM collector_state WHERE language = ?'
+  );
   const state = stateStmt.get(language);
-  const done = state ? !!state.done : false;
 
   const earliestStmt = db.prepare('SELECT MIN(timestamp_created) AS minTs FROM reviews WHERE appid = ? AND language = ?');
   const earliest = earliestStmt.get(appid, language);
-  const coveredFromMs = earliest.minTs !== null ? earliest.minTs * 1000 : null;
-  const collectionComplete = done || coveredFromMs === null || periodStartMs >= coveredFromMs;
+  const earliestMs = earliest.minTs !== null ? earliest.minTs * 1000 : null;
+  const collectionStatus = computeCollectionStatus({ state, earliestMs, periodStartMs });
+  // 완료 판단의 근거가 된 값들을 그대로 노출한다(문서 3.6) — 호출하는 쪽이 "언제 기준으로 이 상태인지"
+  // 직접 확인할 수 있게.
+  const oldestReachedAt = earliestMs === null ? null : new Date(earliestMs).toISOString();
+  const lastSyncedAt = state && state.last_synced_at ? new Date(state.last_synced_at).toISOString() : null;
+  const snapshotAt = new Date().toISOString();
 
+  // 기준일(cutoff) 보호: 시작은 포함(>=)하되 기준일 자체는 제외(<)한다. 작성일뿐 아니라 수정일도
+  // 기준일 이후면 제외한다(원래 더 이전에 써놓고 기준일 지나서 고친 리뷰가 섞여 들어가지 않도록).
   const selectStmt = db.prepare(
-    `SELECT recommendationid, language, review, voted_up, timestamp_created, ${authorColumn}, playtime_forever_minutes
+    `SELECT recommendationid, language, review, voted_up, timestamp_created, timestamp_updated, ${authorColumn}, playtime_forever_minutes
      FROM reviews
-     WHERE appid = ? AND language = ? AND timestamp_created BETWEEN ? AND ?
+     WHERE appid = ? AND language = ?
+       AND timestamp_created >= ? AND timestamp_created < ?
+       AND (timestamp_updated IS NULL OR timestamp_updated < ?)
      ORDER BY timestamp_created DESC`
   );
-  const rawRows = selectStmt.all(appid, language, periodStartSec, periodEndSec).map((r) => ({
+  const rawRows = selectStmt.all(appid, language, periodStartSec, periodEndSec, periodEndSec).map((r) => ({
     recommendationid: r.recommendationid,
     // steamid 원본이면 여기서 해시로 치환, 이미 author_hash(비식별화 사본 DB)면 그대로 사용
     authorHash: authorColumn === 'steamid' ? hashAuthor(r.steamid) : r.author_hash,
@@ -239,19 +314,26 @@ function prepareLanguage({ db, appid, language, periodStartMs, periodEndMs, auth
   const longEnough = rawRows.filter((r) => normalizeForSimilarity(r.review).length >= minLen);
   const tooShortRemoved = rawRows.length - longEnough.length;
 
-  // 중복 판정 두 가지를 합친다: ① 텍스트 유사도 90%+ ② 같은 작성자(해시)가 시간창 이내 재게시
-  const similarPairs = findSimilarPairs(longEnough);
+  // 중복 판정 세 가지를 합친다: ① 완전 동일 텍스트(해시, O(n)) ② 텍스트 유사도 90%+(제한된 인접 구간만)
+  // ③ 같은 작성자(해시)가 시간창 이내 재게시
+  const exactPairs = exactDuplicateGroups(longEnough);
+  const { pairs: similarPairs, truncated } = findSimilarPairs(longEnough);
   const authorPairs = findAuthorTimeWindowPairs(longEnough);
-  const merged = mergeDuplicates(longEnough, similarPairs.concat(authorPairs));
+  const merged = mergeDuplicates(longEnough, exactPairs.concat(similarPairs, authorPairs));
   const evidence = merged.map((item) => ({ ...item, vector: vectorize(item.review) }));
 
   return {
     language,
-    collectionComplete,
+    collectionStatus,
+    appId: appid,
+    oldestReachedAt,
+    lastSyncedAt,
+    snapshotAt,
     rawInPeriod: rawRows.length,
     tooShortRemoved,
     duplicatesMerged: longEnough.length - merged.length,
     finalCount: evidence.length,
+    dedupTruncated: truncated,
     evidence,
   };
 }
@@ -260,11 +342,19 @@ function prepareLanguage({ db, appid, language, periodStartMs, periodEndMs, auth
 // dbPath를 안 주면 원본 로컬 DB를 쓰고, 비식별화 사본(export-anon-db.js가 만든 것)의 경로를 주면 그걸 대신 조회한다 —
 // 둘 다 같은 방식으로 자유롭게 기간/언어를 바꿔가며 반복 조회할 수 있다.
 async function prepareEvidence({ gameName, periodStartMs, periodEndMs, languages, dbPath }) {
+  if (!(Number.isFinite(periodStartMs) && Number.isFinite(periodEndMs) && periodStartMs < periodEndMs)) {
+    return { found: false, error: '조회 시작일이 종료일(기준일)보다 늦거나 같습니다.' };
+  }
+
   const resolved = await resolveSteamAppId(gameName);
   if (!resolved) {
     return { found: false, gameName };
   }
   const { appid, matchedName } = resolved;
+
+  if (appid !== SUPPORTED_APPID) {
+    return { found: false, gameName, matchedName, appid, error: '지원하지 않는 게임입니다(현재 PUBG: BATTLEGROUNDS만 수집함).' };
+  }
 
   const db = openReadOnlyDb(dbPath);
   if (!db) {
@@ -273,24 +363,44 @@ async function prepareEvidence({ gameName, periodStartMs, periodEndMs, languages
 
   try {
     const authorColumn = detectAuthorColumn(db);
+    const hasErrorTracking = detectCollectorStateHasErrorTracking(db);
     const targetLanguages =
       Array.isArray(languages) && languages.length > 0
         ? languages.filter((code) => STEAM_LANGUAGE_CODES.includes(code))
         : STEAM_LANGUAGE_CODES;
 
     const perLanguage = targetLanguages.map((language) =>
-      prepareLanguage({ db, appid, language, periodStartMs, periodEndMs, authorColumn })
+      prepareLanguage({ db, appid, language, periodStartMs, periodEndMs, authorColumn, hasErrorTracking })
     );
 
     const evidence = perLanguage.flatMap((p) => p.evidence);
-    const summary = perLanguage.map(({ language, collectionComplete, rawInPeriod, tooShortRemoved, duplicatesMerged, finalCount }) => ({
-      language,
-      collectionComplete,
-      rawInPeriod,
-      tooShortRemoved,
-      duplicatesMerged,
-      finalCount,
-    }));
+    const summary = perLanguage.map(
+      ({
+        language,
+        collectionStatus,
+        appId,
+        oldestReachedAt,
+        lastSyncedAt,
+        snapshotAt,
+        rawInPeriod,
+        tooShortRemoved,
+        duplicatesMerged,
+        finalCount,
+        dedupTruncated,
+      }) => ({
+        language,
+        collectionStatus,
+        appId,
+        oldestReachedAt,
+        lastSyncedAt,
+        snapshotAt,
+        rawInPeriod,
+        tooShortRemoved,
+        duplicatesMerged,
+        finalCount,
+        dedupTruncated,
+      })
+    );
 
     return {
       found: true,
@@ -309,13 +419,18 @@ async function prepareEvidence({ gameName, periodStartMs, periodEndMs, languages
 module.exports = {
   prepareEvidence,
   findSimilarPairs,
+  exactDuplicateGroups,
   findAuthorTimeWindowPairs,
   mergeDuplicates,
   vectorize,
   hashAuthor,
   detectAuthorColumn,
   minTextLengthFor,
+  computeCollectionStatus,
   CJK_MIN_TEXT_LENGTH,
   DEFAULT_MIN_TEXT_LENGTH,
   AUTHOR_TIME_WINDOW_SECONDS,
+  NEAR_DUP_WINDOW,
+  MAX_COMPARISONS,
+  SUPPORTED_APPID,
 };

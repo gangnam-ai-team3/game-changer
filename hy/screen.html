@@ -465,7 +465,7 @@
     { code: 'dutch', label: '네덜란드어' },
     { code: 'turkish', label: '터키어' },
     { code: 'thai', label: '태국어' },
-    { code: 'vi', label: '베트남어' },
+    { code: 'vietnamese', label: '베트남어' },
     { code: 'indonesian', label: '인도네시아어' },
     { code: 'malay', label: '말레이어' },
     { code: 'arabic', label: '아랍어' },
@@ -542,9 +542,11 @@
       header.type = 'button';
       header.className = 'accordion-header';
       var langName = LANG_LABEL[p.language] || p.language;
+      var STATUS_LABEL = { complete: '', partial: '⚠️ 일부 오류(재확인 필요)', incomplete: '⚠️ 수집 미완료', unknown: '⚠️ 수집 기록 없음' };
+      var statusText = STATUS_LABEL[p.collectionStatus] || '';
       header.innerHTML = '<span class="accordion-arrow">▸</span>' +
         '<span>' + langName + ' 총 ' + p.finalCount + '건</span>' +
-        (p.collectionComplete ? '' : '<span class="accordion-warning">⚠️ 수집 미완료</span>');
+        (statusText ? '<span class="accordion-warning">' + statusText + '</span>' : '');
 
       var body = document.createElement('div');
       body.className = 'accordion-body';
@@ -570,11 +572,9 @@
             metaLine.className = 'evidence-meta';
             var date = new Date(r.timestamp_created * 1000).toISOString().slice(0, 10);
             metaLine.textContent = date + ' · ' + (r.voted_up ? '추천' : '비추천') + (r.duplicateCount > 1 ? ' · 중복 ' + r.duplicateCount + '건 병합' : '');
-            var textLine = document.createElement('div');
-            textLine.className = 'evidence-text';
-            textLine.textContent = r.review;
+            // 리뷰 원문은 서버가 HTTP 응답에 안 담아 보낸다(로컬 원문 DB 밖으로 안 나가게 하는 원칙) —
+            // 화면에는 메타 정보만 표시한다. 원문을 직접 보려면 로컬 DB를 조회한다.
             row.appendChild(metaLine);
-            row.appendChild(textLine);
             body.appendChild(row);
           });
         }
