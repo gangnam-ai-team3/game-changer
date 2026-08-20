@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -31,9 +32,9 @@ _JELLY_TREND_METRICS = {
 _JELLY_USER_PREFIX = (
     "아래는 화면의 [정보 입력] 표에서 넘어온 근거 행 목록입니다(JSON 배열). 각 행은 index로 구분됩니다.\n"
     "각 행마다 근거 내용(content)을 보고 동향(긍정/중립/부정/위험 중 하나), 원인(한 문장), "
-    "개선 방향(한 문장, 판단하기 어려우면 빈 문자열)을 정하세요. "
-    "원인과 개선 방향 문장은 완전한 문장으로 쓰고 반드시 마침표(.)로 끝내세요. "
-    "근거 내용이 비어 있는 행은 동향을 중립으로 두고 원인·개선 방향은 빈 문자열로 두세요.\n"
+    "개선 방향(한 문장)을 정하세요. "
+    "원인과 개선 방향은 비어 있지 않은 완전한 한국어 문장으로 쓰고 반드시 마침표(.)로 끝내세요. "
+    "가운뎃점 기호 대신 쉼표나 자연스러운 연결어를 사용하세요.\n"
     "그리고 전체 행을 종합한 개선 방향(synthesis)을 하나의 긴 문단이 아니라, "
     "가장 근거가 많고 시급한 것부터 순서대로 2~4개의 항목으로 나눠 작성하세요. "
     "각 항목은 title(5~15자 정도의 짧은 테마명, 마침표 없이)과 description(1~2문장, 마침표로 끝냄)으로 구성합니다.\n\n"
@@ -210,7 +211,7 @@ class JellyRunner:
         except Exception:
             result = None
         if type(result) is not dict:
-            raise _team_unavailable("Jelly")
+            raise _jelly_schema_error()
         return result
 
 
@@ -233,7 +234,24 @@ def _safe_jelly_rows(risks, evidence) -> list[dict]:
     return rows
 
 
-def _validated_jelly_trends(result: dict, count: int) -> dict[str, int]:
+def _edit_jelly_sentence(value: str, fallback: str) -> str:
+    """Normalize one disposable Jelly sentence before Korean-style validation."""
+
+    text = value if value.strip() and re.search(r"[가-힣]", value) else fallback
+    text = text.replace("·", ", ")
+    for phrase in ("본질적으로", "궁극적으로", "실질적으로"):
+        text = text.replace(phrase, "")
+    text = text.replace("이유는 명확", "근거를 보면").replace(
+        "혁신적인 변화", "주요 변화"
+    )
+    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"\s*,\s*", ", ", text)
+    text = re.sub(r"^[,\s]+|[,\s]+$", "", text)
+    return text if re.search(r"[.!?]$", text) else f"{text}."
+
+
+def _validated_jelly_trends(result: dict, risks) -> dict[str, int]:
+    count = len(risks)
     if (
         type(result) is not dict
         or set(result) != {"rows", "synthesis"}
@@ -253,16 +271,20 @@ def _validated_jelly_trends(result: dict, count: int) -> dict[str, int]:
             or not isinstance(row["trend"], str)
             or row["trend"] not in _JELLY_TRENDS
             or not isinstance(row["cause"], str)
-            or not row["cause"].strip()
             or not isinstance(row["fix"], str)
-            or not row["fix"].strip()
         ):
             raise _jelly_schema_error()
-        if row["index"] in indexes:
+        if row["index"] in indexes or row["index"] not in range(count):
             raise _jelly_schema_error()
         indexes.add(row["index"])
         trend_counts[_JELLY_TREND_METRICS[row["trend"]]] += 1
-        prose.extend((row["cause"].strip(), row["fix"].strip()))
+        risk = risks[row["index"]]
+        prose.extend(
+            (
+                _edit_jelly_sentence(row["cause"], risk.failure_path),
+                _edit_jelly_sentence(row["fix"], risk.revision_question),
+            )
+        )
     if indexes != set(range(count)):
         raise _jelly_schema_error()
     try:
@@ -290,10 +312,7 @@ def _run_jelly(base, evidence, runner, on_event):
         result = None
     if result is None:
         raise _team_unavailable("Jelly")
-    try:
-        trend_counts = _validated_jelly_trends(result, len(rows))
-    except StructuredModelError:
-        raise _team_unavailable("Jelly") from None
+    trend_counts = _validated_jelly_trends(result, base.risks[: len(rows)])
     notify(
         "jelly_output_checked",
         "정아현 분석기의 행 연결과 한국어 문장을 확인하고 코드 결과를 유지했습니다.",

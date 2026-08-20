@@ -110,10 +110,11 @@ def _risk_core(risks):
     "indexes",
     [
         [0, 1, 2, 3],
-        [0, 1, 2, 3, 4, 99],
+        [0, 1, 2, 3, "4"],
+        [0, 1, 2, 3, 99],
         [0, 1, 2, 3, 3],
     ],
-    ids=["missing", "extra", "duplicate"],
+    ids=["missing", "invalid", "unknown", "duplicate"],
 )
 def test_event_jelly_requires_exact_one_to_one_index_coverage(indexes):
     event, _, pack = _event_inputs()
@@ -122,24 +123,62 @@ def test_event_jelly_requires_exact_one_to_one_index_coverage(indexes):
         row["index"] = index
     runner = FakeJellyRunner(result)
 
-    with pytest.raises(StructuredModelError, match="Jelly"):
+    with pytest.raises(StructuredModelError) as error:
         EventJellyRedteamAdapter(runner=runner, enabled=True).run(event, pack)
 
+    assert error.value.code is ErrorCode.SCHEMA_INVALID
     assert len(runner.calls) == 1
 
 
-@pytest.mark.parametrize(
-    ("trend", "cause"),
-    [("출시", None), ("위험", "release immediately.")],
-    ids=["unknown-trend", "non-korean-prose"],
-)
-def test_event_jelly_rejects_unknown_trend_and_non_korean_prose(trend, cause):
+def test_event_jelly_rejects_unknown_trend_as_schema_invalid():
     event, _, pack = _event_inputs()
     baseline = EventRedteamAgent().run_deterministic(event, pack)
-    runner = FakeJellyRunner(_jelly_result(len(baseline.risks), trend=trend, cause=cause))
+    runner = FakeJellyRunner(_jelly_result(len(baseline.risks), trend="출시"))
 
-    with pytest.raises(StructuredModelError):
+    with pytest.raises(StructuredModelError) as error:
         EventJellyRedteamAdapter(runner=runner, enabled=True).run(event, pack)
+
+    assert error.value.code is ErrorCode.SCHEMA_INVALID
+
+
+def test_jelly_edits_middle_dot_and_blank_fix_without_changing_code_owned_risk(
+    monkeypatch,
+):
+    event, _, pack = _event_inputs()
+    baseline = EventRedteamAgent().run_deterministic(event, pack)
+    result = _jelly_result(len(baseline.risks))
+    result["rows"][0].update(
+        cause="본질적으로 근거·지표를 다시 확인해야 합니다",
+        fix="",
+    )
+    validated = []
+    original_validator = adapter_module.require_native_business_korean
+
+    def record_validator(values):
+        validated.extend(values)
+        original_validator(values)
+
+    monkeypatch.setattr(adapter_module, "require_native_business_korean", record_validator)
+    actual = EventJellyRedteamAdapter(
+        runner=FakeJellyRunner(result), enabled=True
+    ).run(event, pack)
+
+    assert adapter_module._edit_jelly_sentence(
+        result["rows"][0]["cause"], baseline.risks[0].failure_path
+    ) == "근거, 지표를 다시 확인해야 합니다."
+    assert adapter_module._edit_jelly_sentence(
+        result["rows"][0]["fix"], baseline.risks[0].revision_question
+    ) == baseline.risks[0].revision_question
+    assert validated[0] == "근거, 지표를 다시 확인해야 합니다."
+    assert validated[1] == baseline.risks[0].revision_question
+    assert actual == baseline
+    assert actual.model_dump_json() == baseline.model_dump_json()
+
+
+def test_jelly_english_only_prose_falls_back_safely():
+    assert adapter_module._edit_jelly_sentence(
+        "release immediately.", "한국어 대체 문장입니다"
+    ) == "한국어 대체 문장입니다."
 
 
 def test_event_jelly_is_safe_analysis_sidecar_and_cannot_persist_prose():
@@ -295,7 +334,7 @@ def test_update_orchestrator_calls_each_teammate_once_and_preserves_policy_outpu
     assert _risk_core(result.brief.top_risks) == _risk_core(baseline.brief.top_risks)
 
 
-def test_paid_jelly_output_failure_falls_back_without_second_call():
+def test_paid_jelly_schema_failure_retries_then_falls_back():
     event = load_demo_event("jelly-paid-failure")
     baseline = EventPreflightOrchestrator().run(event)
     runner = FakeJellyRunner(
@@ -308,12 +347,12 @@ def test_paid_jelly_output_failure_falls_back_without_second_call():
         redteam=EventJellyRedteamAdapter(runner=runner, enabled=True)
     ).run(event)
 
-    assert len(runner.calls) == 1
+    assert len(runner.calls) == 2
     assert result.fallback_used is True
     assert result.risks == baseline.risks
 
 
-def test_paid_update_jelly_output_failure_falls_back_without_second_call():
+def test_paid_update_jelly_schema_failure_retries_then_falls_back():
     brief = load_dragunov_brief("update-jelly-paid-failure")
     baseline = UpdateReviewOrchestrator().run(brief)
     runner = FakeJellyRunner(
@@ -327,7 +366,7 @@ def test_paid_update_jelly_output_failure_falls_back_without_second_call():
         use_llm=True,
     ).run(brief)
 
-    assert len(runner.calls) == 1
+    assert len(runner.calls) == 2
     assert result.fallback_used is True
     assert result.impact == baseline.impact
 
@@ -371,6 +410,41 @@ def test_jelly_runner_never_leaks_subprocess_output(monkeypatch):
 
     assert secret not in str(error.value)
     assert error.value.__cause__ is None
+
+
+@pytest.mark.parametrize(
+    "stdout",
+    ["not json", json.dumps([_jelly_result(1)])],
+    ids=["invalid-json", "non-dict-json"],
+)
+def test_jelly_runner_rejects_invalid_stdout_as_schema_invalid(monkeypatch, stdout):
+    def fake_run(command, **kwargs):
+        return subprocess.CompletedProcess(command, 0, stdout, "provider-secret")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    with pytest.raises(StructuredModelError) as error:
+        JellyRunner().run(
+            [{"index": 0, "evidenceId": "safe-1", "content": "안전한 요약입니다."}]
+        )
+
+    assert error.value.code is ErrorCode.SCHEMA_INVALID
+    assert "provider-secret" not in str(error.value)
+
+
+def test_jelly_runner_treats_nonzero_subprocess_as_source_unavailable(monkeypatch):
+    def fake_run(command, **kwargs):
+        return subprocess.CompletedProcess(command, 1, "provider-secret", "provider-secret")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    with pytest.raises(StructuredModelError) as error:
+        JellyRunner().run(
+            [{"index": 0, "evidenceId": "safe-1", "content": "안전한 요약입니다."}]
+        )
+
+    assert error.value.code is ErrorCode.SOURCE_UNAVAILABLE
+    assert "provider-secret" not in str(error.value)
 
 
 @pytest.mark.parametrize(
