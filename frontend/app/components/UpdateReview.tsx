@@ -3,6 +3,7 @@
 import { ChangeEvent, FormEvent, useState } from "react";
 
 import { AgentEvent, AgentPipeline } from "./AgentPipeline";
+import { LanguageGameCard, PersonaGameCard } from "./AudienceCards";
 import { businessKorean, businessKoreanJson } from "./businessKorean";
 import { corpusDemoDates, isFutureUtcDate } from "./corpusDemoDates";
 import { DecisionReport, DecisionReportData } from "./DecisionReport";
@@ -73,6 +74,9 @@ type SplitCondition = {
 type PersonaImpact = {
   persona: string;
   expected_reaction: string;
+  positive_signal_ids: string[];
+  negative_signal_ids: string[];
+  split_signal_ids: string[];
   evidence_ids: string[];
   confidence: number;
 };
@@ -148,16 +152,9 @@ type UpdateForm = {
 
 const decisionLabels: Record<string, string> = {
   Go: "출시 가능",
-  Revise: "일부 수정 후 출시",
+  Revise: "수정 후 재검토",
   Test: "테스트 후 출시",
   Hold: "판정 보류",
-};
-
-const decisionDescriptions: Record<string, string> = {
-  Go: "현재 근거와 검증 지표를 바탕으로 출시를 준비할 수 있습니다.",
-  Revise: "출시 전에 우선 위험을 줄이는 수정이 필요합니다.",
-  Test: "제한된 테스트 또는 검증 지표 확인 후 출시를 판단합니다.",
-  Hold: "외부 자료 또는 입력이 충분하지 않아 출시 판단을 보류합니다.",
 };
 
 const updateTypeLabels: Record<UpdateType, string> = {
@@ -179,6 +176,40 @@ const personaLabels: Record<string, string> = {
   value_seeking_free_low_spend: "가성비를 중시하는 이용자",
   collector_high_engagement: "수집을 즐기는 이용자",
   core_combat_first: "전투 경험을 우선하는 이용자",
+};
+
+const periodLabels: Record<string, string> = {
+  before: "출시 전 자료",
+  comparable_reference: "유사 사례 비교 자료",
+  after: "출시 후 실제 반응",
+};
+
+const sentimentLabels: Record<string, string> = {
+  positive: "긍정",
+  negative: "우려",
+  mixed: "혼합",
+  neutral: "중립",
+};
+
+const mechanismLabels: Record<string, string> = {
+  predictability: "결과 예측 가능성",
+  skill_fairness: "실력 반영 공정성",
+  balance_regression: "전투 밸런스 재확인",
+  fairness_regression: "이용 조건별 공정성",
+  validation_needed: "설명과 실제 성능 검증",
+  information_clarity: "변경 정보 명확성",
+  flow_disruption: "이용 흐름 방해",
+  rule_exception: "예외 규칙 일관성",
+  learning_burden: "새 규칙 학습 부담",
+};
+
+const sourceLabels: Record<string, string> = {
+  steam: "Steam",
+  x: "X",
+  reddit_import: "승인된 Reddit 자료",
+  threads_import: "승인된 Threads 자료",
+  instagram_import: "승인된 Instagram 자료",
+  synthetic: "검증된 저장 자료",
 };
 
 const initial: UpdateForm = {
@@ -652,6 +683,7 @@ export function UpdateReview({
   const [form, setForm] = useState<UpdateForm>(initial);
   const [sourceMode, setSourceMode] = useState<SourceMode>("fixture");
   const [steamAppId, setSteamAppId] = useState("578080");
+  const [useSteam, setUseSteam] = useState(true);
   const [useX, setUseX] = useState(false);
   const [xQuery, setXQuery] = useState("PUBG Dragunov damage");
   const [periodStart, setPeriodStart] = useState("2026-08-06T00:00");
@@ -674,9 +706,6 @@ export function UpdateReview({
 
   const selectUpdateType = (next: UpdateType) => {
     setForm((previous) => ({ ...previous, update_type: next }));
-    if (next !== "weapon_balance" && sourceMode === "fixture") {
-      setSourceMode("live");
-    }
     setResult(null);
     setError("");
   };
@@ -722,6 +751,10 @@ export function UpdateReview({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (runBlocked) {
+      setError("다른 점검이 실행 중입니다. 완료된 뒤 시작해 주세요.");
+      return;
+    }
     if (!form.cutoff_on || !form.planned_on) {
       setError("자료 기준일과 출시 예정일을 모두 입력해 주세요.");
       return;
@@ -734,12 +767,24 @@ export function UpdateReview({
       setError("사전 구축 코퍼스를 사용하려면 자료 기준일을 오늘(UTC)보다 뒤로 설정해 주세요.");
       return;
     }
+    if (sourceMode === "fixture" && form.update_type !== "weapon_balance") {
+      setError("이 업데이트 유형의 저장 사례는 준비 중입니다. 실시간 갱신 또는 승인 CSV를 선택해 주세요.");
+      return;
+    }
     if (sourceMode === "import" && !csvData) {
       setError("승인 CSV 파일을 선택해 주세요.");
       return;
     }
-    if (sourceMode === "live" && !steamAppId && !useX) {
-      setError("Steam 앱 ID 또는 X 검색 중 하나를 선택해 주세요.");
+    if (sourceMode === "live" && !useSteam && !useX) {
+      setError("Steam 또는 X 중 하나 이상을 선택해 주세요.");
+      return;
+    }
+    if (sourceMode === "live" && useSteam && (!steamAppId || Number(steamAppId) < 1)) {
+      setError("올바른 Steam 앱 ID를 입력해 주세요.");
+      return;
+    }
+    if (sourceMode === "live" && useX && !xQuery.trim()) {
+      setError("X 검색어를 입력해 주세요.");
       return;
     }
 
@@ -750,7 +795,9 @@ export function UpdateReview({
       return;
     }
 
+    const requestSubject = form.update_name.trim() || "이름 없는 업데이트";
     setLoading(true);
+    onRunningChange?.(true);
     setError("");
     setResult(null);
     setEvents([]);
@@ -773,7 +820,8 @@ export function UpdateReview({
         details: updateDetails(form),
         source_mode: sourceMode,
         fixture_case: "dragunov_random_damage_removal",
-        steam_app_id: sourceMode === "live" && steamAppId ? Number(steamAppId) : null,
+        steam_app_id:
+          sourceMode === "live" && useSteam ? Number(steamAppId) : null,
         use_x: sourceMode === "live" ? useX : false,
         x_query:
           sourceMode === "live" && xQuery.trim()
@@ -829,32 +877,12 @@ export function UpdateReview({
       setError(caught instanceof Error ? caught.message : "업데이트 점검을 실행할 수 없습니다.");
     } finally {
       setLoading(false);
+      onRunningChange?.(false);
     }
   }
 
-  const actualAfter = result?.brief.evidence.filter((item) => item.period === "after") ?? [];
-  const decision = result ? decisionLabels[result.brief.decision] ?? result.brief.decision : "";
-  const visibleLanguages = result?.brief.language_insights.filter((item) => item.conclusion) ?? [];
-  const primaryPositive = result?.brief.expected_positive[0];
-  const primaryNegative = result?.brief.expected_negative[0];
-  const primaryRisk = result?.brief.top_risks[0];
-  const primaryRecommendation = result?.brief.recommendations
-    .slice()
-    .sort((left, right) => left.priority - right.priority)[0];
-
   return (
     <section className="update-review" aria-label="업데이트 점검">
-      <div className="update-heading">
-        <p className="eyebrow">
-          <i /> 게임체인저 / 출시 전 업데이트 점검
-        </p>
-        <h2>변경안의 예상 반응과 출시 조건을 점검합니다.</h2>
-        <p>
-          변경 내용을 기준으로 예상되는 긍정 반응과 우려 반응, 검증 지표, 출시 판단을 한 화면에서
-          확인합니다.
-        </p>
-      </div>
-
       <form onSubmit={submit}>
         <section className="form-card">
           <header>
@@ -1075,17 +1103,18 @@ export function UpdateReview({
             </div>
           </header>
           <div className="source-mode-grid" role="group" aria-label="업데이트 자료 출처">
-            {form.update_type === "weapon_balance" && (
-              <button
-                type="button"
-                className="source-mode"
-                aria-pressed={sourceMode === "fixture"}
-                onClick={() => selectSourceMode("fixture")}
-              >
-                <strong>검증된 저장 데이터</strong>
-                <span>Dragunov 합성 비교 자료로 안정적으로 시연합니다.</span>
-              </button>
-            )}
+            <button
+              type="button"
+              className="source-mode"
+              aria-pressed={sourceMode === "fixture"}
+              disabled={form.update_type !== "weapon_balance"}
+              onClick={() => selectSourceMode("fixture")}
+            >
+              <strong>검증된 저장 데이터</strong>
+              <span>{form.update_type === "weapon_balance"
+                ? "Dragunov 합성 비교 자료로 안정적으로 시연합니다."
+                : "이 업데이트 유형의 저장 사례는 준비 중입니다."}</span>
+            </button>
             <button
               type="button"
               className="source-mode"
@@ -1204,23 +1233,24 @@ export function UpdateReview({
               checked={useClaude}
               onChange={(event) => setUseClaude(event.target.checked)}
             />
-            <span>{sourceMode === "corpus" ? "팀 에이전트로 추가 검증" : "Claude로 한국어 설명 보강"}</span>
+            <span>{sourceMode === "corpus" ? "팀 에이전트로 추가 검증" : "Claude로 설명 보강"}</span>
             <small>
               {sourceMode === "corpus"
                 ? useClaude
-                  ? "정아현(Jelly) 위험 점검과 승진배 근거 검증 에이전트를 Claude로 실행합니다."
-                  : "저장된 코퍼스와 코드 정책만 사용하며 두 에이전트의 Claude 호출은 생략합니다."
+                  ? "유주심 에이전트가 Haiku로 이용자 유형별 문구를 정리하고, 정아현(Jelly) 위험 점검과 승진배 근거 검증 에이전트는 Sonnet 5로 실행됩니다."
+                  : "저장된 코퍼스와 코드 정책만 사용하며 페르소나 문구 정리와 두 팀 에이전트의 Claude 호출은 생략합니다."
                 : useClaude
-                  ? "근거 ID, 위험, 최종 판정은 코드 정책으로 다시 검증합니다."
-                  : "결정론적 분석 경로만 실행합니다."}
+                  ? "근거 연결과 최종 판정은 코드 정책으로 다시 검증합니다."
+                  : "코드 정책만으로 점검합니다."}
             </small>
           </label>
           <p className="prelaunch-notice">
-            출시 전 예상이며 실제 이용자 반응이 아닙니다. API 키를 입력하거나 저장하지 않으며,
-            자료 원문도 결과 화면에 표시하지 않습니다.
+            출시 전 예상이며 실제 이용자 반응이나 출시 후 성과를 의미하지 않습니다.
+            {sourceMode === "fixture" && " 저장 자료는 합성 비교 사례입니다."}
+            {" "}API 키와 자료 원문은 화면에 표시하거나 저장하지 않습니다.
           </p>
-          <button className="primary" disabled={loading}>
-            {loading ? "업데이트 점검 중..." : "출시 전 업데이트 점검 시작"}
+          <button className="primary" disabled={loading || runBlocked}>
+            {loading ? "업데이트 점검 중..." : runBlocked ? "다른 점검 실행 중" : "업데이트 점검 시작"}
           </button>
           {error && (
             <p className="error" role="alert">
