@@ -721,11 +721,12 @@ def test_jelly_budget_enforces_actual_input_cap_before_process(monkeypatch):
     assert process_calls == []
 
 
-def test_jinbae_budget_rejects_output_cap_below_real_judge_request():
+@pytest.mark.parametrize("max_tokens", [511, 1023])
+def test_jinbae_budget_rejects_output_cap_below_real_judge_request(max_tokens):
     messages = FakeAsyncMessages(
         {"verdict": "grounded", "citations": ["safe-1"], "rationale": "근거가 있습니다."}
     )
-    budget = ClaudeBudget(max_tokens=511, max_usd=100)
+    budget = ClaudeBudget(max_tokens=max_tokens, max_usd=100)
 
     with pytest.raises(StructuredModelError) as error:
         JinbaeProbe(client=SimpleNamespace(messages=messages), budget=budget).run(
@@ -736,6 +737,31 @@ def test_jinbae_budget_rejects_output_cap_below_real_judge_request():
     assert error.value.code is ErrorCode.BUDGET_EXCEEDED
     assert budget.requests == 0
     assert messages.calls == []
+
+
+def test_jinbae_budget_accepts_exact_real_judge_request(monkeypatch):
+    citations = [f"safe-{index}" for index in range(12)]
+    messages = FakeAsyncMessages(
+        {
+            "verdict": "grounded",
+            "citations": citations,
+            "rationale": "열두 근거가 모두 위험 판정을 뒷받침합니다.",
+        }
+    )
+    budget = ClaudeBudget(max_tokens=1024, max_usd=100)
+    monkeypatch.setenv("CLAUDE_AUDIT_MODEL", "claude-sonnet-5")
+
+    result = JinbaeProbe(
+        client=SimpleNamespace(messages=messages), budget=budget
+    ).run(
+        "코드 소유 위험 분류를 확인합니다.",
+        [{"id": citation, "text": f"안전한 근거 {citation}입니다."} for citation in citations],
+    )
+
+    assert result["citations"] == citations
+    assert result["rationale"]
+    assert budget.requests == 1
+    assert len(messages.calls) == 1
 
 
 def test_jinbae_probe_rejects_unknown_citation_in_one_call(monkeypatch):

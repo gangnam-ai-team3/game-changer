@@ -15,7 +15,7 @@ from agents.structured import (
     require_native_business_korean,
 )
 from contracts import ErrorCode
-from seungjinbae.app.judge import JUDGE_TOOL, judge_claim
+from seungjinbae.app.judge import JUDGE_MAX_TOKENS, JUDGE_TOOL, judge_claim
 from update_review.audit import UpdateAuditAgent
 from update_review.redteam import UpdateRedteamAgent
 
@@ -406,7 +406,7 @@ class JinbaeProbe:
         supplied_ids = [chunk["id"] for chunk in candidate_chunks]
         if len(supplied_ids) != len(set(supplied_ids)):
             raise _jinbae_schema_error()
-        if self.budget.max_tokens < 512:
+        if self.budget.max_tokens < JUDGE_MAX_TOKENS:
             raise StructuredModelError(
                 ErrorCode.BUDGET_EXCEEDED,
                 "승진배 근거 판정기 출력 토큰 예산이 부족합니다.",

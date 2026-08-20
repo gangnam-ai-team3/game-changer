@@ -151,7 +151,7 @@ class _FakeAnthropicMessages:
         self._claims = claims
         self._judge_responses = judge_responses
 
-    async def create(self, *, model, max_tokens, tools, tool_choice, messages):
+    async def create(self, *, model, max_tokens, tools, tool_choice, messages, thinking=None):
         tool_name = tool_choice["name"]
         if tool_name == "extract_claims":
             block = SimpleNamespace(
@@ -159,6 +159,7 @@ class _FakeAnthropicMessages:
             )
             return SimpleNamespace(content=[block], stop_reason="tool_use")
         assert tool_name == "judge_claim"
+        assert thinking == {"type": "disabled"}
         prompt = messages[0]["content"]
         for claim_text, tool_input in self._judge_responses.items():
             if f"Claim: {claim_text}" in prompt:

@@ -1,6 +1,7 @@
 import asyncio
 
 VALID_VERDICTS = {"grounded", "not_grounded", "partially_grounded"}
+JUDGE_MAX_TOKENS = 1024
 
 JUDGE_TOOL = {
     "name": "judge_claim",
@@ -56,7 +57,8 @@ async def judge_claim(
         try:
             message = await client.messages.create(
                 model=model,
-                max_tokens=512,
+                max_tokens=JUDGE_MAX_TOKENS,
+                thinking={"type": "disabled"},
                 tools=[JUDGE_TOOL],
                 tool_choice={"type": "tool", "name": "judge_claim"},
                 messages=[{"role": "user", "content": prompt}],
