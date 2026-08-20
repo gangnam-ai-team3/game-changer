@@ -1,2 +1,12 @@
 .env
 .data/
+
+# Hy local raw data and secrets: never commit or share
+hy/steam-reviews.db
+hy/steam-reviews.db-wal
+hy/steam-reviews.db-shm
+hy/steam-reviews.db-journal
+hy/steam-reviews.anon.db
+hy/.hash-salt
+hy/.evidence-key
+*.evidence-key

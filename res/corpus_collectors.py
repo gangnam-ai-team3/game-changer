@@ -19,7 +19,7 @@ from contracts import (
     SearchRecord,
     SourceType,
 )
-from hy.corpus import CorpusBuildError, CorpusRecord, corpus_status, search_corpus
+from res.corpus import CorpusBuildError, CorpusRecord, corpus_status, search_corpus
 from update_review.contracts import (
     EvidencePeriod,
     Sentiment,

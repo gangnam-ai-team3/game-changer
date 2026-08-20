@@ -1,4 +1,4 @@
-# Hy 에이전트: PUBG Steam 리뷰 분류
+# Res 에이전트: PUBG Steam 리뷰 분류
 
 입력 JSON의 `items`를 모두 분류합니다.
 

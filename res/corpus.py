@@ -2,22 +2,19 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import hmac
 import json
 import os
 import re
 import sqlite3
 import subprocess
 import tempfile
-import time
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
-from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -230,133 +227,6 @@ _STEAM_MARKUP = re.compile(r"\[/?[A-Za-z0-9_= -]+\]")
 _SPACE = re.compile(r"\s+")
 
 
-def iter_steam_reviews(
-    *,
-    app_id: int = PUBG_APP_ID,
-    language: str,
-    cutoff_at: datetime,
-    max_pages: int = 20,
-    opener: Callable[..., Any] = urlopen,
-    sleeper: Callable[[float], None] = time.sleep,
-    retries: int = 3,
-) -> Iterator[EphemeralSteamReview]:
-    if language not in STEAM_LANGUAGES:
-        raise ValueError("language must be ko or en")
-    if cutoff_at.tzinfo is None:
-        raise ValueError("cutoff_at must be timezone-aware")
-    if max_pages < 1 or retries < 1:
-        raise ValueError("max_pages and retries must be positive")
-
-    steam_language = STEAM_LANGUAGES[language]
-    cursor = "*"
-    seen_cursors: set[str] = set()
-    seen_ids: set[str] = set()
-    for _ in range(max_pages):
-        if cursor in seen_cursors:
-            raise CorpusBuildError("Steam이 같은 페이지 위치를 반복해서 반환했습니다.")
-        seen_cursors.add(cursor)
-        payload = _fetch_steam_page(
-            app_id=app_id,
-            language=steam_language,
-            cursor=cursor,
-            opener=opener,
-            sleeper=sleeper,
-            retries=retries,
-        )
-        reviews = payload.get("reviews")
-        if not isinstance(reviews, list):
-            raise CorpusBuildError("Steam 리뷰 응답 형식이 올바르지 않습니다.")
-        if not reviews:
-            return
-
-        for review in reviews:
-            if not isinstance(review, dict) or review.get("language") != steam_language:
-                continue
-            try:
-                public_id = str(review["recommendationid"]).strip()
-                created_at = datetime.fromtimestamp(int(review["timestamp_created"]), UTC)
-                updated_at = datetime.fromtimestamp(int(review["timestamp_updated"]), UTC)
-            except (KeyError, TypeError, ValueError, OverflowError):
-                continue
-            text = review.get("review")
-            if (
-                not public_id
-                or not isinstance(text, str)
-                or not text.strip()
-                or created_at > updated_at
-                or created_at >= cutoff_at
-                or updated_at >= cutoff_at
-            ):
-                continue
-            evidence_id = _evidence_id(app_id, public_id)
-            if evidence_id in seen_ids:
-                continue
-            seen_ids.add(evidence_id)
-            yield EphemeralSteamReview(
-                evidence_id=evidence_id,
-                language=language,
-                created_at=created_at,
-                updated_at=updated_at,
-                text=text.strip(),
-            )
-
-        next_cursor = payload.get("cursor")
-        if not isinstance(next_cursor, str) or not next_cursor:
-            raise CorpusBuildError("Steam이 다음 페이지 위치를 반환하지 않았습니다.")
-        cursor = next_cursor
-    return
-
-
-def _fetch_steam_page(
-    *,
-    app_id: int,
-    language: str,
-    cursor: str,
-    opener: Callable[..., Any],
-    sleeper: Callable[[float], None],
-    retries: int,
-) -> dict[str, Any]:
-    params = urlencode(
-        {
-            "json": 1,
-            "filter": "recent",
-            "language": language,
-            "cursor": cursor,
-            "review_type": "all",
-            "purchase_type": "all",
-            "num_per_page": 100,
-        }
-    )
-    request = Request(
-        f"https://store.steampowered.com/appreviews/{app_id}?{params}",
-        headers={"User-Agent": "GameChanger-Corpus/1.0"},
-    )
-    for attempt in range(retries):
-        try:
-            with opener(request, timeout=20) as response:
-                payload = json.load(response)
-            if not isinstance(payload, dict) or payload.get("success") != 1:
-                raise CorpusBuildError("Steam 리뷰 API가 실패 응답을 반환했습니다.")
-            return payload
-        except HTTPError as exc:
-            retryable = exc.code in {429, 500, 502, 503, 504}
-            if not retryable or attempt + 1 == retries:
-                raise CorpusBuildError("Steam 리뷰 API 요청에 실패했습니다.") from exc
-            retry_after = exc.headers.get("Retry-After") if exc.headers else None
-            try:
-                delay = min(float(retry_after), 30) if retry_after else 2**attempt
-            except ValueError:
-                delay = 2**attempt
-            sleeper(delay)
-        except (URLError, TimeoutError) as exc:
-            if attempt + 1 == retries:
-                raise CorpusBuildError("Steam 리뷰 API에 연결할 수 없습니다.") from exc
-            sleeper(2**attempt)
-        except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
-            raise CorpusBuildError("Steam 리뷰 응답을 해석할 수 없습니다.") from exc
-    raise AssertionError("unreachable")
-
-
 def classify_with_codex(
     reviews: list[EphemeralSteamReview],
     *,
@@ -448,6 +318,206 @@ def verify_chatgpt_login(*, codex_bin: str = "codex") -> str:
     return version.stdout.strip()
 
 
+def build_from_hy_db(
+    source_db: Path,
+    db_path: Path = DEFAULT_DB,
+    *,
+    target_per_language: int = 500,
+    batch_size: int = 40,
+    max_pages: int = 20,
+    classify: Callable[[list[EphemeralSteamReview]], list[ReviewLabel]] = classify_with_codex,
+    classifier_name: str | None = None,
+) -> dict[str, Any]:
+    """Convert Hy's complete local raw DB into Res's safe active corpus."""
+    source_db = Path(source_db)
+    db_path = Path(db_path)
+    stage_path = db_path.with_name(f"{db_path.name}.staging")
+    key_path = db_path.with_name(f".{db_path.name}.evidence-key")
+    _reject_source_database(source_db, db_path, stage_path, key_path)
+    if not source_db.is_file():
+        raise CorpusBuildError("Hy 원본 DB를 찾지 못했습니다.")
+
+    connection = sqlite3.connect(f"{source_db.resolve().as_uri()}?mode=ro", uri=True)
+    try:
+        connection.execute("PRAGMA query_only = ON")
+        connection.execute("BEGIN")
+        snapshot, backfill_watermarks = _hy_safe_snapshot(connection)
+        evidence_key = _load_or_create_evidence_key(key_path)
+        seen_text_hashes = {language: set() for language in STEAM_LANGUAGES}
+
+        def fetch_reviews(**kwargs) -> Iterator[EphemeralSteamReview]:
+            return _iter_hy_reviews(
+                connection,
+                language=kwargs["language"],
+                cutoff_at=kwargs["cutoff_at"],
+                evidence_key=evidence_key,
+                seen_text_hashes=seen_text_hashes[kwargs["language"]],
+                candidate_limit=kwargs["max_pages"] * 100,
+                backfill_watermark=backfill_watermarks[
+                    STEAM_LANGUAGES[kwargs["language"]]
+                ],
+            )
+
+        return build_corpus(
+            db_path,
+            target_per_language=target_per_language,
+            batch_size=batch_size,
+            max_pages=max_pages,
+            fetch_reviews=fetch_reviews,
+            classify=classify,
+            classifier_name=classifier_name,
+            snapshot_at=snapshot,
+        )
+    except sqlite3.Error as exc:
+        raise CorpusBuildError("Hy 원본 DB 형식이 올바르지 않습니다.") from exc
+    finally:
+        connection.close()
+
+
+def _reject_source_database(source_db: Path, *protected_paths: Path) -> None:
+    source = source_db.resolve()
+    for path in protected_paths:
+        protected = path.resolve()
+        if source == protected or (
+            source.exists()
+            and protected.exists()
+            and os.path.samefile(source, protected)
+        ):
+            raise CorpusBuildError(
+                "Hy 원본 DB와 안전 코퍼스 관련 경로는 같을 수 없습니다."
+            )
+
+
+def _load_or_create_evidence_key(key_path: Path) -> bytes:
+    if key_path.is_symlink():
+        raise CorpusBuildError("코퍼스 ID 키 경로는 심볼릭 링크일 수 없습니다.")
+    try:
+        key = key_path.read_bytes()
+    except FileNotFoundError:
+        key_path.parent.mkdir(parents=True, exist_ok=True)
+        key = os.urandom(32)
+        try:
+            descriptor = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            key = key_path.read_bytes()
+        else:
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(key)
+    if len(key) != 32:
+        raise CorpusBuildError("코퍼스 ID 키 형식이 올바르지 않습니다.")
+    os.chmod(key_path, 0o600)
+    return key
+
+
+def _hy_safe_snapshot(
+    connection: sqlite3.Connection,
+) -> tuple[datetime, dict[str, int]]:
+    state = {
+        row[0]: (row[1], row[2])
+        for row in connection.execute(
+            """
+            SELECT language, done, updated_at
+            FROM collector_state
+            WHERE language IN ('koreana', 'english')
+            """
+        )
+    }
+    if set(state) != {"koreana", "english"}:
+        raise CorpusBuildError("Hy DB의 한국어와 영어 수집 상태가 모두 필요합니다.")
+    if any(done != 1 for done, _watermark in state.values()):
+        raise CorpusBuildError("Hy DB의 한국어와 영어 수집이 완료되지 않았습니다.")
+    try:
+        watermarks = {language: int(value[1]) for language, value in state.items()}
+    except (TypeError, ValueError) as exc:
+        raise CorpusBuildError("Hy DB의 백필 완료 시각이 올바르지 않습니다.") from exc
+    collected_at = {
+        language: connection.execute(
+            """
+            SELECT MIN(collected_at)
+            FROM reviews
+            WHERE appid = ? AND language = ? AND collected_at <= ?
+            """,
+            (PUBG_APP_ID, language, watermark),
+        ).fetchone()[0]
+        for language, watermark in watermarks.items()
+    }
+    if set(collected_at) != {"koreana", "english"} or any(
+        value is None for value in collected_at.values()
+    ):
+        raise CorpusBuildError("Hy DB에 한국어와 영어 리뷰가 모두 필요합니다.")
+    try:
+        snapshot = datetime.fromtimestamp(min(collected_at.values()) / 1000, UTC)
+    except (OverflowError, OSError, TypeError, ValueError) as exc:
+        raise CorpusBuildError("Hy DB의 수집 시각이 올바르지 않습니다.") from exc
+    return snapshot, watermarks
+
+
+def _iter_hy_reviews(
+    connection: sqlite3.Connection,
+    *,
+    language: str,
+    cutoff_at: datetime,
+    evidence_key: bytes,
+    seen_text_hashes: set[bytes],
+    candidate_limit: int,
+    backfill_watermark: int,
+) -> Iterator[EphemeralSteamReview]:
+    steam_language = STEAM_LANGUAGES[language]
+    cutoff_timestamp = int(cutoff_at.timestamp())
+    rows = connection.execute(
+        """
+        SELECT recommendationid, review, timestamp_created,
+               COALESCE(timestamp_updated, timestamp_created)
+        FROM reviews
+        WHERE appid = ? AND language = ?
+          AND timestamp_created < ?
+          AND COALESCE(timestamp_updated, timestamp_created) < ?
+          AND collected_at <= ?
+        ORDER BY timestamp_created DESC, recommendationid
+        LIMIT ?
+        """,
+        (
+            PUBG_APP_ID,
+            steam_language,
+            cutoff_timestamp,
+            cutoff_timestamp,
+            backfill_watermark,
+            candidate_limit,
+        ),
+    )
+    for public_id, text, created, updated in rows:
+        if (
+            not isinstance(public_id, str)
+            or not public_id.strip()
+            or not isinstance(text, str)
+            or not text.strip()
+        ):
+            continue
+        text_hash = hashlib.sha256(text.encode()).digest()
+        if text_hash in seen_text_hashes:
+            continue
+        seen_text_hashes.add(text_hash)
+        try:
+            created_at = datetime.fromtimestamp(int(created), UTC)
+            updated_at = datetime.fromtimestamp(int(updated), UTC)
+        except (OverflowError, OSError, TypeError, ValueError):
+            continue
+        if created_at > updated_at:
+            continue
+        evidence_id = hmac.new(
+            evidence_key,
+            f"steam:{PUBG_APP_ID}:{public_id}".encode(),
+            hashlib.sha256,
+        ).hexdigest()[:24]
+        yield EphemeralSteamReview(
+            evidence_id=evidence_id,
+            language=language,
+            created_at=cutoff_at,
+            updated_at=cutoff_at,
+            text=text.strip(),
+        )
+
+
 def build_corpus(
     db_path: Path = DEFAULT_DB,
     *,
@@ -455,13 +525,15 @@ def build_corpus(
     batch_size: int = 40,
     max_pages: int = 20,
     resume: bool = False,
-    fetch_reviews: Callable[..., Iterable[EphemeralSteamReview]] = iter_steam_reviews,
+    fetch_reviews: Callable[..., Iterable[EphemeralSteamReview]],
     classify: Callable[[list[EphemeralSteamReview]], list[ReviewLabel]] = classify_with_codex,
     classifier_name: str | None = None,
     snapshot_at: datetime | None = None,
 ) -> dict[str, Any]:
-    if target_per_language < 1 or not 1 <= batch_size <= 100:
-        raise ValueError("target_per_language and batch_size must be positive")
+    if target_per_language < 1 or not 1 <= batch_size <= 100 or max_pages < 1:
+        raise ValueError(
+            "target_per_language, batch_size and max_pages must be positive"
+        )
     db_path = Path(db_path)
     stage_path = db_path.with_name(f"{db_path.name}.staging")
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -805,10 +877,6 @@ def _redact(text: str) -> str:
     return _SPACE.sub(" ", redacted).strip()[:2000]
 
 
-def _evidence_id(app_id: int, public_id: str) -> str:
-    return hashlib.sha256(f"steam:{app_id}:{public_id}".encode()).hexdigest()[:24]
-
-
 def _query_terms(query: str) -> list[str]:
     lowered = query.lower()
     terms = re.findall(r"[0-9A-Za-z가-힣_]{2,}", lowered)
@@ -826,12 +894,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="PUBG Steam 비식별 코퍼스 빌더")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    build = subparsers.add_parser("build", help="Steam 리뷰를 분류해 코퍼스를 만듭니다")
-    build.add_argument("--db", type=Path, default=DEFAULT_DB)
-    build.add_argument("--target-per-language", type=int, default=500)
-    build.add_argument("--batch-size", type=int, default=40)
-    build.add_argument("--max-pages", type=int, default=20)
-    build.add_argument("--resume", action="store_true")
+    build_hy = subparsers.add_parser(
+        "build-hy", help="Hy의 로컬 원본 DB를 안전한 코퍼스로 변환합니다"
+    )
+    build_hy.add_argument("--source-db", type=Path, required=True)
+    build_hy.add_argument("--db", type=Path, default=DEFAULT_DB)
+    build_hy.add_argument("--target-per-language", type=int, default=500)
+    build_hy.add_argument("--batch-size", type=int, default=40)
+    build_hy.add_argument("--max-pages", type=int, default=20)
 
     status = subparsers.add_parser("status", help="활성 코퍼스 상태를 확인합니다")
     status.add_argument("--db", type=Path, default=DEFAULT_DB)
@@ -844,14 +914,14 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     try:
-        if args.command == "build":
+        if args.command == "build-hy":
             _print_json(
-                build_corpus(
+                build_from_hy_db(
+                    args.source_db,
                     args.db,
                     target_per_language=args.target_per_language,
                     batch_size=args.batch_size,
                     max_pages=args.max_pages,
-                    resume=args.resume,
                 )
             )
         elif args.command == "status":

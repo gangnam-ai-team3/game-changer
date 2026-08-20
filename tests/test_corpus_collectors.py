@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 import res.corpus_collectors as corpus_collectors
 from agents.evidence_rag import EvidenceRagAgent
 from contracts import ArtifactStatus, EventBrief, InputMode
-from hy.corpus import (
+from res.corpus import (
     BehaviorCode,
     CorpusRecord,
     EphemeralSteamReview,

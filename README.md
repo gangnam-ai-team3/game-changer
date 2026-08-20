@@ -15,12 +15,12 @@
 ```bash
 uv sync --extra dev --locked
 uv run python -m evaluation.verify_update_success
-uv run python -m hy.corpus build --db .data/corpus/pubg_steam.sqlite3 --target-per-language 500 --batch-size 20 --max-pages 20 --resume
+uv run python -m res.corpus build-hy --source-db hy/steam-reviews.db --db .data/corpus/pubg_steam.sqlite3 --target-per-language 500 --batch-size 20 --max-pages 20
 uv run --env-file backend/.env uvicorn backend.app.main:app --reload --port 8000
 cd frontend && npm install && npm run dev
 ```
 
-Steam 코퍼스 생성은 ChatGPT 구독으로 로그인한 Codex CLI를 사용합니다. 생성된 `.data/`는 로컬 시연 자료로만 유지하며 Git에 올리지 않습니다.
+Hy는 `hy/steam-reviews.db`에 PUBG Steam 원본과 수집 상태를 로컬로 준비합니다. Res는 한국어·영어 최초 백필이 완료된 시점까지의 자료만 사용하고, ChatGPT 구독으로 로그인한 Codex CLI를 통해 원문·Steam ID·공개 리뷰 ID·정확한 작성 시각이 없는 안전 코퍼스로 변환합니다. 생성된 `.data/`는 로컬 시연 자료로만 유지하며 Git에 올리지 않습니다.
 
 프론트엔드 배포 빌드는 `cd frontend && npm run build`로 확인합니다. API 키는 `backend/.env` 내부에만 보관하고 화면, 로그, Git에 남기지 않습니다.
 

@@ -1,14 +1,12 @@
-import io
 import json
 import os
 import subprocess
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
-from urllib.error import HTTPError
 
 import pytest
 
-from hy.corpus import (
+from res.corpus import (
     BehaviorCode,
     CorpusBuildError,
     EphemeralSteamReview,
@@ -20,7 +18,6 @@ from hy.corpus import (
     build_corpus,
     classify_with_codex,
     corpus_status,
-    iter_steam_reviews,
     search_corpus,
 )
 
@@ -51,64 +48,6 @@ def _labels(reviews: list[EphemeralSteamReview]) -> list[ReviewLabel]:
     ]
 
 
-def test_bulk_source_retries_and_blocks_reviews_updated_after_snapshot():
-    cutoff = datetime(2026, 8, 19, tzinfo=UTC)
-    attempts = 0
-    delays: list[float] = []
-    payloads = [
-        {
-            "success": 1,
-            "reviews": [
-                {
-                    "recommendationid": "safe-public-id",
-                    "language": "koreana",
-                    "timestamp_created": int((cutoff - timedelta(days=2)).timestamp()),
-                    "timestamp_updated": int((cutoff - timedelta(days=1)).timestamp()),
-                    "review": "무기 피해가 예측하기 쉬워졌지만 밸런스는 더 봐야 한다.",
-                },
-                {
-                    "recommendationid": "late-update",
-                    "language": "koreana",
-                    "timestamp_created": int((cutoff - timedelta(days=3)).timestamp()),
-                    "timestamp_updated": int(cutoff.timestamp()),
-                    "review": "기준일 뒤 수정된 내용",
-                },
-            ],
-            "cursor": "next",
-        },
-        {"success": 1, "reviews": [], "cursor": "next"},
-    ]
-
-    def opener(_request, timeout):
-        nonlocal attempts
-        assert timeout == 20
-        attempts += 1
-        if attempts == 1:
-            raise HTTPError(
-                "https://store.steampowered.com",
-                429,
-                "rate limited",
-                {"Retry-After": "0"},
-                None,
-            )
-        return io.BytesIO(json.dumps(payloads[attempts - 2]).encode())
-
-    rows = list(
-        iter_steam_reviews(
-            language="ko",
-            cutoff_at=cutoff,
-            max_pages=3,
-            opener=opener,
-            sleeper=delays.append,
-        )
-    )
-
-    assert len(rows) == 1
-    assert rows[0].evidence_id != "safe-public-id"
-    assert rows[0].updated_at < cutoff
-    assert delays == [0.0]
-
-
 def test_codex_classification_uses_only_subscription_cli_environment(monkeypatch):
     review = _review("a" * 24, "ko", "user@example.com 무기 밸런스")
     for key in (
@@ -135,7 +74,7 @@ def test_codex_classification_uses_only_subscription_cli_environment(monkeypatch
 
     def fake_run(args, **kwargs):
         schema_path = args[args.index("--output-schema") + 1]
-        prompt = Path(__file__).parents[1].joinpath("hy/corpus_prompt.md").read_text(
+        prompt = Path(__file__).parents[1].joinpath("res/corpus_prompt.md").read_text(
             encoding="utf-8"
         )
         assert args == [
@@ -162,46 +101,6 @@ def test_codex_classification_uses_only_subscription_cli_environment(monkeypatch
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     assert classify_with_codex([review], codex_bin="/opt/codex") == _labels([review])
-
-
-def test_build_classifies_last_partial_batch_at_page_limit(tmp_path):
-    snapshot = datetime(2026, 8, 19, tzinfo=UTC)
-
-    def fetch_reviews(**kwargs):
-        steam_language = {"ko": "koreana", "en": "english"}[kwargs["language"]]
-        payload = {
-            "success": 1,
-            "reviews": [
-                {
-                    "recommendationid": f"last-{kwargs['language']}",
-                    "language": steam_language,
-                    "timestamp_created": int((snapshot - timedelta(days=2)).timestamp()),
-                    "timestamp_updated": int((snapshot - timedelta(days=1)).timestamp()),
-                    "review": "weapon balance review",
-                }
-            ],
-            "cursor": "next",
-        }
-        return iter_steam_reviews(
-            language=kwargs["language"],
-            cutoff_at=kwargs["cutoff_at"],
-            max_pages=kwargs["max_pages"],
-            opener=lambda _request, timeout: io.BytesIO(json.dumps(payload).encode()),
-        )
-
-    manifest = build_corpus(
-        tmp_path / "pubg.sqlite3",
-        target_per_language=1,
-        batch_size=2,
-        max_pages=1,
-        fetch_reviews=fetch_reviews,
-        classify=_labels,
-        classifier_name="codex-test",
-        snapshot_at=snapshot,
-    )
-
-    assert manifest["ko_count"] == "1"
-    assert manifest["en_count"] == "1"
 
 
 def test_build_activates_only_safe_derived_corpus_and_search_is_stable(tmp_path):
