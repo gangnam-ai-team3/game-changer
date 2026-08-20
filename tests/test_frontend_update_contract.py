@@ -35,16 +35,12 @@ def test_update_screen_has_prelaunch_copy_and_four_decision_labels():
     assert 'fetch(`${API_URL}/api/update-runs/stream`' in source
 
 
-def test_both_result_modes_expose_complete_decision_brief():
+def test_event_result_uses_shared_decision_report():
     event_source = (ROOT / "page.tsx").read_text(encoding="utf-8")
-    update_source = (ROOT / "components" / "UpdateReview.tsx").read_text(encoding="utf-8")
 
-    for source in (event_source, update_source):
-        assert "decision-logic" in source
-        assert "이용자 유형별 예상 반응" in source
-        assert "언어권별 예상" in source
-        assert "판단을 좌우한 위험" in source
-        assert "지금 해야 할 일" in source
+    assert "DecisionReport" in event_source
+    assert "decision-logic" not in event_source
+    assert "decisionHeading" not in event_source
 
 
 def test_event_live_source_can_select_steam_x_or_both():
@@ -331,6 +327,33 @@ def test_shared_decision_report_has_accessible_one_page_structure():
     assert ".decision-report-card-grid" in styles
     assert "grid-template-columns:repeat(3,minmax(0,1fr))" in styles
     assert "content:attr(data-label)" in styles
+
+
+def test_event_result_maps_contract_to_shared_decision_report():
+    source = (ROOT / "page.tsx").read_text(encoding="utf-8")
+
+    assert 'import { DecisionReport, DecisionReportData }' in source
+    assert "decision_reason: string" in source
+    assert "input_mode?: string" in source
+    assert "submittedSubject" in source
+    assert "const requestSubject = form.event_name.trim()" in source
+    assert "setSubmittedSubject(requestSubject)" in source
+    assert "function selectEventPanel" in source
+    assert "function findEventRevision" in source
+    assert "function buildEventReport" in source
+    assert "top_risks[0]" in source
+    assert "addresses_risk_ids.includes(riskId)" in source
+    assert "uniqueEvidenceCount(panel.evidence_ids)" in source
+    assert "left.confidence" in source
+    assert "left.persona.localeCompare(right.persona)" in source
+    assert 'opinionVisible={visibleOpinions.has(panel.persona)}' in source
+    assert "feedback.input_mode" in source
+    assert "<DecisionReport" in source
+    assert "reactionDetails={" in source
+    assert "evidenceDetails={" in source
+    assert "agentDetails={" in source
+    assert "result.fallback_used &&" not in source
+    assert "ref={decisionHeading}" not in source
 
 
 def test_audience_cards_can_hide_duplicate_opinion_and_name_confidence_correctly():

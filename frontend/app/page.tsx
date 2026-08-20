@@ -3,8 +3,10 @@
 import { ChangeEvent, FormEvent, useState } from "react";
 
 import { AgentEvent, AgentPipeline } from "./components/AgentPipeline";
+import { LanguageGameCard, PersonaGameCard } from "./components/AudienceCards";
 import { businessKorean, businessKoreanJson } from "./components/businessKorean";
 import { corpusDemoDates, isFutureUtcDate } from "./components/corpusDemoDates";
+import { DecisionReport, DecisionReportData } from "./components/DecisionReport";
 import { UpdateReview } from "./components/UpdateReview";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -91,10 +93,10 @@ type RunResult = {
     language_results: LanguageResult[];
     revision_plan: Revision[];
   } & Artifact;
-  feedback: { evidence: EventEvidence[] } & Artifact;
+  feedback: { evidence: EventEvidence[]; input_mode?: string } & Artifact;
   evidence: Artifact;
   risks: Artifact;
-  validated: Artifact;
+  validated: { decision_reason: string } & Artifact;
   events: AgentEvent[];
   fallback_used: boolean;
   analysis_incomplete: boolean;
@@ -127,11 +129,6 @@ const severityLabels: Record<string, string> = {
   Medium: "보통",
   High: "높음",
   Critical: "매우 높음",
-};
-const decisionCopy: Record<string, { title: string; description: string }> = {
-  Go: { title: "현재 기획안으로 출시 가능", description: "확인된 위험이 허용 기준보다 낮습니다." },
-  Revise: { title: "수정 후 다시 검토", description: "이용자 경험을 해칠 수 있는 위험이 확인됐습니다." },
-  Hold: { title: "판정 보류", description: "현재 자료만으로는 판단하기 어렵습니다." },
 };
 const decisionLabels: Record<string, string> = {
   Go: "출시 가능",
@@ -206,46 +203,208 @@ function ArtifactDetails({ result }: { result: RunResult }) {
   );
 }
 
-function ResultInsights({ result }: { result: RunResult }) {
+const inputModeLabels: Record<string, string> = {
+  fixture: "검증된 저장 자료",
+  corpus: "사전 구축 코퍼스",
+  live: "실시간 공개 자료",
+  import: "승인 CSV",
+};
+
+function uniqueEvidenceCount(ids: string[]) {
+  return new Set(ids).size;
+}
+
+function expectedAction(value: string) {
+  const marker = "예상 행동:";
+  const index = value.indexOf(marker);
+  return index >= 0 ? businessKorean(value.slice(index + marker.length).trim()) : "";
+}
+
+function opinionKey(value: string) {
+  const opinion = value.split("예상 행동:")[0].replace("예상 대표 의견:", "");
+  return businessKorean(opinion).replace(/[\p{P}\s]/gu, "");
+}
+
+function comparePanels(left: PersonaPanel, right: PersonaPanel) {
+  return (
+    uniqueEvidenceCount(right.evidence_ids) - uniqueEvidenceCount(left.evidence_ids)
+    || right.confidence - left.confidence
+    || left.persona.localeCompare(right.persona)
+  );
+}
+
+function selectEventPanel(result: RunResult) {
+  const primaryRiskId = result.brief.top_risks[0]?.risk_id;
+  return result.brief.panel_results
+    .filter((panel) => panel.evidence_ids.length > 0)
+    .slice()
+    .sort((left, right) => {
+      const leftTier = primaryRiskId && left.risk_ids.includes(primaryRiskId) ? 0 : left.risk_ids.length ? 1 : 2;
+      const rightTier = primaryRiskId && right.risk_ids.includes(primaryRiskId) ? 0 : right.risk_ids.length ? 1 : 2;
+      return leftTier - rightTier || comparePanels(left, right);
+    })[0];
+}
+
+function findEventRevision(revisions: Revision[], riskId?: string) {
+  if (!riskId) return undefined;
+  return revisions
+    .filter((revision) => revision.addresses_risk_ids.includes(riskId))
+    .slice()
+    .sort((left, right) => left.priority - right.priority)[0];
+}
+
+function visibleEventOpinions(panels: PersonaPanel[]) {
+  const seen = new Set<string>();
+  const visible = new Set<string>();
+  panels.slice().sort(comparePanels).forEach((panel) => {
+    const key = opinionKey(panel.reaction);
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      visible.add(panel.persona);
+    }
+  });
+  return visible;
+}
+
+function buildEventReport(result: RunResult, subject: string): DecisionReportData {
+  const primaryRisk = result.brief.top_risks[0];
+  const panel = selectEventPanel(result);
+  const revision = findEventRevision(result.brief.revision_plan, primaryRisk?.risk_id);
+  const modeLabel = result.feedback.input_mode ? inputModeLabels[result.feedback.input_mode] : undefined;
+  const evidenceCount = new Set(result.feedback.evidence.map((item) => item.evidence_id)).size;
+  const languageCount = result.brief.language_results.filter((item) => item.conclusion).length;
+  const panelRisk = primaryRisk && panel?.risk_ids.includes(primaryRisk.risk_id)
+    ? primaryRisk.title
+    : panel?.risk_ids.map((id) => result.brief.top_risks.find((risk) => risk.risk_id === id)?.title).find(Boolean);
+  const action = panel ? expectedAction(panel.reaction) : "";
+
+  return {
+    subject,
+    decision: result.brief.decision,
+    decisionLabel: decisionLabels[result.brief.decision] ?? "판정 확인 필요",
+    conclusion: businessKorean([
+      result.validated.decision_reason,
+      revision ? `우선 조치는 ‘${revision.title}’입니다.` : "",
+    ].filter(Boolean).join(" ")),
+    fullReasoning: businessKorean(result.brief.executive_summary),
+    sourceScope: [
+      `고유 근거 ${evidenceCount}건`,
+      `결론 공개 언어권 ${languageCount}개`,
+      modeLabel,
+    ].filter(Boolean).join(", "),
+    analysisIncomplete: result.analysis_incomplete,
+    expectedCard: {
+      label: "영향이 큰 이용자 반응",
+      title: panel ? personaLabels[panel.persona] ?? "이용자 유형 확인 필요" : "대표 반응 선정 어려움",
+      body: panel
+        ? businessKorean([panelRisk ? `연결된 위험은 ${panelRisk}입니다.` : "직접 연결된 우선 위험이 없습니다.", action].filter(Boolean).join(" "))
+        : "현재 근거만으로 대표 반응을 선정하기 어렵습니다.",
+      meta: panel ? `고유 근거 ${uniqueEvidenceCount(panel.evidence_ids)}건` : undefined,
+    },
+    riskCard: {
+      label: "가장 큰 위험",
+      title: businessKorean(primaryRisk?.title ?? "우선 위험이 확인되지 않았습니다"),
+      body: businessKorean(primaryRisk?.failure_path ?? "현재 검증 범위에서 우선 위험이 확인되지 않았습니다."),
+      meta: primaryRisk ? `${severityLabels[primaryRisk.severity] ?? "수준 확인 필요"}, 고유 근거 ${uniqueEvidenceCount(primaryRisk.evidence_ids)}건` : undefined,
+    },
+    actionCard: {
+      label: "출시 전 조치",
+      title: businessKorean(revision?.title ?? "연결된 출시 전 조치를 확인할 수 없습니다"),
+      body: businessKorean(revision?.change ?? "위험과 연결된 개선안을 상세 근거에서 확인해 주세요."),
+      meta: revision ? `확인 기준: ${businessKorean(revision.success_metric)}` : "확인 기준이 연결되지 않았습니다",
+    },
+    riskRows: result.brief.top_risks.slice(0, 3).map((risk) => {
+      const linked = findEventRevision(result.brief.revision_plan, risk.risk_id);
+      return {
+        id: risk.risk_id,
+        risk: businessKorean(risk.title),
+        level: severityLabels[risk.severity] ?? "확인 필요",
+        impact: businessKorean(risk.failure_path),
+        action: businessKorean(linked?.change ?? "연결된 출시 전 조치를 확인할 수 없습니다"),
+        check: businessKorean(linked?.success_metric ?? "확인 기준이 연결되지 않았습니다"),
+      };
+    }),
+  };
+}
+
+function EventReactionDetails({ result }: { result: RunResult }) {
+  const riskTitle = new Map(result.brief.top_risks.map((risk) => [risk.risk_id, risk.title]));
+  const visibleOpinions = visibleEventOpinions(result.brief.panel_results);
+  return (
+    <section className="insight-section">
+      <div className="section-title">
+        <h3>이용자 유형별 예상 반응</h3>
+        <p>예상 행동과 연결된 위험, 근거 수를 이용자 유형별로 확인합니다.</p>
+      </div>
+      <div className="audience-card-grid">
+        {result.brief.panel_results.map((panel) => (
+          <PersonaGameCard
+            key={panel.persona}
+            persona={panel.persona}
+            label={personaLabels[panel.persona] ?? panel.persona}
+            reaction={panel.reaction}
+            evidenceCount={uniqueEvidenceCount(panel.evidence_ids)}
+            confidence={panel.confidence}
+            opinionVisible={visibleOpinions.has(panel.persona)}
+            context={panel.risk_ids.length
+              ? `연결된 우려: ${panel.risk_ids.map((id) => businessKorean(riskTitle.get(id) ?? "관련 위험")).join(", ")}`
+              : "직접 연결된 우려 없음"}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function EventEvidenceDetails({ result }: { result: RunResult }) {
   const riskTitle = new Map(result.brief.top_risks.map((risk) => [risk.risk_id, risk.title]));
   return (
     <>
-      <section className="insight-section">
+      <div className="risk-section">
         <div className="section-title">
-          <h2>이용자 유형별 영향</h2>
-          <p>각 이용자 유형이 어떤 위험에 영향을 받는지 근거 수와 함께 보여줍니다.</p>
+          <h2>확인된 위험</h2>
+          <p>연결 근거는 비식별 요약이며, 이용자의 직접 인용이 아닙니다.</p>
         </div>
-        <div className="insight-grid">
-          {result.brief.panel_results.map((panel) => (
-            <article className="insight-card" key={panel.persona}>
-              <span className="risk-category">{personaLabels[panel.persona] ?? panel.persona}</span>
-              <h3>{businessKorean(panel.reaction)}</h3>
-              <p>
-                {panel.risk_ids.length
-                  ? `연결된 위험: ${panel.risk_ids.map((id) => businessKorean(riskTitle.get(id) ?? id)).join(", ")}`
-                  : "직접 연결된 상위 위험 없음"}
-              </p>
-              <small>근거 {panel.evidence_ids.length}건, 신뢰도 {Math.round(panel.confidence * 100)}%</small>
+        <div className="risk-grid">
+          {result.brief.top_risks.map((risk) => (
+            <article className="risk-card" key={risk.risk_id}>
+              <span className="risk-category">{riskLabels[risk.category] ?? risk.category}</span>
+              <h3>{businessKorean(risk.title)}</h3>
+              <p>{businessKorean(risk.failure_path)}</p>
+              <small>
+                위험 수준 {severityLabels[risk.severity] ?? risk.severity}, 근거 {risk.evidence_ids.length}건, 신뢰도 {Math.round(risk.confidence * 100)}%
+              </small>
+              <details>
+                <summary>연결된 파생 요약 보기</summary>
+                <p>아래 내용은 비식별 요약입니다. 이용자의 문장을 직접 인용한 내용이 아니며, 원문은 저장하거나 표시하지 않습니다.</p>
+                {result.feedback.evidence
+                  .filter((item) => risk.evidence_ids.includes(String(item.evidence_id)))
+                  .map((item) => (
+                    <div className="derived-evidence" key={String(item.evidence_id)}>
+                      <b>{String(item.evidence_id)}</b> {businessKorean(item.summary)}
+                    </div>
+                  ))}
+              </details>
             </article>
           ))}
         </div>
-      </section>
+      </div>
       <section className="insight-section">
         <div className="section-title">
-          <h2>언어권별 결과</h2>
+          <h2>언어권별 예상</h2>
           <p>최소 표본을 충족한 언어권만 결론을 공개합니다.</p>
         </div>
-        <div className="language-grid">
+        <div className="audience-card-grid">
           {result.brief.language_results.map((item) => (
-            <article className={`language-card ${item.conclusion ? "" : "muted"}`} key={item.language}>
-              <strong>{languageLabels[item.language] ?? item.language}</strong>
-              <p>{businessKorean(item.conclusion ?? item.hidden_reason ?? "표본 기준에 미달했습니다.")}</p>
-              <small>
-                {item.conclusion
-                  ? `근거 ${item.evidence_ids.length}건, 신뢰도 ${Math.round(item.confidence * 100)}%`
-                  : "결론 숨김"}
-              </small>
-            </article>
+            <LanguageGameCard
+              key={item.language}
+              language={item.language}
+              label={languageLabels[item.language] ?? item.language}
+              conclusion={item.conclusion}
+              hiddenReason={item.hidden_reason}
+              evidenceCount={item.evidence_ids.length}
+              confidence={item.confidence}
+            />
           ))}
         </div>
       </section>
@@ -285,6 +444,7 @@ function EventReview() {
   const [csvName, setCsvName] = useState("");
   const [useClaude, setUseClaude] = useState(true);
   const [result, setResult] = useState<RunResult | null>(null);
+  const [submittedSubject, setSubmittedSubject] = useState(initialForm.event_name);
   const [liveEvents, setLiveEvents] = useState<AgentEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -370,6 +530,7 @@ function EventReview() {
       setLoading(false);
       return;
     }
+    const requestSubject = form.event_name.trim() || "이름 없는 이벤트";
     try {
       const payload = {
         ...form,
@@ -412,6 +573,7 @@ function EventReview() {
             setLiveEvents((previous) => [...previous, message.event as AgentEvent]);
           }
           if (eventName === "result" && message.result) {
+            setSubmittedSubject(requestSubject);
             setResult(message.result);
             setLiveEvents(message.result.events);
           }
@@ -424,14 +586,6 @@ function EventReview() {
       setLoading(false);
     }
   }
-
-  const copy = result ? decisionCopy[result.brief.decision] ?? decisionCopy.Hold : null;
-  const visibleLanguages = result?.brief.language_results.filter((item) => item.conclusion) ?? [];
-  const primaryRisk = result?.brief.top_risks[0];
-  const primaryPanel = result?.brief.panel_results[0];
-  const primaryRevision = result?.brief.revision_plan
-    .slice()
-    .sort((left, right) => left.priority - right.priority)[0];
 
   return (
     <>
@@ -639,154 +793,22 @@ function EventReview() {
         </section>
       )}
 
-      {result && (
-        <section className="results">
-          <section className="decision-brief" aria-labelledby="event-decision-title">
-            <header className="decision-brief-head">
-              <div>
-                <p className="eyebrow">출시 판단</p>
-                <h2 id="event-decision-title">{copy?.title}</h2>
-              </div>
-              <span className="decision">{decisionLabels[result.brief.decision] ?? result.brief.decision}</span>
-            </header>
-            <p className="decision-summary">{businessKorean(result.brief.executive_summary)}</p>
-            <p className="decision-caution">
-              출시 전 자료를 바탕으로 한 예상입니다. 실제 이용자 반응과 출시 후 성과를 의미하지 않습니다.
-            </p>
-
-            <div className="decision-logic" aria-label="출시 판단 과정">
-              <article>
-                <span>1. 판단 근거</span>
-                <strong>비식별 근거 {result.feedback.evidence.length}건</strong>
-                <small>기준일 이전 자료만 사용</small>
-              </article>
-              <b aria-hidden="true">→</b>
-              <article>
-                <span>2. 예상 반응</span>
-                <strong>이용자 유형 {result.brief.panel_results.length}개, 언어권 {visibleLanguages.length}개</strong>
-                <small>표본 기준을 통과한 결론만 공개</small>
-              </article>
-              <b aria-hidden="true">→</b>
-              <article>
-                <span>3. 출시 판단</span>
-                <strong>{decisionLabels[result.brief.decision] ?? result.brief.decision}</strong>
-                <small>{copy?.description}</small>
-              </article>
-            </div>
-
-            <div className="decision-signal-grid event-signals">
-              <article className="decision-signal negative">
-                <span>가장 큰 예상 우려</span>
-                <strong>{businessKorean(primaryRisk?.title ?? "우선 위험 없음")}</strong>
-                <p>{businessKorean(primaryRisk?.failure_path ?? "현재 자료에서는 우선 수정이 필요한 위험이 확인되지 않았습니다.")}</p>
-              </article>
-              <article className="decision-signal split">
-                <span>영향이 큰 이용자</span>
-                <strong>{primaryPanel ? personaLabels[primaryPanel.persona] ?? businessKorean(primaryPanel.persona) : "직접 영향 없음"}</strong>
-                <p>{businessKorean(primaryPanel?.reaction ?? "상위 위험에서 직접적인 영향은 예상되지 않습니다.")}</p>
-              </article>
-              <article className="decision-signal neutral">
-                <span>언어권별 예상</span>
-                <strong>{visibleLanguages.length}개 언어권에서 결론 공개</strong>
-                <p>{businessKorean(visibleLanguages[0]?.conclusion ?? "표본을 보강한 뒤 언어권별 결론을 확인해야 합니다.")}</p>
-              </article>
-            </div>
-
-            <div className="decision-context-grid">
-              <section>
-                <h3>이용자 유형별 예상 반응</h3>
-                <div className="decision-list">
-                  {result.brief.panel_results.map((item) => (
-                    <article key={item.persona}>
-                      <strong>{personaLabels[item.persona] ?? businessKorean(item.persona)}</strong>
-                      <p>{businessKorean(item.reaction)}</p>
-                      <small>근거 {item.evidence_ids.length}건, 신뢰도 {Math.round(item.confidence * 100)}%</small>
-                    </article>
-                  ))}
-                </div>
-              </section>
-              <section>
-                <h3>언어권별 예상</h3>
-                <div className="decision-list">
-                  {result.brief.language_results.map((item) => (
-                    <article className={item.conclusion ? "" : "is-muted"} key={item.language}>
-                      <strong>{languageLabels[item.language] ?? businessKorean(item.language)}</strong>
-                      <p>{businessKorean(item.conclusion ?? item.hidden_reason ?? "표본이 부족해 결론을 공개하지 않습니다.")}</p>
-                      <small>{item.conclusion ? `근거 ${item.evidence_ids.length}건, 신뢰도 ${Math.round(item.confidence * 100)}%` : "표본 보강 필요"}</small>
-                    </article>
-                  ))}
-                </div>
-              </section>
-            </div>
-
-            <div className="decision-grounding">
-              <section>
-                <h3>판단을 좌우한 위험</h3>
-                {result.brief.top_risks.length ? (
-                  <ul>
-                    {result.brief.top_risks.slice(0, 3).map((risk) => (
-                      <li key={risk.risk_id}>
-                        <strong>{businessKorean(risk.title)}</strong>
-                        <span>{businessKorean(risk.failure_path)}</span>
-                        <small>근거 {risk.evidence_ids.length}건, 신뢰도 {Math.round(risk.confidence * 100)}%</small>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p>현재 자료에서는 우선 수정이 필요한 위험이 확인되지 않았습니다.</p>
-                )}
-              </section>
-              <aside className="decision-action">
-                <span>지금 해야 할 일</span>
-                <h3>{businessKorean(primaryRevision?.title ?? copy?.title)}</h3>
-                <p>{businessKorean(primaryRevision?.change ?? copy?.description)}</p>
-                {primaryRevision && <small>확인 기준: {businessKorean(primaryRevision.success_metric)}</small>}
-              </aside>
-            </div>
-
-            <footer className="decision-meta">
-              <span>{result.llm_requested
-                ? result.fallback_used
-                  ? "Claude 요청 후 결정론적 안전 경로로 전환했습니다."
-                  : "Claude 자연어 분석을 사용했습니다."
-                : "결정론적 분석을 사용했습니다."}</span>
-              <span>실행 ID: {String(result.brief.run_id)}</span>
-            </footer>
-          </section>
-          <AgentPipeline events={result.events} mode="event" />
-          <div className="risk-section">
-            <div className="section-title">
-              <h2>확인된 위험</h2>
-              <p>연결 근거는 비식별 요약이며, 이용자의 직접 인용이 아닙니다.</p>
-            </div>
-            <div className="risk-grid">
-              {result.brief.top_risks.map((risk) => (
-                <article className="risk-card" key={risk.risk_id}>
-                  <span className="risk-category">{riskLabels[risk.category] ?? risk.category}</span>
-                  <h3>{businessKorean(risk.title)}</h3>
-                  <p>{businessKorean(risk.failure_path)}</p>
-                  <small>
-                    위험 수준 {severityLabels[risk.severity] ?? risk.severity}, 근거 {risk.evidence_ids.length}건, 신뢰도 {Math.round(risk.confidence * 100)}%
-                  </small>
-                  <details>
-                    <summary>연결된 파생 요약 보기</summary>
-                    <p>아래 내용은 비식별 요약입니다. 이용자의 문장을 직접 인용한 내용이 아니며, 원문은 저장하거나 표시하지 않습니다.</p>
-                    {result.feedback.evidence
-                      .filter((item) => risk.evidence_ids.includes(String(item.evidence_id)))
-                      .map((item) => (
-                        <div className="derived-evidence" key={String(item.evidence_id)}>
-                          <b>{String(item.evidence_id)}</b> {businessKorean(item.summary)}
-                        </div>
-                      ))}
-                  </details>
-                </article>
-              ))}
-            </div>
-          </div>
-          <ResultInsights result={result} />
-          <ArtifactDetails result={result} />
-        </section>
-      )}
+      {result && (() => {
+        const report = buildEventReport(result, submittedSubject);
+        return (
+          <DecisionReport
+            {...report}
+            reactionDetails={<EventReactionDetails result={result} />}
+            evidenceDetails={<EventEvidenceDetails result={result} />}
+            agentDetails={(
+              <>
+                <AgentPipeline events={result.events} mode="event" />
+                <ArtifactDetails result={result} />
+              </>
+            )}
+          />
+        );
+      })()}
     </>
   );
 }
