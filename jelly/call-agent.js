@@ -147,7 +147,12 @@ async function analyzeRows(rows) {
 
   const textBlock = data.content.find((block) => block.type === "text");
   if (!textBlock) throw new Error("응답에서 결과를 찾지 못했습니다.");
-  const parsed = JSON.parse(textBlock.text);
+  let parsed;
+  try {
+    parsed = JSON.parse(textBlock.text);
+  } catch (_) {
+    throw new Error("Jelly 응답 형식을 확인하지 못했습니다.");
+  }
 
   // 모델이 마침표를 빼먹는 경우에 대비해 원인·개선 문장 끝에 마침표를 보장합니다.
   const ensureFullStop = (s) => {

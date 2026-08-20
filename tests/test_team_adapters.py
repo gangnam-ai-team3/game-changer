@@ -597,6 +597,37 @@ def test_jelly_node_provider_errors_do_not_leak_to_cli_or_analyze(tmp_path):
     assert "status 500" in body
 
 
+def test_jelly_node_invalid_json_does_not_leak_provider_text(tmp_path):
+    secret = "provider-secret"
+    preload = tmp_path / "mock-fetch.js"
+    preload.write_text(
+        "global.fetch = async () => ({ ok: true, status: 200, json: async () => ({ "
+        "stop_reason: 'end_turn', content: [{ type: 'text', text: 'provider-secret' }] }) });\n",
+        encoding="utf-8",
+    )
+    script = r'''
+const { analyzeRows } = require("./jelly/call-agent.js");
+analyzeRows([{index: 0, evidenceId: "safe-1", content: "안전한 요약입니다."}])
+  .then(() => process.exitCode = 2)
+  .catch((error) => { console.error(error.message); process.exitCode = 1; });
+'''
+    env = os.environ.copy()
+    env["ANTHROPIC_API_KEY"] = "test-key"
+    completed = subprocess.run(
+        ["node", "-r", str(preload), "-e", script],
+        cwd=Path(__file__).resolve().parents[1],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert completed.returncode == 1
+    assert secret not in completed.stdout + completed.stderr
+    assert "Jelly 응답 형식을 확인하지 못했습니다." in completed.stderr
+
+
 class FakeAsyncMessages:
     def __init__(self, judge_result):
         self.judge_result = judge_result
