@@ -673,17 +673,10 @@ function UpdateEvidenceDetails({ result }: { result: UpdateRunResult }) {
   );
 }
 
-export function UpdateReview({
-  runBlocked = false,
-  onRunningChange,
-}: {
-  runBlocked?: boolean;
-  onRunningChange?: (running: boolean) => void;
-}) {
+export function UpdateReview() {
   const [form, setForm] = useState<UpdateForm>(initial);
   const [sourceMode, setSourceMode] = useState<SourceMode>("fixture");
   const [steamAppId, setSteamAppId] = useState("578080");
-  const [useSteam, setUseSteam] = useState(true);
   const [useX, setUseX] = useState(false);
   const [xQuery, setXQuery] = useState("PUBG Dragunov damage");
   const [periodStart, setPeriodStart] = useState("2026-08-06T00:00");
@@ -706,6 +699,9 @@ export function UpdateReview({
 
   const selectUpdateType = (next: UpdateType) => {
     setForm((previous) => ({ ...previous, update_type: next }));
+    if (next !== "weapon_balance" && sourceMode === "fixture") {
+      setSourceMode("live");
+    }
     setResult(null);
     setError("");
   };
@@ -751,10 +747,6 @@ export function UpdateReview({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (runBlocked) {
-      setError("다른 점검이 실행 중입니다. 완료된 뒤 시작해 주세요.");
-      return;
-    }
     if (!form.cutoff_on || !form.planned_on) {
       setError("자료 기준일과 출시 예정일을 모두 입력해 주세요.");
       return;
@@ -767,24 +759,12 @@ export function UpdateReview({
       setError("사전 구축 코퍼스를 사용하려면 자료 기준일을 오늘(UTC)보다 뒤로 설정해 주세요.");
       return;
     }
-    if (sourceMode === "fixture" && form.update_type !== "weapon_balance") {
-      setError("이 업데이트 유형의 저장 사례는 준비 중입니다. 실시간 갱신 또는 승인 CSV를 선택해 주세요.");
-      return;
-    }
     if (sourceMode === "import" && !csvData) {
       setError("승인 CSV 파일을 선택해 주세요.");
       return;
     }
-    if (sourceMode === "live" && !useSteam && !useX) {
-      setError("Steam 또는 X 중 하나 이상을 선택해 주세요.");
-      return;
-    }
-    if (sourceMode === "live" && useSteam && (!steamAppId || Number(steamAppId) < 1)) {
-      setError("올바른 Steam 앱 ID를 입력해 주세요.");
-      return;
-    }
-    if (sourceMode === "live" && useX && !xQuery.trim()) {
-      setError("X 검색어를 입력해 주세요.");
+    if (sourceMode === "live" && !steamAppId && !useX) {
+      setError("Steam 앱 ID 또는 X 검색 중 하나를 선택해 주세요.");
       return;
     }
 
@@ -797,7 +777,6 @@ export function UpdateReview({
 
     const requestSubject = form.update_name.trim() || "이름 없는 업데이트";
     setLoading(true);
-    onRunningChange?.(true);
     setError("");
     setResult(null);
     setEvents([]);
@@ -820,8 +799,7 @@ export function UpdateReview({
         details: updateDetails(form),
         source_mode: sourceMode,
         fixture_case: "dragunov_random_damage_removal",
-        steam_app_id:
-          sourceMode === "live" && useSteam ? Number(steamAppId) : null,
+        steam_app_id: sourceMode === "live" && steamAppId ? Number(steamAppId) : null,
         use_x: sourceMode === "live" ? useX : false,
         x_query:
           sourceMode === "live" && xQuery.trim()
@@ -877,7 +855,6 @@ export function UpdateReview({
       setError(caught instanceof Error ? caught.message : "업데이트 점검을 실행할 수 없습니다.");
     } finally {
       setLoading(false);
-      onRunningChange?.(false);
     }
   }
 
@@ -1103,18 +1080,17 @@ export function UpdateReview({
             </div>
           </header>
           <div className="source-mode-grid" role="group" aria-label="업데이트 자료 출처">
-            <button
-              type="button"
-              className="source-mode"
-              aria-pressed={sourceMode === "fixture"}
-              disabled={form.update_type !== "weapon_balance"}
-              onClick={() => selectSourceMode("fixture")}
-            >
-              <strong>검증된 저장 데이터</strong>
-              <span>{form.update_type === "weapon_balance"
-                ? "Dragunov 합성 비교 자료로 안정적으로 시연합니다."
-                : "이 업데이트 유형의 저장 사례는 준비 중입니다."}</span>
-            </button>
+            {form.update_type === "weapon_balance" && (
+              <button
+                type="button"
+                className="source-mode"
+                aria-pressed={sourceMode === "fixture"}
+                onClick={() => selectSourceMode("fixture")}
+              >
+                <strong>검증된 저장 데이터</strong>
+                <span>Dragunov 합성 비교 자료로 안정적으로 시연합니다.</span>
+              </button>
+            )}
             <button
               type="button"
               className="source-mode"
@@ -1158,64 +1134,44 @@ export function UpdateReview({
             </div>
           )}
           {sourceMode === "live" && (
-            <div className="source-fields">
-              <div className="grid two" role="group" aria-label="실시간 자료 선택">
-                <label className="toggle source-toggle">
-                  <input
-                    type="checkbox"
-                    checked={useSteam}
-                    onChange={(event) => setUseSteam(event.target.checked)}
-                  />
-                  <span>Steam 공개 리뷰 수집</span>
-                  <small>선택하면 입력한 앱 ID의 공개 리뷰를 확인합니다.</small>
-                </label>
-                <label className="toggle source-toggle">
-                  <input
-                    type="checkbox"
-                    checked={useX}
-                    onChange={(event) => setUseX(event.target.checked)}
-                  />
-                  <span>X 공개 게시물 수집</span>
-                  <small>선택하면 서버에 설정된 X API 연결을 사용합니다.</small>
-                </label>
-              </div>
-              <div className="grid two source-fields">
-                {useSteam && (
-                  <label className="field">
-                    <span>Steam 앱 ID</span>
-                    <input
-                      inputMode="numeric"
-                      value={steamAppId}
-                      onChange={(event) => setSteamAppId(event.target.value)}
-                    />
-                  </label>
-                )}
-                {useX && (
-                  <label className="field">
-                    <span>X 검색어</span>
-                    <input value={xQuery} onChange={(event) => setXQuery(event.target.value)} />
-                  </label>
-                )}
-                <label className="field">
-                  <span>수집 시작 시각 (UTC)</span>
-                  <input
-                    type="datetime-local"
-                    value={periodStart}
-                    onChange={(event) => setPeriodStart(event.target.value)}
-                  />
-                </label>
-                <label className="field">
-                  <span>수집 종료 및 기준 시각 (UTC)</span>
-                  <input
-                    type="datetime-local"
-                    value={periodEnd}
-                    onChange={(event) => setPeriodEnd(event.target.value)}
-                  />
-                </label>
-              </div>
-              <p className="source-note">
-                Steam만, X만, 또는 두 자료를 함께 선택할 수 있습니다. 비밀 키는 서버 환경 변수에서만 읽습니다.
-              </p>
+            <div className="grid two source-fields">
+              <label className="field">
+                <span>Steam 앱 ID</span>
+                <input
+                  inputMode="numeric"
+                  value={steamAppId}
+                  onChange={(event) => setSteamAppId(event.target.value)}
+                />
+              </label>
+              <label className="field">
+                <span>X 검색어</span>
+                <input value={xQuery} onChange={(event) => setXQuery(event.target.value)} />
+              </label>
+              <label className="field">
+                <span>수집 시작 시각 (UTC)</span>
+                <input
+                  type="datetime-local"
+                  value={periodStart}
+                  onChange={(event) => setPeriodStart(event.target.value)}
+                />
+              </label>
+              <label className="field">
+                <span>수집 종료 및 기준 시각 (UTC)</span>
+                <input
+                  type="datetime-local"
+                  value={periodEnd}
+                  onChange={(event) => setPeriodEnd(event.target.value)}
+                />
+              </label>
+              <label className="toggle source-toggle">
+                <input
+                  type="checkbox"
+                  checked={useX}
+                  onChange={(event) => setUseX(event.target.checked)}
+                />
+                <span>X 공개 자료도 수집</span>
+                <small>비용 한도와 기준일은 서버의 안전 정책으로 검증합니다.</small>
+              </label>
             </div>
           )}
           {sourceMode === "import" && (
@@ -1249,8 +1205,8 @@ export function UpdateReview({
             {sourceMode === "fixture" && " 저장 자료는 합성 비교 사례입니다."}
             {" "}API 키와 자료 원문은 화면에 표시하거나 저장하지 않습니다.
           </p>
-          <button className="primary" disabled={loading || runBlocked}>
-            {loading ? "업데이트 점검 중..." : runBlocked ? "다른 점검 실행 중" : "업데이트 점검 시작"}
+          <button className="primary" disabled={loading}>
+            {loading ? "업데이트 점검 중..." : "업데이트 점검 시작"}
           </button>
           {error && (
             <p className="error" role="alert">

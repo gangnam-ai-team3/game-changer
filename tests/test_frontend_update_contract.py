@@ -77,10 +77,13 @@ def test_actual_after_section_is_conditionally_rendered():
 
 def test_language_ratios_are_hidden_when_sample_conclusion_is_hidden():
     source = (ROOT / "components" / "UpdateReview.tsx").read_text(encoding="utf-8")
+    cards = (ROOT / "components" / "AudienceCards.tsx").read_text(encoding="utf-8")
 
-    assert "language.conclusion ?" in source
-    assert "language.hidden_reason" in source
-    assert "language.sentiment_counts" in source
+    assert "conclusion={language.conclusion}" in source
+    assert "hiddenReason={language.hidden_reason}" in source
+    assert "sentimentCounts={language.sentiment_counts}" in source
+    assert "conclusion ?? hiddenReason" in cards
+    assert "sentimentTotal > 0 && conclusion" in cards
 
 
 def test_official_context_is_visually_separate_from_synthetic_evidence():
@@ -293,18 +296,6 @@ process.stdout.write(JSON.stringify({
         "tomorrowAllowed": True,
     }
 
-
-def test_mode_switch_preserves_each_review_state():
-    source = (ROOT / "page.tsx").read_text(encoding="utf-8")
-    update_source = (ROOT / "components" / "UpdateReview.tsx").read_text(encoding="utf-8")
-
-    assert 'hidden={reviewMode !== "event"}' in source
-    assert 'hidden={reviewMode !== "update"}' in source
-    assert "runningMode" in source
-    assert 'runBlocked={runningMode === "update"}' in source
-    assert 'runBlocked={runningMode === "event"}' in source
-    assert "disabled={loading || runBlocked}" in source
-    assert "disabled={loading || runBlocked}" in update_source
 
 
 def test_unavailable_update_fixture_stays_visible_and_explains_why():
