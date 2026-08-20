@@ -17,9 +17,11 @@ from res.team_adapters import (
 )
 from tests.test_api import request_payload
 from tests.test_update_api import payload as update_payload
+from update_review.audit import UpdateAuditAgent
 from update_review.evidence import UpdateEvidenceAgent
-from update_review.fixtures import load_update_feedback_fixture
+from update_review.fixtures import load_dragunov_brief, load_update_feedback_fixture
 from update_review.orchestrator import UpdateReviewOrchestrator
+from update_review.redteam import UpdateRedteamAgent
 
 
 def _request(pipeline: str, *, source_mode: str = "corpus", use_llm: bool):
@@ -56,8 +58,21 @@ def _install_team_fakes(monkeypatch):
 
     def make_budget(**kwargs):
         budget = ClaudeBudget(**kwargs)
+        budget.reserve_models = []
+        real_reserve = budget.reserve
+
+        def recording_reserve(payload_chars, **reserve_kwargs):
+            budget.reserve_models.append(reserve_kwargs["model"])
+            return real_reserve(payload_chars, **reserve_kwargs)
+
+        budget.reserve = recording_reserve
         budgets.append(budget)
         return budget
+
+    class FakePersonaEvidence(UpdateEvidenceAgent):
+        def run(self, bundle, on_event=None):
+            self.budget.reserve(1, model="fake-haiku")
+            return self.run_deterministic(bundle, on_event=on_event)
 
     class FakeJellyRunner:
         def __init__(self, *, budget):
@@ -66,6 +81,7 @@ def _install_team_fakes(monkeypatch):
 
         def run(self, rows):
             self.calls.append(rows)
+            self.budget.reserve(1, model="fake-jelly")
             return {
                 "rows": [
                     {
@@ -86,6 +102,7 @@ def _install_team_fakes(monkeypatch):
 
         def run(self, claim_text, candidate_chunks):
             self.calls.append((claim_text, candidate_chunks))
+            self.budget.reserve(1, model="fake-jinbae")
             return {
                 "verdict": "grounded",
                 "citations": [],
@@ -93,6 +110,7 @@ def _install_team_fakes(monkeypatch):
             }
 
     monkeypatch.setattr(api_main, "ClaudeBudget", make_budget)
+    monkeypatch.setattr(api_main, "UpdateEvidenceAgent", FakePersonaEvidence)
     monkeypatch.setattr(api_main, "JellyRunner", FakeJellyRunner)
     monkeypatch.setattr(api_main, "JinbaeProbe", FakeJinbaeProbe)
     return budgets, runners, probes
@@ -174,6 +192,12 @@ def test_corpus_team_wiring(monkeypatch, tmp_path, pipeline, use_llm):
     assert len(budgets) == len(runners) == len(probes) == 1
     assert runners[0].budget is probes[0].budget is budgets[0]
     assert budgets[0].max_requests == 3
+    assert budgets[0].requests == (2 if pipeline == "event" else 3)
+    assert budgets[0].reserve_models == (
+        ["fake-jelly", "fake-jinbae"]
+        if pipeline == "event"
+        else ["fake-haiku", "fake-jelly", "fake-jinbae"]
+    )
     assert len(runners[0].calls) == len(probes[0].calls) == 1
     assert (requested, provider) == (True, "claude")
 
@@ -290,3 +314,146 @@ def test_update_corpus_jelly_failure_falls_back_and_continues_jinbae(
     assert ("audit_strategy", "jinbae_probe_checked") in event_nodes
     assert "safe" not in " ".join(event.message for event in result.events)
     assert (result.llm_requested, result.llm_provider) == (True, "claude")
+
+
+def test_update_direct_team_without_external_budget_continues_after_jelly_failure():
+    jelly_calls, probe_calls = [], []
+
+    class UnavailableJellyRunner:
+        def run(self, rows):
+            jelly_calls.append(rows)
+            raise StructuredModelError(ErrorCode.SOURCE_UNAVAILABLE, "private")
+
+    class GroundedJinbaeProbe:
+        def run(self, claim_text, candidate_chunks):
+            probe_calls.append((claim_text, candidate_chunks))
+            return {
+                "verdict": "grounded",
+                "citations": [candidate_chunks[0]["id"]],
+                "rationale": "제공된 근거로 뒷받침됩니다.",
+            }
+
+    brief = load_dragunov_brief("direct-team-no-budget")
+    baseline = UpdateReviewOrchestrator(
+        collector=_FixtureCorpusCollector(None)
+    ).run(brief)
+    result = UpdateReviewOrchestrator(
+        collector=_FixtureCorpusCollector(None),
+        evidence=UpdateEvidenceAgent(),
+        redteam=UpdateJellyRedteamAdapter(
+            runner=UnavailableJellyRunner(), enabled=True
+        ),
+        audit=UpdateJinbaeAuditAdapter(
+            probe=GroundedJinbaeProbe(), enabled=True
+        ),
+        use_llm=True,
+    ).run(brief)
+
+    assert len(jelly_calls) == len(probe_calls) == 1
+    assert result.fallback_used is True
+    assert result.analysis_incomplete is False
+    assert result.brief.decision == baseline.brief.decision
+    assert result.impact == baseline.impact
+    assert "private" not in repr(
+        [event.model_dump(mode="json") for event in result.events]
+    )
+
+
+def test_update_persona_copy_fallback_is_reflected_in_pipeline_result(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    brief = load_dragunov_brief("persona-copy-pipeline-fallback")
+    baseline = UpdateReviewOrchestrator(
+        collector=_FixtureCorpusCollector(None)
+    ).run(brief)
+
+    result = UpdateReviewOrchestrator(
+        collector=_FixtureCorpusCollector(None),
+        evidence=UpdateEvidenceAgent(rewrite_personas=True),
+        redteam=UpdateRedteamAgent(),
+        audit=UpdateAuditAgent(),
+        use_llm=True,
+    ).run(brief)
+
+    assert result.fallback_used is True
+    assert result.analysis_incomplete is False
+    assert result.brief.decision == baseline.brief.decision
+    assert result.evidence == baseline.evidence
+    assert any(event.node == "persona_copy_fallback" for event in result.events)
+    assert "ANTHROPIC_API_KEY" not in repr(
+        [event.model_dump(mode="json") for event in result.events]
+    )
+
+
+def test_update_shared_budget_exhaustion_falls_back_only_for_exhausted_stage():
+    budget = ClaudeBudget(max_requests=2, max_input_chars=100_000, max_usd=100)
+
+    class BudgetPersonaEvidence(UpdateEvidenceAgent):
+        calls = 0
+
+        def run(self, bundle, on_event=None):
+            self.calls += 1
+            budget.reserve(1, model="fake-haiku")
+            return self.run_deterministic(bundle, on_event=on_event)
+
+    class BudgetJellyRunner:
+        attempts = 0
+        provider_calls = 0
+
+        def run(self, rows):
+            self.attempts += 1
+            budget.reserve(1, model="fake-jelly")
+            self.provider_calls += 1
+            return {
+                "rows": [
+                    {
+                        "index": index,
+                        "trend": "위험",
+                        "cause": "근거에서 위험 원인이 확인됩니다.",
+                        "fix": "근거에 맞춰 수정안을 확인해야 합니다.",
+                    }
+                    for index in range(len(rows))
+                ],
+                "synthesis": [],
+            }
+
+    class BudgetJinbaeProbe:
+        attempts = 0
+        provider_calls = 0
+
+        def run(self, claim_text, candidate_chunks):
+            self.attempts += 1
+            budget.reserve(1, model="fake-jinbae")
+            self.provider_calls += 1
+            return {
+                "verdict": "grounded",
+                "citations": [candidate_chunks[0]["id"]],
+                "rationale": "제공된 근거로 뒷받침됩니다.",
+            }
+
+    brief = load_dragunov_brief("shared-budget-exhaustion")
+    baseline = UpdateReviewOrchestrator(
+        collector=_FixtureCorpusCollector(None)
+    ).run(brief)
+    evidence = BudgetPersonaEvidence(budget=budget)
+    jelly = BudgetJellyRunner()
+    jinbae = BudgetJinbaeProbe()
+    result = UpdateReviewOrchestrator(
+        collector=_FixtureCorpusCollector(None),
+        evidence=evidence,
+        redteam=UpdateJellyRedteamAdapter(runner=jelly, enabled=True),
+        audit=UpdateJinbaeAuditAdapter(probe=jinbae, enabled=True),
+        use_llm=True,
+        budget=budget,
+    ).run(brief)
+
+    assert budget.requests == 2
+    assert evidence.calls == jelly.attempts == jelly.provider_calls == 1
+    assert jinbae.attempts == 1
+    assert jinbae.provider_calls == 0
+    assert result.fallback_used is True
+    assert result.analysis_incomplete is False
+    assert result.brief.decision == baseline.brief.decision
+    assert result.impact == baseline.impact
+    assert ("audit_strategy", "fallback") in [
+        (event.agent, event.node) for event in result.events
+    ]

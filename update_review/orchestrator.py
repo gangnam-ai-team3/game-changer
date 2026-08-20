@@ -49,7 +49,6 @@ class UpdateReviewOrchestrator:
         llm_client=None,
         budget: ClaudeBudget | None = None,
     ) -> None:
-        continue_after_fallback = budget is not None
         budget = budget if budget is not None else (ClaudeBudget() if use_llm else None)
         self.collector = collector or UpdateCollectorAgent(
             use_llm=use_llm, client=llm_client, budget=budget
@@ -64,7 +63,6 @@ class UpdateReviewOrchestrator:
             use_llm=use_llm, client=llm_client, budget=budget
         )
         self.budget = budget
-        self._continue_after_fallback = continue_after_fallback
         self.use_llm = use_llm
         self.llm_provider = "claude" if use_llm else "deterministic"
         self.llm_requested = use_llm
@@ -185,6 +183,7 @@ class UpdateReviewOrchestrator:
         )
         if analysis_incomplete:
             force_deterministic = True
+        evidence_event_start = len(events)
         evidence = stage(
             "evidence_rag_personas",
             lambda: self.evidence_agent.run(
@@ -198,6 +197,10 @@ class UpdateReviewOrchestrator:
             {feedback.ref},
             allow_llm=self.use_llm,
         )
+        fallback_used = fallback_used or any(
+            event.node == "persona_copy_fallback"
+            for event in events[evidence_event_start:]
+        )
         impact = stage(
             "event_redteam",
             lambda: self.redteam.run(
@@ -209,8 +212,7 @@ class UpdateReviewOrchestrator:
             UpdateImpactAssessment,
             Producer.EVENT_REDTEAM,
             {brief.ref, evidence.ref},
-            allow_llm=self.use_llm
-            and (self._continue_after_fallback or not fallback_used),
+            allow_llm=self.use_llm,
         )
         validated = stage(
             "audit_strategy",
@@ -231,9 +233,7 @@ class UpdateReviewOrchestrator:
             UpdateValidatedDecision,
             Producer.AUDIT_STRATEGY,
             {feedback.ref, evidence.ref, impact.ref},
-            allow_llm=self.use_llm
-            and feedback.input_mode != InputMode.LIVE
-            and (self._continue_after_fallback or not fallback_used),
+            allow_llm=self.use_llm and feedback.input_mode != InputMode.LIVE,
         )
         final = self.audit.to_brief(brief, evidence, impact, validated).model_copy(
             update=metadata

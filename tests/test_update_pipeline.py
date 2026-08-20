@@ -352,7 +352,7 @@ def test_invalid_claude_reference_retries_then_uses_fixture_safe_path():
     assert result.brief.decision is UpdateDecision.TEST
     assert result.fallback_used is True
     assert result.analysis_incomplete is False
-    assert len(fake.messages.calls) == 2
+    assert len(fake.messages.calls) == 3
     assert any(item.state.value == "retrying" for item in result.events)
 
 
@@ -406,7 +406,7 @@ def test_claude_auth_failure_falls_back_without_retry_or_error_text_leakage():
 
     assert result.fallback_used is True
     assert result.brief.decision is UpdateDecision.TEST
-    assert calls == [True]
+    assert calls == [True] * 3
     assert not any(item.state.value == "retrying" for item in result.events)
     assert "test-key" not in event_json
 
@@ -721,7 +721,7 @@ def test_unapproved_release_result_evidence_falls_back_without_persistence(
     assert result.brief.decision is UpdateDecision.TEST
     assert result.fallback_used is True
     assert result.evidence == baseline.evidence
-    assert len(fake.messages.calls) == 2
+    assert len(fake.messages.calls) == 3
     assert release_result_claim not in brief_json
     assert release_result_claim not in artifacts
     assert release_result_claim not in log_path.read_text(encoding="utf-8")
