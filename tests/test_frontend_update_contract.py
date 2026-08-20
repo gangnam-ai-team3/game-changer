@@ -26,13 +26,18 @@ def test_existing_event_stream_and_pipeline_mode_are_preserved():
 
 def test_update_screen_has_prelaunch_copy_and_four_decision_labels():
     source = (ROOT / "components" / "UpdateReview.tsx").read_text(encoding="utf-8")
+    report_source = (ROOT / "components" / "DecisionReport.tsx").read_text(encoding="utf-8")
 
-    assert "출시 전 예상이며 실제 이용자 반응이 아닙니다" in source
+    assert "실제 이용자 인용이 아닙니다" in report_source
     assert 'Go: "출시 가능"' in source
-    assert 'Revise: "일부 수정 후 출시"' in source
+    assert 'Revise: "수정 후 재검토"' in source
     assert 'Test: "테스트 후 출시"' in source
     assert 'Hold: "판정 보류"' in source
     assert 'fetch(`${API_URL}/api/update-runs/stream`' in source
+    assert "DecisionReport" in source
+    assert "reactionDetails" in source
+    assert "evidenceDetails" in source
+    assert "agentDetails" in source
 
 
 def test_event_result_uses_shared_decision_report():
@@ -289,6 +294,103 @@ process.stdout.write(JSON.stringify({
     }
 
 
+def test_mode_switch_preserves_each_review_state():
+    source = (ROOT / "page.tsx").read_text(encoding="utf-8")
+    update_source = (ROOT / "components" / "UpdateReview.tsx").read_text(encoding="utf-8")
+
+    assert 'hidden={reviewMode !== "event"}' in source
+    assert 'hidden={reviewMode !== "update"}' in source
+    assert "runningMode" in source
+    assert 'runBlocked={runningMode === "update"}' in source
+    assert 'runBlocked={runningMode === "event"}' in source
+    assert "disabled={loading || runBlocked}" in source
+    assert "disabled={loading || runBlocked}" in update_source
+
+
+def test_unavailable_update_fixture_stays_visible_and_explains_why():
+    source = (ROOT / "components" / "UpdateReview.tsx").read_text(encoding="utf-8")
+
+    assert 'disabled={form.update_type !== "weapon_balance"}' in source
+    assert "저장 사례는 준비 중입니다" in source
+    assert 'setSourceMode("live")' not in source
+
+
+def test_official_context_is_visually_separate_from_synthetic_evidence():
+    source = (ROOT / "components" / "UpdateReview.tsx").read_text(encoding="utf-8")
+
+    assert "공식으로 확인된 변경 맥락" in source
+    assert "official_context" in source
+    assert "synthetic" in source
+
+
+def test_shared_pipeline_has_update_contract_names_and_owners():
+    source = (ROOT / "components" / "AgentPipeline.tsx").read_text(encoding="utf-8")
+
+    for contract in (
+        "UpdateFeedbackBundle",
+        "UpdateEvidencePack",
+        "UpdateImpactAssessment",
+        "UpdateValidatedDecision",
+    ):
+        assert contract in source
+    for owner in ("정현예", "유주심", "정아현", "승진배"):
+        assert owner in source
+
+
+def test_update_client_never_accepts_or_serializes_provider_credentials():
+    source = (ROOT / "components" / "UpdateReview.tsx").read_text(encoding="utf-8")
+
+    assert "ANTHROPIC_API_KEY" not in source
+    assert "api_key" not in source
+    assert "authorization" not in source.lower()
+    assert "file.name" not in source
+
+
+def _live_period_payload_in_timezone(timezone: str) -> dict[str, str | None]:
+    script = """
+import { utcWallClockToIso } from "./frontend/app/components/utcWallClock.ts";
+
+process.stdout.write(JSON.stringify({
+  period_start: utcWallClockToIso("2026-08-06T00:00"),
+  period_end: utcWallClockToIso("2026-08-13T00:00"),
+  invalid_period: utcWallClockToIso("2026-02-30T00:00"),
+}));
+"""
+    completed = subprocess.run(
+        [
+            "node",
+            "--no-warnings",
+            "--experimental-strip-types",
+            "--input-type=module",
+            "--eval",
+            script,
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        check=True,
+        capture_output=True,
+        env={**os.environ, "TZ": timezone},
+        text=True,
+    )
+    return json.loads(completed.stdout)
+
+
+def test_live_datetime_payload_keeps_utc_wall_clock_in_non_utc_timezones():
+    source = (ROOT / "components" / "UpdateReview.tsx").read_text(encoding="utf-8")
+
+    assert "period_start: livePeriodStart" in source
+    assert "period_end: livePeriodEnd" in source
+    assert "new Date(periodStart).toISOString()" not in source
+    assert "new Date(periodEnd).toISOString()" not in source
+
+    expected = {
+        "period_start": "2026-08-06T00:00:00Z",
+        "period_end": "2026-08-13T00:00:00Z",
+        "invalid_period": None,
+    }
+    assert _live_period_payload_in_timezone("America/New_York") == expected
+    assert _live_period_payload_in_timezone("Asia/Seoul") == expected
+
+
 def test_shared_decision_report_has_accessible_one_page_structure():
     source = (ROOT / "components" / "DecisionReport.tsx").read_text(encoding="utf-8")
     styles = (ROOT / "globals.css").read_text(encoding="utf-8")
@@ -381,3 +483,58 @@ postcss.parse(fs.readFileSync("frontend/app/globals.css", "utf8"));
         capture_output=True,
         text=True,
     )
+
+
+def test_update_result_maps_ids_to_shared_decision_report():
+    source = (ROOT / "components" / "UpdateReview.tsx").read_text(encoding="utf-8")
+
+    assert 'import { DecisionReport, DecisionReportData }' in source
+    assert "decision_reason: string" in source
+    assert "submittedSubject" in source
+    assert "const requestSubject = form.update_name.trim()" in source
+    assert "setSubmittedSubject(requestSubject)" in source
+    assert "function selectUpdatePositive" in source
+    assert "function findUpdateRecommendation" in source
+    assert "function findUpdateMetric" in source
+    assert "top_risks[0]" in source
+    assert "addresses_risk_ids.includes(riskId)" in source
+    assert "validation_metric_ids" in source
+    assert "item.metric_id === metricId" in source
+    assert "updateEvidenceCount(item.evidence_ids)" in source
+    assert "left.impact_id.localeCompare(right.impact_id)" in source
+    assert 'opinionVisible={visibleOpinions.has(item.persona)}' in source
+    assert "feedback.input_mode" in source
+    assert "<DecisionReport" in source
+    assert "reactionDetails={" in source
+    assert "evidenceDetails={" in source
+    assert "agentDetails={" in source
+    assert "result.fallback_used &&" not in source
+    assert "ref={decisionHeading}" not in source
+
+
+def test_both_result_modes_use_one_page_report_without_duplicate_top_sections():
+    event_source = (ROOT / "page.tsx").read_text(encoding="utf-8")
+    update_source = (ROOT / "components" / "UpdateReview.tsx").read_text(encoding="utf-8")
+    report_source = (ROOT / "components" / "DecisionReport.tsx").read_text(encoding="utf-8")
+
+    for source in (event_source, update_source):
+        assert "<DecisionReport" in source
+        assert "analysisIncomplete: result.analysis_incomplete" in source
+        assert "decision_reason" in source
+        assert "executive_summary" in source
+        assert "opinionVisible=" in source
+        assert 'mode="' in source
+        assert 'active mode=' in source
+        assert 'className="decision-brief"' not in source
+        assert 'className="final-pipeline"' not in source
+    assert "실제 이용자 인용이 아닙니다" in report_source
+
+
+def test_one_page_report_copy_has_no_middle_dots():
+    for path in (
+        ROOT / "components" / "DecisionReport.tsx",
+        ROOT / "page.tsx",
+        ROOT / "components" / "UpdateReview.tsx",
+        ROOT / "components" / "AudienceCards.tsx",
+    ):
+        assert "·" not in path.read_text(encoding="utf-8")

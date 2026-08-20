@@ -5,6 +5,7 @@ import { ChangeEvent, FormEvent, useState } from "react";
 import { AgentEvent, AgentPipeline } from "./AgentPipeline";
 import { businessKorean, businessKoreanJson } from "./businessKorean";
 import { corpusDemoDates, isFutureUtcDate } from "./corpusDemoDates";
+import { DecisionReport, DecisionReportData } from "./DecisionReport";
 import { utcWallClockToIso } from "./utcWallClock";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -106,7 +107,7 @@ type UpdateRunResult = {
   feedback: { evidence: Evidence[]; status?: string; input_mode?: string } & Artifact;
   evidence: Artifact;
   impact: Artifact;
-  validated: Artifact;
+  validated: { decision_reason: string } & Artifact;
   events: AgentEvent[];
   fallback_used: boolean;
   analysis_incomplete: boolean;
@@ -319,7 +320,335 @@ function ArtifactDetails({ result }: { result: UpdateRunResult }) {
   );
 }
 
-export function UpdateReview() {
+const updateSeverityLabels: Record<string, string> = {
+  Low: "낮음",
+  Medium: "보통",
+  High: "높음",
+  Critical: "매우 높음",
+};
+
+function updateEvidenceCount(ids: string[]) {
+  return new Set(ids).size;
+}
+
+function updateExpectedAction(value: string) {
+  const marker = "예상 행동:";
+  const index = value.indexOf(marker);
+  return index >= 0 ? businessKorean(value.slice(index + marker.length).trim()) : "";
+}
+
+function updateOpinionKey(value: string) {
+  const opinion = value.split("예상 행동:")[0].replace("예상 대표 의견:", "");
+  return businessKorean(opinion).replace(/[\p{P}\s]/gu, "");
+}
+
+function selectUpdatePositive(items: Impact[]) {
+  return items.slice().sort((left, right) => (
+    updateEvidenceCount(right.evidence_ids) - updateEvidenceCount(left.evidence_ids)
+    || right.confidence - left.confidence
+    || left.impact_id.localeCompare(right.impact_id)
+  ))[0];
+}
+
+function findUpdateRecommendation(recommendations: Recommendation[], riskId?: string) {
+  if (!riskId) return undefined;
+  return recommendations
+    .filter((item) => item.addresses_risk_ids.includes(riskId))
+    .slice()
+    .sort((left, right) => left.priority - right.priority)[0];
+}
+
+function findUpdateMetric(metrics: Metric[], recommendation: Recommendation | undefined, riskId?: string) {
+  for (const metricId of recommendation?.validation_metric_ids ?? []) {
+    const metric = metrics.find((item) => item.metric_id === metricId);
+    if (metric) return metric;
+  }
+  return riskId ? metrics.find((item) => item.addresses_risk_ids.includes(riskId)) : undefined;
+}
+
+function visibleUpdateOpinions(items: PersonaImpact[]) {
+  const seen = new Set<string>();
+  const visible = new Set<string>();
+  items.slice().sort((left, right) => (
+    updateEvidenceCount(right.evidence_ids) - updateEvidenceCount(left.evidence_ids)
+    || right.confidence - left.confidence
+    || left.persona.localeCompare(right.persona)
+  )).forEach((item) => {
+    const key = updateOpinionKey(item.expected_reaction);
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      visible.add(item.persona);
+    }
+  });
+  return visible;
+}
+
+function buildUpdateReport(result: UpdateRunResult, subject: string): DecisionReportData {
+  const primaryRisk = result.brief.top_risks[0];
+  const positive = selectUpdatePositive(result.brief.expected_positive);
+  const recommendation = findUpdateRecommendation(result.brief.recommendations, primaryRisk?.risk_id);
+  const metric = findUpdateMetric(result.brief.validation_metrics, recommendation, primaryRisk?.risk_id);
+  const modeLabels: Record<string, string> = {
+    fixture: "검증된 저장 자료",
+    corpus: "사전 구축 코퍼스",
+    live: "실시간 공개 자료",
+    import: "승인 CSV",
+  };
+  const modeLabel = result.feedback.input_mode ? modeLabels[result.feedback.input_mode] : undefined;
+  const evidenceCount = new Set(result.brief.evidence.map((item) => item.evidence_id)).size;
+  const languageCount = result.brief.language_insights.filter((item) => item.conclusion).length;
+  const affected = positive?.affected_personas.map((id) => personaLabels[id] ?? "이용자 유형 확인 필요").join(", ");
+  const positiveAction = positive ? updateExpectedAction(positive.summary) : "";
+
+  return {
+    subject,
+    decision: result.brief.decision,
+    decisionLabel: decisionLabels[result.brief.decision] ?? "판정 확인 필요",
+    conclusion: businessKorean([
+      result.validated.decision_reason,
+      recommendation ? `우선 조치는 ‘${recommendation.title}’입니다.` : "",
+    ].filter(Boolean).join(" ")),
+    fullReasoning: businessKorean(result.brief.executive_summary),
+    sourceScope: [
+      `고유 근거 ${evidenceCount}건`,
+      `결론 공개 언어권 ${languageCount}개`,
+      modeLabel,
+    ].filter(Boolean).join(", "),
+    analysisIncomplete: result.analysis_incomplete,
+    expectedCard: {
+      label: "예상 효과",
+      title: businessKorean(positive?.title ?? "대표 효과 선정 어려움"),
+      body: positive
+        ? businessKorean([affected ? `영향 이용자는 ${affected}입니다.` : "", positiveAction].filter(Boolean).join(" "))
+        : "현재 근거만으로 대표 효과를 선정하기 어렵습니다.",
+      meta: positive ? `고유 근거 ${updateEvidenceCount(positive.evidence_ids)}건` : undefined,
+    },
+    riskCard: {
+      label: "가장 큰 위험",
+      title: businessKorean(primaryRisk?.title ?? "우선 위험이 확인되지 않았습니다"),
+      body: businessKorean(primaryRisk?.failure_path ?? "현재 검증 범위에서 우선 위험이 확인되지 않았습니다."),
+      meta: primaryRisk ? `${updateSeverityLabels[primaryRisk.severity] ?? "수준 확인 필요"}, 고유 근거 ${updateEvidenceCount(primaryRisk.evidence_ids)}건` : undefined,
+    },
+    actionCard: {
+      label: "출시 전 조치",
+      title: businessKorean(recommendation?.title ?? "연결된 출시 전 조치를 확인할 수 없습니다"),
+      body: businessKorean(recommendation?.action ?? "위험과 연결된 권고안을 상세 근거에서 확인해 주세요."),
+      meta: `확인 기준: ${businessKorean(metric?.success_condition ?? "확인 기준이 연결되지 않았습니다")}`,
+    },
+    riskRows: result.brief.top_risks.slice(0, 3).map((risk) => {
+      const linkedRecommendation = findUpdateRecommendation(result.brief.recommendations, risk.risk_id);
+      const linkedMetric = findUpdateMetric(result.brief.validation_metrics, linkedRecommendation, risk.risk_id);
+      return {
+        id: risk.risk_id,
+        risk: businessKorean(risk.title),
+        level: updateSeverityLabels[risk.severity] ?? "확인 필요",
+        impact: businessKorean(risk.failure_path),
+        action: businessKorean(linkedRecommendation?.action ?? "연결된 출시 전 조치를 확인할 수 없습니다"),
+        check: businessKorean(linkedMetric?.success_condition ?? "확인 기준이 연결되지 않았습니다"),
+      };
+    }),
+  };
+}
+
+function UpdateReactionDetails({ result }: { result: UpdateRunResult }) {
+  const visibleOpinions = visibleUpdateOpinions(result.brief.persona_impacts);
+  const signalTitles = new Map(
+    [...result.brief.expected_positive, ...result.brief.expected_negative, ...result.brief.split_conditions]
+      .map((signal) => [
+        "signal_id" in signal ? signal.signal_id : signal.impact_id.replace(/^impact-/, ""),
+        businessKorean(signal.title),
+      ]),
+  );
+
+  return (
+    <section className="reaction-section">
+      <div className="section-title">
+        <h3>출시 전 예상 반응</h3>
+        <p>예상되는 긍정 반응과 우려 반응, 반응이 갈릴 조건을 실제 반응과 구분해 표시합니다.</p>
+      </div>
+      <div className="reaction-grid">
+        <article className="reaction-card positive">
+          <span>예상 긍정 반응</span>
+          {result.brief.expected_positive.length ? result.brief.expected_positive.map((item) => (
+            <div className="reaction-entry" key={item.impact_id}>
+              <h3>{businessKorean(item.title)}</h3>
+              <p className="reaction-copy">{businessKorean(item.summary)}</p>
+              <small>근거 {updateEvidenceCount(item.evidence_ids)}건, 신뢰도 {Math.round(item.confidence * 100)}%</small>
+            </div>
+          )) : <p>현재 자료에서 공개할 긍정 예상 신호가 없습니다.</p>}
+        </article>
+        <article className="reaction-card negative">
+          <span>예상 부정 반응</span>
+          {result.brief.expected_negative.length ? result.brief.expected_negative.map((item) => (
+            <div className="reaction-entry" key={item.impact_id}>
+              <h3>{businessKorean(item.title)}</h3>
+              <p className="reaction-copy">{businessKorean(item.summary)}</p>
+              <small>근거 {updateEvidenceCount(item.evidence_ids)}건, 신뢰도 {Math.round(item.confidence * 100)}%</small>
+            </div>
+          )) : <p>현재 자료에서 공개할 부정 예상 신호가 없습니다.</p>}
+        </article>
+        <article className="reaction-card split">
+          <span>반응이 갈릴 조건</span>
+          {result.brief.split_conditions.length ? result.brief.split_conditions.map((item) => (
+            <div className="reaction-entry" key={item.signal_id}>
+              <h3>{businessKorean(item.title)}</h3>
+              <p className="reaction-copy">{businessKorean(item.summary)}</p>
+            </div>
+          )) : <p>현재 자료에서는 뚜렷하게 반응이 갈릴 조건이 확인되지 않았습니다.</p>}
+        </article>
+      </div>
+      <div className="audience-subsection">
+        <h3>이용자 유형별 예상 반응</h3>
+        <p>각 이용자 유형의 대표 의견과 예상 행동을 카드별로 비교할 수 있습니다.</p>
+        <div className="audience-card-grid">
+          {result.brief.persona_impacts.map((item) => {
+            const relatedTitles = [...item.positive_signal_ids, ...item.negative_signal_ids, ...item.split_signal_ids]
+              .map((id) => signalTitles.get(id))
+              .filter(Boolean);
+            return (
+              <PersonaGameCard
+                key={item.persona}
+                persona={item.persona}
+                label={personaLabels[item.persona] ?? item.persona}
+                reaction={item.expected_reaction}
+                evidenceCount={updateEvidenceCount(item.evidence_ids)}
+                confidence={item.confidence}
+                opinionVisible={visibleOpinions.has(item.persona)}
+                context={relatedTitles.length
+                  ? `연결된 반응: ${relatedTitles.join(", ")}`
+                  : "직접 연결된 반응 근거 없음"}
+              />
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function UpdateEvidenceDetails({ result }: { result: UpdateRunResult }) {
+  const actualAfter = result.brief.evidence.filter((item) => item.period === "after");
+  const riskTitles = new Map(
+    result.brief.top_risks.map((risk) => [risk.risk_id, businessKorean(risk.title)]),
+  );
+
+  return (
+    <>
+      {(result.brief.official_context || result.brief.official_context_url) && (
+        <section className="official-context">
+          <p className="eyebrow">공식 자료</p>
+          <h3>공식으로 확인된 변경 맥락</h3>
+          {result.brief.official_context && <p>{businessKorean(result.brief.official_context)}</p>}
+          {result.brief.official_context_url && (
+            <a href={result.brief.official_context_url} target="_blank" rel="noreferrer">
+              공식 변경 내용 열기
+            </a>
+          )}
+        </section>
+      )}
+
+      <section className="insight-section">
+        <div className="section-title">
+          <h3>언어권별 예상</h3>
+          <p>표본 기준을 통과한 언어권만 감정 건수와 결론을 공개합니다.</p>
+        </div>
+        <div className="audience-card-grid">
+          {result.brief.language_insights.map((language) => (
+            <LanguageGameCard
+              key={language.language}
+              language={language.language}
+              label={languageLabels[language.language] ?? language.language}
+              conclusion={language.conclusion}
+              hiddenReason={language.hidden_reason}
+              evidenceCount={language.evidence_ids.length}
+              confidence={language.confidence}
+              sentimentCounts={language.sentiment_counts}
+            />
+          ))}
+        </div>
+      </section>
+
+      <section className="metric-section">
+        <div className="section-title">
+          <h3>출시 후 검증할 지표</h3>
+          <p>실제 결과가 생긴 뒤에만 확인할 측정 항목입니다.</p>
+        </div>
+        <div className="metric-table-wrap">
+          <table className="metric-table">
+            <thead>
+              <tr>
+                <th scope="col">지표</th>
+                <th scope="col">측정 방법</th>
+                <th scope="col">성공 기준</th>
+                <th scope="col">연결 위험</th>
+              </tr>
+            </thead>
+            <tbody>
+              {result.brief.validation_metrics.map((metric) => (
+                <tr key={metric.metric_id}>
+                  <td>{businessKorean(metric.title)}</td>
+                  <td>{businessKorean(metric.measurement)}</td>
+                  <td>{businessKorean(metric.success_condition)}</td>
+                  <td>{metric.addresses_risk_ids.map((id) => riskTitles.get(id) ?? "관련 위험").join(", ")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {actualAfter.length > 0 && (
+        <section className="actual-after-section">
+          <div className="section-title">
+            <h3>업데이트 후 실제 반응</h3>
+            <p>기준일 이후에 안전하게 수집된 실제 반응이 있는 경우에만 표시합니다.</p>
+          </div>
+          <div className="evidence-list">
+            {actualAfter.map((item) => (
+              <details key={item.evidence_id}>
+                <summary>{businessKorean(item.summary)}</summary>
+                <p className="evidence-meta">
+                  {languageLabels[item.language] ?? item.language}, {sentimentLabels[item.sentiment] ?? "기타 반응"}, {item.mechanism_tags.map((tag) => mechanismLabels[tag] ?? "기타 변경 요소").join(", ")}, {sourceLabels[item.source] ?? "공개 자료"}
+                </p>
+              </details>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section className="evidence-section">
+        <div className="section-title">
+          <h3>근거와 비식별 의견</h3>
+          <p>사용자 원문 대신 안전하게 정규화된 요약, 기간, 감정, 태그와 출처만 제공합니다.</p>
+        </div>
+        <div className="evidence-list">
+          {result.brief.evidence.map((item) => (
+            <details key={item.evidence_id}>
+              <summary>
+                <span>{businessKorean(item.summary)}</span>
+                <small>{item.synthetic ? "합성 비교 참고" : "비식별 요약"}</small>
+              </summary>
+              <p className="evidence-meta">
+                기간 {periodLabels[item.period] ?? "기간 확인 필요"}, 반응 {sentimentLabels[item.sentiment] ?? "기타"}, 관련성 {Math.round(item.relevance * 100)}%, 주제 {item.mechanism_tags.map((tag) => mechanismLabels[tag] ?? "기타 변경 요소").join(", ")}
+              </p>
+              <a href={item.source_url} target="_blank" rel="noreferrer">
+                {sourceLabels[item.source] ?? "공개 자료"} 출처 열기
+              </a>
+            </details>
+          ))}
+        </div>
+      </section>
+    </>
+  );
+}
+
+export function UpdateReview({
+  runBlocked = false,
+  onRunningChange,
+}: {
+  runBlocked?: boolean;
+  onRunningChange?: (running: boolean) => void;
+}) {
   const [form, setForm] = useState<UpdateForm>(initial);
   const [sourceMode, setSourceMode] = useState<SourceMode>("fixture");
   const [steamAppId, setSteamAppId] = useState("578080");
@@ -331,6 +660,7 @@ export function UpdateReview() {
   const [csvName, setCsvName] = useState("");
   const [useClaude, setUseClaude] = useState(true);
   const [result, setResult] = useState<UpdateRunResult | null>(null);
+  const [submittedSubject, setSubmittedSubject] = useState(initial.update_name);
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -486,6 +816,7 @@ export function UpdateReview() {
             setEvents((previous) => [...previous, message.event as AgentEvent]);
           }
           if (eventName === "result" && message.result) {
+            setSubmittedSubject(requestSubject);
             setResult(message.result);
             setEvents(message.result.events);
           }
@@ -798,44 +1129,64 @@ export function UpdateReview() {
             </div>
           )}
           {sourceMode === "live" && (
-            <div className="grid two source-fields">
-              <label className="field">
-                <span>Steam 앱 ID</span>
-                <input
-                  inputMode="numeric"
-                  value={steamAppId}
-                  onChange={(event) => setSteamAppId(event.target.value)}
-                />
-              </label>
-              <label className="field">
-                <span>X 검색어</span>
-                <input value={xQuery} onChange={(event) => setXQuery(event.target.value)} />
-              </label>
-              <label className="field">
-                <span>수집 시작 시각 (UTC)</span>
-                <input
-                  type="datetime-local"
-                  value={periodStart}
-                  onChange={(event) => setPeriodStart(event.target.value)}
-                />
-              </label>
-              <label className="field">
-                <span>수집 종료 및 기준 시각 (UTC)</span>
-                <input
-                  type="datetime-local"
-                  value={periodEnd}
-                  onChange={(event) => setPeriodEnd(event.target.value)}
-                />
-              </label>
-              <label className="toggle source-toggle">
-                <input
-                  type="checkbox"
-                  checked={useX}
-                  onChange={(event) => setUseX(event.target.checked)}
-                />
-                <span>X 공개 자료도 수집</span>
-                <small>비용 한도와 기준일은 서버의 안전 정책으로 검증합니다.</small>
-              </label>
+            <div className="source-fields">
+              <div className="grid two" role="group" aria-label="실시간 자료 선택">
+                <label className="toggle source-toggle">
+                  <input
+                    type="checkbox"
+                    checked={useSteam}
+                    onChange={(event) => setUseSteam(event.target.checked)}
+                  />
+                  <span>Steam 공개 리뷰 수집</span>
+                  <small>선택하면 입력한 앱 ID의 공개 리뷰를 확인합니다.</small>
+                </label>
+                <label className="toggle source-toggle">
+                  <input
+                    type="checkbox"
+                    checked={useX}
+                    onChange={(event) => setUseX(event.target.checked)}
+                  />
+                  <span>X 공개 게시물 수집</span>
+                  <small>선택하면 서버에 설정된 X API 연결을 사용합니다.</small>
+                </label>
+              </div>
+              <div className="grid two source-fields">
+                {useSteam && (
+                  <label className="field">
+                    <span>Steam 앱 ID</span>
+                    <input
+                      inputMode="numeric"
+                      value={steamAppId}
+                      onChange={(event) => setSteamAppId(event.target.value)}
+                    />
+                  </label>
+                )}
+                {useX && (
+                  <label className="field">
+                    <span>X 검색어</span>
+                    <input value={xQuery} onChange={(event) => setXQuery(event.target.value)} />
+                  </label>
+                )}
+                <label className="field">
+                  <span>수집 시작 시각 (UTC)</span>
+                  <input
+                    type="datetime-local"
+                    value={periodStart}
+                    onChange={(event) => setPeriodStart(event.target.value)}
+                  />
+                </label>
+                <label className="field">
+                  <span>수집 종료 및 기준 시각 (UTC)</span>
+                  <input
+                    type="datetime-local"
+                    value={periodEnd}
+                    onChange={(event) => setPeriodEnd(event.target.value)}
+                  />
+                </label>
+              </div>
+              <p className="source-note">
+                Steam만, X만, 또는 두 자료를 함께 선택할 수 있습니다. 비밀 키는 서버 환경 변수에서만 읽습니다.
+              </p>
             </div>
           )}
           {sourceMode === "import" && (
@@ -883,311 +1234,28 @@ export function UpdateReview() {
         <section className="live-panel">
           <div className="section-title">
             <h2>에이전트 실행 중</h2>
-            <p>서버 SSE 이벤트를 받는 즉시 각 단계와 노드의 상태를 표시합니다.</p>
+            <p>서버에서 받는 즉시 각 에이전트와 노드의 상태를 표시합니다.</p>
           </div>
           <AgentPipeline events={events} active mode="update" />
         </section>
       )}
 
-      {result && (
-        <section className="results update-results">
-          <section className="decision-brief" aria-labelledby="update-decision-title">
-            <header className="decision-brief-head">
-              <div>
-                <p className="eyebrow">출시 판단</p>
-                <h2 id="update-decision-title">{decision}</h2>
-              </div>
-              <span className="decision">{decision}</span>
-            </header>
-            <p className="decision-summary">{businessKorean(result.brief.executive_summary)}</p>
-            <p className="decision-caution">
-              출시 전 자료를 바탕으로 한 예상입니다. 실제 이용자 반응과 출시 후 성과를 의미하지 않습니다.
-            </p>
-
-            <div className="decision-logic" aria-label="출시 판단 과정">
-              <article>
-                <span>1. 판단 근거</span>
-                <strong>비식별 근거 {result.brief.evidence.length}건</strong>
-                <small>기준일 이전 자료만 사용</small>
-              </article>
-              <b aria-hidden="true">→</b>
-              <article>
-                <span>2. 예상 반응</span>
-                <strong>이용자 유형 {result.brief.persona_impacts.length}개, 언어권 {visibleLanguages.length}개</strong>
-                <small>표본 기준을 통과한 결론만 공개</small>
-              </article>
-              <b aria-hidden="true">→</b>
-              <article>
-                <span>3. 출시 판단</span>
-                <strong>{decision}</strong>
-                <small>{businessKorean(decisionDescriptions[result.brief.decision] ?? decisionDescriptions.Hold)}</small>
-              </article>
-            </div>
-
-            <div className="decision-signal-grid">
-              <article className="decision-signal positive">
-                <span>예상 긍정 반응</span>
-                <strong>{businessKorean(primaryPositive?.title ?? "확인된 긍정 신호 없음")}</strong>
-                <p>{businessKorean(primaryPositive?.summary ?? "현재 근거에서는 별도의 긍정 반응을 예상하기 어렵습니다.")}</p>
-              </article>
-              <article className="decision-signal negative">
-                <span>예상 우려 반응</span>
-                <strong>{businessKorean(primaryNegative?.title ?? primaryRisk?.title ?? "확인된 우려 신호 없음")}</strong>
-                <p>{businessKorean(primaryNegative?.summary ?? primaryRisk?.failure_path ?? "현재 근거에서는 우선 확인할 우려 반응이 없습니다.")}</p>
-              </article>
-              <article className="decision-signal split">
-                <span>반응이 갈릴 조건</span>
-                <strong>{businessKorean(result.brief.split_conditions[0]?.title ?? "뚜렷한 분기 조건 없음")}</strong>
-                <p>{businessKorean(result.brief.split_conditions[0]?.summary ?? "이용자 유형별 차이는 아래 예상 반응에서 확인할 수 있습니다.")}</p>
-              </article>
-            </div>
-
-            <div className="decision-context-grid">
-              <section>
-                <h3>이용자 유형별 예상 반응</h3>
-                <div className="decision-list">
-                  {result.brief.persona_impacts.map((item) => (
-                    <article key={item.persona}>
-                      <strong>{personaLabels[item.persona] ?? businessKorean(item.persona)}</strong>
-                      <p>{businessKorean(item.expected_reaction)}</p>
-                      <small>근거 {item.evidence_ids.length}건, 신뢰도 {Math.round(item.confidence * 100)}%</small>
-                    </article>
-                  ))}
-                </div>
-              </section>
-              <section>
-                <h3>언어권별 예상</h3>
-                <div className="decision-list">
-                  {result.brief.language_insights.map((item) => (
-                    <article className={item.conclusion ? "" : "is-muted"} key={item.language}>
-                      <strong>{languageLabels[item.language] ?? businessKorean(item.language)}</strong>
-                      <p>{businessKorean(item.conclusion ?? item.hidden_reason ?? "표본이 부족해 결론을 공개하지 않습니다.")}</p>
-                      <small>{item.conclusion ? `근거 ${item.evidence_ids.length}건, 신뢰도 ${Math.round(item.confidence * 100)}%` : "표본 보강 필요"}</small>
-                    </article>
-                  ))}
-                </div>
-              </section>
-            </div>
-
-            <div className="decision-grounding">
-              <section>
-                <h3>판단을 좌우한 위험</h3>
-                {result.brief.top_risks.length ? (
-                  <ul>
-                    {result.brief.top_risks.slice(0, 3).map((risk) => (
-                      <li key={risk.risk_id}>
-                        <strong>{businessKorean(risk.title)}</strong>
-                        <span>{businessKorean(risk.failure_path)}</span>
-                        <small>근거 {risk.evidence_ids.length}건, 신뢰도 {Math.round(risk.confidence * 100)}%</small>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p>현재 자료에서는 우선 수정이 필요한 위험이 확인되지 않았습니다.</p>
-                )}
-              </section>
-              <aside className="decision-action">
-                <span>지금 해야 할 일</span>
-                <h3>{businessKorean(primaryRecommendation?.title ?? decision)}</h3>
-                <p>{businessKorean(primaryRecommendation?.action ?? decisionDescriptions[result.brief.decision] ?? decisionDescriptions.Hold)}</p>
-                {result.brief.validation_metrics[0] && (
-                  <small>확인 기준: {businessKorean(result.brief.validation_metrics[0].success_condition)}</small>
-                )}
-              </aside>
-            </div>
-
-            <footer className="decision-meta">
-              <span>{result.analysis_incomplete
-                ? "외부 자료 분석이 충분하지 않아 판정을 보류했습니다."
-                : result.llm_requested
-                  ? result.fallback_used
-                    ? "Claude 설명은 안전한 결정론 경로로 대체했습니다."
-                    : `Claude 설명 보강을 사용했습니다. (${result.llm_provider})`
-                  : "결정론적 분석을 사용했습니다."}</span>
-              <span>실행 ID: {result.brief.run_id}</span>
-            </footer>
-          </section>
-
-          {(result.brief.official_context || result.brief.official_context_url) && (
-            <section className="official-context">
-              <p className="eyebrow">공식 자료</p>
-              <h2>공식으로 확인된 변경 맥락</h2>
-              {result.brief.official_context && <p>{businessKorean(result.brief.official_context)}</p>}
-              {result.brief.official_context_url && (
-                <a href={result.brief.official_context_url} target="_blank" rel="noreferrer">
-                  공식 변경 내용 열기
-                </a>
-              )}
-            </section>
-          )}
-
-          <section className="reaction-section">
-            <div className="section-title">
-              <h2>출시 전 예상 반응</h2>
-              <p>예상되는 긍정 반응과 우려 반응, 반응이 갈릴 조건을 실제 반응과 구분해 표시합니다.</p>
-            </div>
-            <div className="reaction-grid">
-              <article className="reaction-card positive">
-                <span>예상 긍정 반응</span>
-                {result.brief.expected_positive.length ? (
-                  result.brief.expected_positive.map((item) => (
-                    <div className="reaction-entry" key={item.impact_id}>
-                      <h3>{businessKorean(item.title)}</h3>
-                      <p>{businessKorean(item.summary)}</p>
-                      <small>근거 {item.evidence_ids.length}건, 신뢰도 {Math.round(item.confidence * 100)}%</small>
-                    </div>
-                  ))
-                ) : (
-                  <p>현재 자료에서 공개할 긍정 예상 신호가 없습니다.</p>
-                )}
-              </article>
-              <article className="reaction-card negative">
-                <span>예상 부정 반응</span>
-                {result.brief.expected_negative.length ? (
-                  result.brief.expected_negative.map((item) => (
-                    <div className="reaction-entry" key={item.impact_id}>
-                      <h3>{businessKorean(item.title)}</h3>
-                      <p>{businessKorean(item.summary)}</p>
-                      <small>근거 {item.evidence_ids.length}건, 신뢰도 {Math.round(item.confidence * 100)}%</small>
-                    </div>
-                  ))
-                ) : (
-                  <p>현재 자료에서 공개할 부정 예상 신호가 없습니다.</p>
-                )}
-              </article>
-              <article className="reaction-card split">
-                <span>반응이 갈릴 이용자 유형</span>
-                {result.brief.persona_impacts.map((item) => (
-                  <div className="reaction-entry" key={item.persona}>
-                    <h3>{personaLabels[item.persona] ?? item.persona}</h3>
-                    <p>{businessKorean(item.expected_reaction)}</p>
-                    <small>근거 {item.evidence_ids.length}건, 신뢰도 {Math.round(item.confidence * 100)}%</small>
-                  </div>
-                ))}
-                {result.brief.split_conditions.map((item) => (
-                  <div className="reaction-entry" key={item.signal_id}>
-                    <h3>{businessKorean(item.title)}</h3>
-                    <p>{businessKorean(item.summary)}</p>
-                  </div>
-                ))}
-              </article>
-            </div>
-          </section>
-
-          <section className="insight-section">
-            <div className="section-title">
-              <h2>언어권별 예상</h2>
-              <p>표본 기준을 통과한 언어권만 감정 건수와 결론을 공개합니다.</p>
-            </div>
-            <div className="language-grid">
-              {result.brief.language_insights.map((language) => (
-                <article
-                  className={`language-card ${language.conclusion ? "" : "muted"}`}
-                  key={language.language}
-                >
-                  <strong>{languageLabels[language.language] ?? language.language}</strong>
-                  {language.conclusion ? (
-                    <>
-                      <p>{businessKorean(language.conclusion)}</p>
-                      <small>
-                        {Object.entries(language.sentiment_counts)
-                          .map(([sentiment, count]) => `${sentiment} ${count}건`)
-                          .join(", ")}
-                      </small>
-                    </>
-                  ) : (
-                    <>
-                      <p>{businessKorean(language.hidden_reason ?? "표본 기준에 미달해 결론을 공개하지 않습니다.")}</p>
-                      <small>감정 비율과 수치는 공개하지 않습니다.</small>
-                    </>
-                  )}
-                </article>
-              ))}
-            </div>
-          </section>
-
-          <section className="metric-section">
-            <div className="section-title">
-              <h2>출시 후 검증할 지표</h2>
-              <p>실제 결과가 생긴 뒤에만 확인할 측정 항목입니다.</p>
-            </div>
-            <div className="metric-table-wrap">
-              <table className="metric-table">
-                <thead>
-                  <tr>
-                    <th scope="col">지표</th>
-                    <th scope="col">측정 방법</th>
-                    <th scope="col">성공 기준</th>
-                    <th scope="col">연결 위험</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {result.brief.validation_metrics.map((metric) => (
-                    <tr key={metric.metric_id}>
-                      <td>{businessKorean(metric.title)}</td>
-                      <td>{businessKorean(metric.measurement)}</td>
-                      <td>{businessKorean(metric.success_condition)}</td>
-                      <td>{metric.addresses_risk_ids.join(", ")}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          {actualAfter.length > 0 && (
-            <section className="actual-after-section">
-              <div className="section-title">
-                <h2>업데이트 후 실제 반응</h2>
-                <p>기준일 이후에 안전하게 수집된 실제 반응이 있는 경우에만 표시합니다.</p>
-              </div>
-              <div className="evidence-list">
-                {actualAfter.map((item) => (
-                  <details key={item.evidence_id}>
-                    <summary>{businessKorean(item.summary)}</summary>
-                    <p className="evidence-meta">
-                      {item.language}, {item.sentiment}, {item.mechanism_tags.join(", ")}, {item.source}
-                    </p>
-                  </details>
-                ))}
-              </div>
-            </section>
-          )}
-
-          <section className="evidence-section">
-            <div className="section-title">
-              <h2>근거와 비식별 의견</h2>
-              <p>사용자 원문 대신 안전하게 정규화된 요약, 기간, 감정, 태그와 출처만 제공합니다.</p>
-            </div>
-            <div className="evidence-list">
-              {result.brief.evidence.map((item) => (
-                <details key={item.evidence_id}>
-                  <summary>
-                    <span>{businessKorean(item.summary)}</span>
-                    <small>{item.synthetic ? "합성 비교 참고" : "비식별 요약"}</small>
-                  </summary>
-                  <p className="evidence-meta">
-                    기간 {item.period}, 감정 {item.sentiment}, 관련성 {Math.round(item.relevance * 100)}%, 태그 {item.mechanism_tags.join(", ")}
-                  </p>
-                  <a href={item.source_url} target="_blank" rel="noreferrer">
-                    {item.source} 출처 열기
-                  </a>
-                </details>
-              ))}
-            </div>
-          </section>
-
-          <section className="final-pipeline">
-            <div className="section-title">
-              <h2>에이전트 실행 과정</h2>
-              <p>단계별 노드는 가로 카드에서 열어 정의된 값과 처리 상태를 확인할 수 있습니다.</p>
-            </div>
-            <AgentPipeline events={result.events} mode="update" />
-          </section>
-
-          <ArtifactDetails result={result} />
-        </section>
-      )}
+      {result && (() => {
+        const report = buildUpdateReport(result, submittedSubject);
+        return (
+          <DecisionReport
+            {...report}
+            reactionDetails={<UpdateReactionDetails result={result} />}
+            evidenceDetails={<UpdateEvidenceDetails result={result} />}
+            agentDetails={(
+              <>
+                <AgentPipeline events={result.events} mode="update" />
+                <ArtifactDetails result={result} />
+              </>
+            )}
+          />
+        );
+      })()}
     </section>
   );
 }
