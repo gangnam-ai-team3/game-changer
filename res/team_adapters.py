@@ -237,17 +237,22 @@ def _safe_jelly_rows(risks, evidence) -> list[dict]:
 def _edit_jelly_sentence(value: str, fallback: str) -> str:
     """Normalize one disposable Jelly sentence before Korean-style validation."""
 
-    text = value if value.strip() and re.search(r"[가-힣]", value) else fallback
-    text = text.replace("·", ", ")
-    for phrase in ("본질적으로", "궁극적으로", "실질적으로"):
-        text = text.replace(phrase, "")
-    text = text.replace("이유는 명확", "근거를 보면").replace(
-        "혁신적인 변화", "주요 변화"
+    def clean(text: str) -> str:
+        text = text.replace("·", ", ")
+        for phrase in ("본질적으로", "궁극적으로", "실질적으로"):
+            text = text.replace(phrase, "")
+        text = text.replace("이유는 명확", "근거를 보면").replace(
+            "혁신적인 변화", "주요 변화"
+        )
+        text = re.sub(r"\s+", " ", text).strip()
+        text = re.sub(r"\s*,\s*", ", ", text)
+        text = re.sub(r"^[,\s]+|[,\s]+$", "", text)
+        return text if re.search(r"[.!?]$", text) else f"{text}."
+
+    text = clean(
+        value if value.strip() and re.search(r"[가-힣]", value) else fallback
     )
-    text = re.sub(r"\s+", " ", text).strip()
-    text = re.sub(r"\s*,\s*", ", ", text)
-    text = re.sub(r"^[,\s]+|[,\s]+$", "", text)
-    return text if re.search(r"[.!?]$", text) else f"{text}."
+    return text if re.search(r"[가-힣]", text) else clean(fallback)
 
 
 def _validated_jelly_trends(result: dict, risks) -> dict[str, int]:

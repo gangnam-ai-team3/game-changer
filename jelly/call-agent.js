@@ -35,30 +35,43 @@ function loadRolePrompt() {
   return fs.readFileSync(ROLE_PATH, "utf8");
 }
 
+async function requestClaude(apiKey, body) {
+  let response;
+  try {
+    response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (_) {
+    throw new Error("Claude API 호출에 실패했습니다.");
+  }
+  if (!response?.ok) {
+    const status = Number.isInteger(response?.status) ? response.status : 0;
+    throw new Error(`Claude API 호출에 실패했습니다. (status ${status})`);
+  }
+  try {
+    return await response.json();
+  } catch (_) {
+    throw new Error("Claude API 호출에 실패했습니다.");
+  }
+}
+
 async function callAgent(inputText) {
   const apiKey = loadApiKey();
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY 값이 비어 있습니다.");
   const rolePrompt = loadRolePrompt();
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      max_tokens: MAX_TOKENS,
-      system: rolePrompt,
-      messages: [{ role: "user", content: inputText }],
-    }),
+  const data = await requestClaude(apiKey, {
+    model: MODEL,
+    max_tokens: MAX_TOKENS,
+    system: rolePrompt,
+    messages: [{ role: "user", content: inputText }],
   });
-
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(`API 오류 (${response.status}): ${data.error?.message || JSON.stringify(data)}`);
-  }
   if (data.stop_reason === "refusal") {
     throw new Error("모델이 요청을 거부했습니다.");
   }
@@ -121,26 +134,13 @@ async function analyzeRows(rows) {
     "각 항목은 title(5~15자 정도의 짧은 테마명, 마침표 없이)과 description(1~2문장, 마침표로 끝냄)으로 구성합니다.\n\n" +
     JSON.stringify(rows, null, 2);
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      max_tokens: MAX_TOKENS,
-      system: rolePrompt,
-      messages: [{ role: "user", content: userText }],
-      output_config: { format: { type: "json_schema", schema: ANALYZE_SCHEMA } },
-    }),
+  const data = await requestClaude(apiKey, {
+    model: MODEL,
+    max_tokens: MAX_TOKENS,
+    system: rolePrompt,
+    messages: [{ role: "user", content: userText }],
+    output_config: { format: { type: "json_schema", schema: ANALYZE_SCHEMA } },
   });
-
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(`API 오류 (${response.status}): ${data.error?.message || JSON.stringify(data)}`);
-  }
   if (data.stop_reason === "refusal") {
     throw new Error("모델이 요청을 거부했습니다.");
   }

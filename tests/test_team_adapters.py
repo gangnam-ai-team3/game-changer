@@ -3,7 +3,11 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import socket
 import subprocess
+import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -159,9 +163,8 @@ def test_jelly_edits_middle_dot_and_blank_fix_without_changing_code_owned_risk(
         original_validator(values)
 
     monkeypatch.setattr(adapter_module, "require_native_business_korean", record_validator)
-    actual = EventJellyRedteamAdapter(
-        runner=FakeJellyRunner(result), enabled=True
-    ).run(event, pack)
+    runner = FakeJellyRunner(result)
+    actual = EventJellyRedteamAdapter(runner=runner, enabled=True).run(event, pack)
 
     assert adapter_module._edit_jelly_sentence(
         result["rows"][0]["cause"], baseline.risks[0].failure_path
@@ -179,6 +182,22 @@ def test_jelly_english_only_prose_falls_back_safely():
     assert adapter_module._edit_jelly_sentence(
         "release immediately.", "한국어 대체 문장입니다"
     ) == "한국어 대체 문장입니다."
+
+
+def test_jelly_filler_only_korean_prose_falls_back_without_error():
+    event, _, pack = _event_inputs()
+    baseline = EventRedteamAgent().run_deterministic(event, pack)
+    result = _jelly_result(len(baseline.risks))
+    result["rows"][0]["cause"] = "궁극적으로 KPI."
+    runner = FakeJellyRunner(result)
+
+    actual = EventJellyRedteamAdapter(runner=runner, enabled=True).run(event, pack)
+
+    assert adapter_module._edit_jelly_sentence(
+        "궁극적으로 KPI.", baseline.risks[0].failure_path
+    ) == baseline.risks[0].failure_path
+    assert len(runner.calls) == 1
+    assert actual == baseline
 
 
 def test_event_jelly_is_safe_analysis_sidecar_and_cannot_persist_prose():
@@ -509,6 +528,73 @@ analyzeRows([{index: 0, evidenceId: "safe-1", content: "안전한 요약입니�
 
     assert completed.returncode == 0, completed.stderr
     assert completed.stdout == "ok"
+
+
+def test_jelly_node_provider_errors_do_not_leak_to_cli_or_analyze(tmp_path):
+    secret = "provider-secret"
+    preload = tmp_path / "mock-fetch.js"
+    preload.write_text(
+        "global.fetch = async () => ({ ok: false, status: 500, "
+        "json: async () => ({ error: { message: 'provider-secret' } }) });\n",
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env["ANTHROPIC_API_KEY"] = "test-key"
+
+    cli = subprocess.run(
+        ["node", "-r", str(preload), "jelly/call-agent.js", "안전한 입력입니다."],
+        cwd=Path(__file__).resolve().parents[1],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert cli.returncode == 1
+    assert secret not in cli.stdout + cli.stderr
+    assert "status 500" in cli.stderr
+
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        port = listener.getsockname()[1]
+    server_env = {**env, "CALL_AGENT_PORT": str(port)}
+    server = subprocess.Popen(
+        ["node", "-r", str(preload), "jelly/call-agent.js", "serve"],
+        cwd=Path(__file__).resolve().parents[1],
+        env=server_env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{port}/analyze",
+        data=json.dumps(
+            {"rows": [{"index": 0, "evidenceId": "safe-1", "content": "안전한 요약입니다."}]}
+        ).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    response = None
+    try:
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            try:
+                urllib.request.urlopen(request, timeout=1)
+            except urllib.error.HTTPError as error:
+                response = error
+                break
+            except urllib.error.URLError:
+                time.sleep(0.05)
+    finally:
+        server.terminate()
+        stdout, stderr = server.communicate(timeout=10)
+
+    assert response is not None
+    body = response.read().decode()
+    assert response.code == 500
+    assert secret not in body + stdout + stderr
+    assert "status 500" in body
 
 
 class FakeAsyncMessages:
