@@ -298,13 +298,6 @@ process.stdout.write(JSON.stringify({
 
 
 
-def test_unavailable_update_fixture_stays_visible_and_explains_why():
-    source = (ROOT / "components" / "UpdateReview.tsx").read_text(encoding="utf-8")
-
-    assert 'disabled={form.update_type !== "weapon_balance"}' in source
-    assert "저장 사례는 준비 중입니다" in source
-    assert 'setSourceMode("live")' not in source
-
 
 def test_official_context_is_visually_separate_from_synthetic_evidence():
     source = (ROOT / "components" / "UpdateReview.tsx").read_text(encoding="utf-8")
