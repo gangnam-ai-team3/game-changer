@@ -160,3 +160,4 @@ h2 { margin:0; font-size:23px; letter-spacing:-.035em; }
   .decision-report-risks td{display:grid;grid-template-columns:108px minmax(0,1fr);gap:10px;border-top:1px solid var(--border)}
   .decision-report-risks td:first-child{border-top:0}
   .decision-report-risks td::before{content:attr(data-label);color:var(--muted);font-size:12px;font-weight:650}
+}

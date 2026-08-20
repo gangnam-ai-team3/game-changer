@@ -341,3 +341,20 @@ def test_audience_cards_can_hide_duplicate_opinion_and_name_confidence_correctly
     assert "대표 의견은 관련 이용자 유형 카드에 함께 표시했습니다" in source
     assert source.count("근거 일치도") == 2
     assert "<small>신뢰도</small>" not in source
+
+
+def test_decision_report_css_is_parseable():
+    script = '''
+import fs from "node:fs";
+import postcss from "./frontend/node_modules/postcss/lib/postcss.js";
+
+postcss.parse(fs.readFileSync("frontend/app/globals.css", "utf8"));
+'''
+
+    subprocess.run(
+        ["node", "--input-type=module", "--eval", script],
+        cwd=Path(__file__).resolve().parents[1],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
