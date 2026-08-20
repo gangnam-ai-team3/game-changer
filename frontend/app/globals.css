@@ -120,3 +120,43 @@ h2 { margin:0; font-size:23px; letter-spacing:-.035em; }
 .evidence-meta { line-height:1.55; }
 @media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; scroll-behavior:auto !important; transition-duration:.01ms !important; } }
 @media (max-width:800px) { .mode-switch,.update-types,.reaction-grid,.source-mode-grid { grid-template-columns:1fr; }.update-heading h2 { font-size:24px; }.source-mode { min-height:0; }.metric-table { min-width:620px; } }
+
+.decision-report{margin-top:28px;padding:24px;border:1px solid var(--border);border-radius:16px;background:#fff;color:var(--text)}
+.decision-report-head{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;padding-bottom:16px;border-bottom:1px solid var(--border)}
+.decision-report-head h2{margin:4px 0 10px;font-size:28px;line-height:1.25;outline:none}
+.decision-report-head h2:focus-visible,.decision-report-details summary:focus-visible{outline:3px solid var(--accent);outline-offset:4px;border-radius:6px}
+.decision-report-conclusion{max-width:920px;margin:0;font-size:16px;line-height:1.65;font-weight:650}
+.decision-report-scope,.decision-report-caution{margin:8px 0 0;color:var(--muted);font-size:12px;line-height:1.5}
+.decision-report-badge{flex:none;padding:7px 11px;border:1px solid currentColor;border-radius:999px;font-size:13px;font-weight:750}
+.decision-report[data-decision="go"] .decision-report-badge{color:#16794c}.decision-report[data-decision="revise"] .decision-report-badge{color:#9a5b00}.decision-report[data-decision="test"] .decision-report-badge{color:#3656a6}.decision-report[data-decision="hold"] .decision-report-badge{color:#9a5b00}
+.decision-report-alert{margin:14px 0 0;padding:11px 13px;border:1px solid #d97706;border-radius:10px;background:#fffbeb;color:#92400e;font-size:13px;font-weight:650}
+.decision-report-card-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:18px}
+.decision-report-card{display:flex;min-height:170px;flex-direction:column;padding:16px;border:1px solid var(--border);border-radius:12px;background:var(--bg)}
+.decision-report-card>span{color:var(--accent);font-size:12px;font-weight:750}
+.decision-report-card h3{margin:9px 0 7px;font-size:17px;line-height:1.35}
+.decision-report-card p{margin:0;font-size:14px;line-height:1.55}
+.decision-report-card small{margin-top:auto;padding-top:12px;color:var(--muted);font-size:12px}
+.decision-report-risks{margin-top:18px}
+.decision-report-risks h3{margin:0 0 10px;font-size:16px}
+.decision-report-risks table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:13px}
+.decision-report-risks th,.decision-report-risks td{padding:11px 10px;border-top:1px solid var(--border);text-align:left;vertical-align:top;overflow-wrap:anywhere}
+.decision-report-risks th{color:var(--muted);font-size:12px;font-weight:650}
+.decision-report-risks th:nth-child(1){width:20%}.decision-report-risks th:nth-child(2){width:10%}.decision-report-risks th:nth-child(3){width:34%}.decision-report-risks th:nth-child(4){width:36%}
+.decision-report-risks td strong,.decision-report-risks td span{display:block}.decision-report-risks td span{margin-top:4px;color:var(--muted)}
+.decision-report-empty{margin:0;padding:14px;border:1px dashed var(--border);border-radius:10px;color:var(--muted);font-size:14px}
+.decision-report-details{display:grid;gap:8px;margin-top:18px}
+.decision-report-details>details{border:1px solid var(--border);border-radius:10px;background:#fff}
+.decision-report-details>details>summary{cursor:pointer;padding:13px 15px;font-size:14px;font-weight:700}
+.decision-report-detail-body{padding:0 15px 15px}
+.decision-report-reasoning{margin-bottom:14px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--bg)}
+.decision-report-reasoning summary{cursor:pointer;font-size:13px;font-weight:700}.decision-report-reasoning p{white-space:pre-line;font-size:14px;line-height:1.7}
+
+@media (max-width:800px){
+  .decision-report{padding:18px 14px}.decision-report-head{display:grid;gap:12px}.decision-report-badge{justify-self:start}
+  .decision-report-card-grid{grid-template-columns:1fr}.decision-report-card{min-height:0}
+  .decision-report-risks thead{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+  .decision-report-risks table,.decision-report-risks tbody,.decision-report-risks tr,.decision-report-risks td{display:block;width:100%}
+  .decision-report-risks tr{margin-top:10px;border:1px solid var(--border);border-radius:10px;overflow:hidden}
+  .decision-report-risks td{display:grid;grid-template-columns:108px minmax(0,1fr);gap:10px;border-top:1px solid var(--border)}
+  .decision-report-risks td:first-child{border-top:0}
+  .decision-report-risks td::before{content:attr(data-label);color:var(--muted);font-size:12px;font-weight:650}

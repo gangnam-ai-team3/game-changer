@@ -291,3 +291,53 @@ process.stdout.write(JSON.stringify({
         "todayAllowed": False,
         "tomorrowAllowed": True,
     }
+
+
+def test_shared_decision_report_has_accessible_one_page_structure():
+    source = (ROOT / "components" / "DecisionReport.tsx").read_text(encoding="utf-8")
+    styles = (ROOT / "globals.css").read_text(encoding="utf-8")
+
+    for name in (
+        "DecisionReportData",
+        "subject",
+        "decisionLabel",
+        "conclusion",
+        "fullReasoning",
+        "sourceScope",
+        "analysisIncomplete",
+        "expectedCard",
+        "riskCard",
+        "actionCard",
+        "riskRows",
+        "reactionDetails",
+        "evidenceDetails",
+        "agentDetails",
+    ):
+        assert name in source
+    assert "useEffect" in source
+    assert "headingRef.current?.focus()" in source
+    assert "knownDecisions.includes(decision)" in source
+    assert 'tabIndex={-1}' in source
+    assert 'role="alert"' in source
+    assert "analysisIncomplete &&" in source
+    assert "판정 논리 전체 보기" in source
+    assert "실제 이용자 인용이 아닙니다" in source
+    assert "예상 반응과 이용자 유형" in source
+    assert "언어권과 판단 근거" in source
+    assert "에이전트 실행 과정과 산출물" in source
+    assert "<table" in source
+    assert 'data-label="위험"' in source
+    assert 'data-label="출시 전 확인"' in source
+    assert ".decision-report-card-grid" in styles
+    assert "grid-template-columns:repeat(3,minmax(0,1fr))" in styles
+    assert "content:attr(data-label)" in styles
+
+
+def test_audience_cards_can_hide_duplicate_opinion_and_name_confidence_correctly():
+    source = (ROOT / "components" / "AudienceCards.tsx").read_text(encoding="utf-8")
+
+    assert "opinionVisible = true" in source
+    assert "opinionVisible ?" in source
+    assert "대표 의견은 관련 이용자 유형 카드에 함께 표시했습니다" in source
+    assert source.count("근거 일치도") == 2
+    assert "<small>신뢰도</small>" not in source
