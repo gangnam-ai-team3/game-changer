@@ -158,6 +158,10 @@ def test_corpus_team_wiring(monkeypatch, tmp_path, pipeline, use_llm):
         evidence, EvidenceRagAgent if pipeline == "event" else UpdateEvidenceAgent
     )
     assert evidence.use_llm is False
+    if pipeline == "update":
+        assert kwargs["budget"] is budgets[0]
+        assert evidence.rewrite_personas is True
+        assert evidence.budget is budgets[0]
     assert isinstance(
         kwargs["redteam"],
         EventJellyRedteamAdapter if pipeline == "event" else UpdateJellyRedteamAdapter,
@@ -169,7 +173,7 @@ def test_corpus_team_wiring(monkeypatch, tmp_path, pipeline, use_llm):
     assert kwargs["redteam"].enabled is kwargs["audit"].enabled is True
     assert len(budgets) == len(runners) == len(probes) == 1
     assert runners[0].budget is probes[0].budget is budgets[0]
-    assert budgets[0].max_requests == 2
+    assert budgets[0].max_requests == 3
     assert len(runners[0].calls) == len(probes[0].calls) == 1
     assert (requested, provider) == (True, "claude")
 
@@ -216,39 +220,73 @@ def test_non_corpus_llm_requests_do_not_construct_team_sidecars(monkeypatch, pip
     )
 
 
-def test_update_corpus_team_quota_failure_is_an_incomplete_hold(
+def test_update_corpus_jelly_failure_falls_back_and_continues_jinbae(
     monkeypatch, tmp_path
 ):
     jelly_calls, probe_calls = [], []
 
-    class QuotaJellyRunner:
+    class UnavailableJellyRunner:
         def __init__(self, *, budget):
             pass
 
         def run(self, rows):
             jelly_calls.append(rows)
-            raise StructuredModelError(ErrorCode.BUDGET_EXCEEDED, "quota")
+            raise StructuredModelError(ErrorCode.SOURCE_UNAVAILABLE, "safe")
 
-    class UnusedJinbaeProbe:
+    class GroundedJinbaeProbe:
         def __init__(self, *, budget):
             pass
 
         def run(self, claim_text, candidate_chunks):
             probe_calls.append((claim_text, candidate_chunks))
+            return {
+                "verdict": "grounded",
+                "citations": [candidate_chunks[0]["id"]],
+                "rationale": "제공된 근거로 뒷받침됩니다.",
+            }
 
     _FixtureCorpusCollector.instances = []
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setattr(api_main, "ROOT", tmp_path)
     monkeypatch.setattr(api_main, "UpdateCorpusCollector", _FixtureCorpusCollector)
-    monkeypatch.setattr(api_main, "JellyRunner", QuotaJellyRunner)
-    monkeypatch.setattr(api_main, "JinbaeProbe", UnusedJinbaeProbe)
+    monkeypatch.setattr(api_main, "JellyRunner", UnavailableJellyRunner)
+    monkeypatch.setattr(api_main, "JinbaeProbe", GroundedJinbaeProbe)
+
+    baseline = api_main._run_update(
+        _request("update", use_llm=False), "update-complete-baseline"
+    )
 
     result = api_main._run_update(
-        _request("update", use_llm=True), "update-quota-failure"
+        _request("update", use_llm=True), "update-jelly-failure"
     )
 
     assert len(jelly_calls) == 1
-    assert probe_calls == []
+    assert len(probe_calls) == 1
     assert result.fallback_used is True
-    assert result.analysis_incomplete is True
-    assert result.brief.decision.value == "Hold"
+    assert result.analysis_incomplete is False
+    assert result.brief.decision == baseline.brief.decision
+    assert [
+        (
+            risk.risk_id,
+            risk.category,
+            risk.severity,
+            risk.evidence_ids,
+            risk.confidence,
+        )
+        for risk in result.impact.risks
+    ] == [
+        (
+            risk.risk_id,
+            risk.category,
+            risk.severity,
+            risk.evidence_ids,
+            risk.confidence,
+        )
+        for risk in baseline.impact.risks
+    ]
+    event_nodes = [(event.agent, event.node) for event in result.events]
+    assert ("event_redteam", "fallback") in event_nodes
+    assert ("audit_strategy", "jinbae_probe_started") in event_nodes
+    assert ("audit_strategy", "jinbae_probe_checked") in event_nodes
+    assert "safe" not in " ".join(event.message for event in result.events)
     assert (result.llm_requested, result.llm_provider) == (True, "claude")

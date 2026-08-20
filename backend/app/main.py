@@ -134,8 +134,8 @@ def _csv_bytes(value: str | None) -> bytes | None:
 
 
 def _team_sidecars():
-    budget = ClaudeBudget(max_requests=2)
-    return JellyRunner(budget=budget), JinbaeProbe(budget=budget)
+    budget = ClaudeBudget(max_requests=3)
+    return budget, JellyRunner(budget=budget), JinbaeProbe(budget=budget)
 
 
 def _run(
@@ -161,7 +161,7 @@ def _run(
     team_mode = request.source_mode == "corpus" and request.use_llm
     team = {}
     if team_mode:
-        runner, probe = _team_sidecars()
+        _budget, runner, probe = _team_sidecars()
         team = {
             "evidence_rag": EvidenceRagAgent(),
             "redteam": EventJellyRedteamAdapter(runner=runner, enabled=True),
@@ -260,9 +260,13 @@ def _run_update(
     )
     team = {}
     if request.source_mode == "corpus" and request.use_llm:
-        runner, probe = _team_sidecars()
+        budget, runner, probe = _team_sidecars()
         team = {
-            "evidence": UpdateEvidenceAgent(),
+            "budget": budget,
+            "evidence": UpdateEvidenceAgent(
+                rewrite_personas=True,
+                budget=budget,
+            ),
             "redteam": UpdateJellyRedteamAdapter(runner=runner, enabled=True),
             "audit": UpdateJinbaeAuditAdapter(probe=probe, enabled=True),
         }

@@ -47,8 +47,10 @@ class UpdateReviewOrchestrator:
         audit=None,
         use_llm: bool = False,
         llm_client=None,
+        budget: ClaudeBudget | None = None,
     ) -> None:
-        budget = ClaudeBudget() if use_llm else None
+        continue_after_fallback = budget is not None
+        budget = budget if budget is not None else (ClaudeBudget() if use_llm else None)
         self.collector = collector or UpdateCollectorAgent(
             use_llm=use_llm, client=llm_client, budget=budget
         )
@@ -62,6 +64,7 @@ class UpdateReviewOrchestrator:
             use_llm=use_llm, client=llm_client, budget=budget
         )
         self.budget = budget
+        self._continue_after_fallback = continue_after_fallback
         self.use_llm = use_llm
         self.llm_provider = "claude" if use_llm else "deterministic"
         self.llm_requested = use_llm
@@ -111,7 +114,7 @@ class UpdateReviewOrchestrator:
             *,
             allow_llm: bool,
         ):
-            nonlocal analysis_incomplete, fallback_used, force_deterministic
+            nonlocal fallback_used
             emit(agent, "agent", ExecutionState.RUNNING, "업데이트 점검 단계를 시작했습니다.")
             if not allow_llm or force_deterministic:
                 result = deterministic_call()
@@ -125,9 +128,6 @@ class UpdateReviewOrchestrator:
                     )
                     if can_retry:
                         fallback_used = True
-                        force_deterministic = True
-                        if options.input_mode != InputMode.FIXTURE:
-                            analysis_incomplete = True
                         emit(
                             agent,
                             "agent",
@@ -147,9 +147,6 @@ class UpdateReviewOrchestrator:
                             result = deterministic_call()
                     else:
                         fallback_used = True
-                        force_deterministic = True
-                        if options.input_mode != InputMode.FIXTURE:
-                            analysis_incomplete = True
                         emit(
                             agent,
                             "fallback",
@@ -212,7 +209,8 @@ class UpdateReviewOrchestrator:
             UpdateImpactAssessment,
             Producer.EVENT_REDTEAM,
             {brief.ref, evidence.ref},
-            allow_llm=self.use_llm,
+            allow_llm=self.use_llm
+            and (self._continue_after_fallback or not fallback_used),
         )
         validated = stage(
             "audit_strategy",
@@ -233,7 +231,9 @@ class UpdateReviewOrchestrator:
             UpdateValidatedDecision,
             Producer.AUDIT_STRATEGY,
             {feedback.ref, evidence.ref, impact.ref},
-            allow_llm=self.use_llm and feedback.input_mode != InputMode.LIVE,
+            allow_llm=self.use_llm
+            and feedback.input_mode != InputMode.LIVE
+            and (self._continue_after_fallback or not fallback_used),
         )
         final = self.audit.to_brief(brief, evidence, impact, validated).model_copy(
             update=metadata
