@@ -181,7 +181,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anthropic", specifier = ">=0.40,<1" },
+    { name = "anthropic", specifier = ">=0.121,<1" },
     { name = "fastapi", specifier = ">=0.115,<1" },
     { name = "openai", specifier = ">=1.55,<3" },
     { name = "pydantic", specifier = ">=2.10,<3" },
