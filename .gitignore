@@ -1,12 +1,20 @@
 .env
+.DS_Store
+.playwright-mcp/
+node_modules/
 .data/
 
 # Hy local raw data and secrets: never commit or share
-hy/steam-reviews.db
-hy/steam-reviews.db-wal
-hy/steam-reviews.db-shm
-hy/steam-reviews.db-journal
-hy/steam-reviews.anon.db
 hy/.hash-salt
 hy/.evidence-key
+hy/steam-reviews.db
+hy/steam-reviews.db-shm
+hy/steam-reviews.db-wal
+hy/steam-reviews.db-journal
 *.evidence-key
+
+# Hy generated snapshots: keep out of Git
+hy/steam-reviews.anon.db
+hy/steam-reviews.anon.db-shm
+hy/steam-reviews.anon.db-wal
+hy/steam-reviews.anon.db-journal
