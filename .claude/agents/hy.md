@@ -72,10 +72,10 @@ VOC(Voice of Customer) 수집 담당 에이전트입니다. 스팀 공식 리뷰
 | `hy/collector.js` | 전체 리뷰 수집(백필) / 새 리뷰만 확인(동기화) → DB 적재 | ❌ |
 | `hy/prepare-evidence.js` | **핵심 파트.** 기간 필터 → 짧은 리뷰 삭제 → 근접중복 병합 → 벡터화 | ❌ |
 | `hy/call-agent.js` | (선택) 위 결과 위에 Claude로 사람이 읽는 보고서 생성 | ✅ (여기만) |
-| `hy/export-anon-db.js` | 원본 DB에서 공유해도 안전한 파생 스냅샷(`evidence` 스키마 v2 — steamid·recommendationid·리뷰 원문 없음) 생성 | ❌ |
+| `hy/export-anon-db.js` | 원본 DB에서 공유해도 안전한 파생 스냅샷(`evidence` 스키마 v3 — steamid·recommendationid·리뷰 원문 없음, k-익명성 적용) 생성 | ❌ |
 | `hy/server.js` | `hy/screen.html` 화면과 `prepare-evidence.js`를 잇는 로컬 서버(127.0.0.1 전용, `/call-agent`는 기본 서버에서 제거됨) | ❌ |
 
-자세한 기준값(언어별 최소 글자수 등)과 사용법은 `hy/README.md`에 있습니다. `hy/steam-reviews.db`(원본, steamid 있음), `hy/.hash-salt`, `hy/.evidence-key`는 절대 공유/커밋하지 않습니다(`.gitignore` 처리). 팀과 공유할 땐 `hy/export-anon-db.js`로 만든 `hy/steam-reviews.anon.db`만 사용합니다 — recommendationid·리뷰 원문·정확한 타임스탬프까지 빠진 v2 스키마라, steamid만 지웠던 v1과 달리 스팀 공개 API와 대조해도 재식별이 안 됩니다. 의미 판단(긍정/부정·요약·원인 분류)이 필요한 필드는 jelly 파트 협의 전이라 이 스냅샷에 아직 없습니다.
+자세한 기준값(언어별 최소 글자수 등)과 사용법은 `hy/README.md`에 있습니다. `hy/steam-reviews.db`(원본, steamid 있음), `hy/.hash-salt`, `hy/.evidence-key`는 절대 공유/커밋하지 않습니다(`.gitignore` 처리). 팀과 공유할 땐 `hy/export-anon-db.js`로 만든 `hy/steam-reviews.anon.db`만 사용합니다 — recommendationid·리뷰 원문·정확한 타임스탬프까지 빠진 데다(v2에서 해결), "언어+날짜 조합이 너무 희귀해서 스팀 공개 목록과 대조하면 특정 가능한" 경우까지 날짜 정밀도를 하루→주→월→언어 단위로 낮추거나 제외해(v3, res의 "15건 미만" 기준 재사용) 재식별 위험을 막습니다. 의미 판단(긍정/부정·요약·원인 분류)이 필요한 필드는 jelly 파트 협의 전이라 이 스냅샷에 아직 없습니다.
 
 # 도구 제한
 
