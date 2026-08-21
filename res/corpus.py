@@ -584,6 +584,8 @@ def _validate_public_source(connection: sqlite3.Connection) -> dict[str, str]:
         raise CorpusBuildError("활성 코퍼스 manifest 값이 공개 시연 기준과 다릅니다.")
     if not re.fullmatch(r"[0-9a-f]{64}", manifest["content_hash"]):
         raise CorpusBuildError("활성 코퍼스 manifest 해시가 올바르지 않습니다.")
+    if manifest["content_hash"] != _evidence_content_hash(connection):
+        raise CorpusBuildError("활성 코퍼스 manifest 해시와 실제 내용이 다릅니다.")
     try:
         snapshot = datetime.fromisoformat(manifest["snapshot_at"])
         completed = datetime.fromisoformat(manifest["completed_at"])

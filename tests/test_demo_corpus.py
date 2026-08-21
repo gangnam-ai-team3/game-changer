@@ -321,6 +321,26 @@ def test_public_demo_build_fails_closed_and_preserves_existing_target(tmp_path):
         build_public_demo_corpus(target, target)
 
 
+def test_stale_source_hash_preserves_existing_target(tmp_path):
+    source = tmp_path / "source.sqlite3"
+    target = tmp_path / "demo.sqlite3"
+    _make_source(source)
+    target.write_bytes(b"existing-demo")
+
+    connection = sqlite3.connect(source)
+    connection.execute(
+        "UPDATE evidence SET confidence = 0.1 WHERE evidence_id = "
+        "(SELECT evidence_id FROM evidence LIMIT 1)"
+    )
+    connection.commit()
+    connection.close()
+
+    with pytest.raises(CorpusBuildError, match="해시"):
+        build_public_demo_corpus(source, target)
+    assert target.read_bytes() == b"existing-demo"
+    assert not target.with_name(f"{target.name}.staging").exists()
+
+
 def test_public_demo_source_schema_and_key_alias_are_rejected(tmp_path):
     source = tmp_path / "source.sqlite3"
     target = tmp_path / "demo.sqlite3"
