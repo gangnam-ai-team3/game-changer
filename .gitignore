@@ -2,6 +2,10 @@
 .DS_Store
 .playwright-mcp/
 node_modules/
+.next/
+__pycache__/
+*.py[cod]
+.pytest_cache/
 .data/
 
 # Hy local raw data and secrets: never commit or share

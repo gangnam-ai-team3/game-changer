@@ -24,6 +24,14 @@ Hy는 `hy/steam-reviews.db`에 PUBG Steam 원본과 수집 상태를 로컬로 �
 
 프론트엔드 배포 빌드는 `cd frontend && npm run build`로 확인합니다. API 키는 `backend/.env` 내부에만 보관하고 화면, 로그, Git에 남기지 않습니다.
 
+## GitHub Codespaces 공개 시연
+
+1. 저장소의 Codespaces secret에 `ANTHROPIC_API_KEY`를 등록합니다.
+2. `demo_mvp` 브랜치로 Codespace를 만들고 초기 설치가 끝나면 `./scripts/start_codespace_demo.sh`를 실행합니다.
+3. **Ports** 탭에서 3000 포트의 **Port Visibility**를 **Public**으로 바꾸고 표시된 URL을 공유합니다.
+
+8000과 8787 포트는 공개하지 않습니다. Codespace를 다시 시작하면 공개 설정이 Private로 돌아가므로 시연 전에 3000 포트를 다시 Public으로 바꿔야 합니다. 시연이 끝나면 실행 스크립트를 `Ctrl+C`로 종료하고 Codespace도 정지합니다.
+
 ```text
 .claude/agents/        Claude Code가 읽는 역할 지시문
 ├─ hy.md               정현예 담당
