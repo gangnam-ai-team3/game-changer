@@ -21,6 +21,7 @@ from update_review.contracts import (
 _MAX_UPDATE_TEXT = 8_000
 _MAX_UPDATE_LIST_ITEMS = 20
 _MAX_UPDATE_CSV_BYTES = 2_000_000
+_MAX_EVENT_CSV_BASE64 = 2_666_668
 _FORBIDDEN_CREDENTIAL_FIELD_NAMES = frozenset(
     {
         "api_key",
@@ -34,26 +35,32 @@ _FORBIDDEN_CREDENTIAL_FIELD_NAMES = frozenset(
         "password",
     }
 )
-UpdateListText = Annotated[str, Field(min_length=1, max_length=1_000)]
+RequestListText = Annotated[str, Field(min_length=1, max_length=1_000)]
 
 
 class EventBriefRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    game: str = Field(min_length=1)
-    event_name: str = Field(min_length=1)
-    goal: str = Field(min_length=1)
-    target_users: list[str] = Field(min_length=1)
+    game: str = Field(min_length=1, max_length=200)
+    event_name: str = Field(min_length=1, max_length=300)
+    goal: str = Field(min_length=1, max_length=_MAX_UPDATE_TEXT)
+    target_users: list[RequestListText] = Field(
+        min_length=1, max_length=_MAX_UPDATE_LIST_ITEMS
+    )
     starts_on: date
     ends_on: date
     cutoff_on: date
-    participation_rule: str = Field(min_length=1)
-    repeat_rule: str = Field(min_length=1)
-    rewards: list[str] = Field(min_length=1)
-    currencies: list[str] = Field(min_length=1)
-    probability_guarantee: str = Field(min_length=1)
-    monetization_policy: str = Field(min_length=1)
-    expiration_policy: str = Field(min_length=1)
+    participation_rule: str = Field(min_length=1, max_length=_MAX_UPDATE_TEXT)
+    repeat_rule: str = Field(min_length=1, max_length=_MAX_UPDATE_TEXT)
+    rewards: list[RequestListText] = Field(
+        min_length=1, max_length=_MAX_UPDATE_LIST_ITEMS
+    )
+    currencies: list[RequestListText] = Field(
+        min_length=1, max_length=_MAX_UPDATE_LIST_ITEMS
+    )
+    probability_guarantee: str = Field(min_length=1, max_length=_MAX_UPDATE_TEXT)
+    monetization_policy: str = Field(min_length=1, max_length=_MAX_UPDATE_TEXT)
+    expiration_policy: str = Field(min_length=1, max_length=_MAX_UPDATE_TEXT)
 
 
 class PipelineRunRequest(EventBriefRequest):
@@ -61,9 +68,9 @@ class PipelineRunRequest(EventBriefRequest):
     fixture_case: Literal["black_market_2025", "weekly_supply_2025"] = "black_market_2025"
     steam_app_id: int | None = Field(default=None, ge=1)
     use_x: bool = False
-    x_query: str = "PUBG Black Market"
+    x_query: str = Field(default="PUBG Black Market", min_length=1, max_length=500)
     x_estimated_total_cost_usd: float = Field(default=0, ge=0, le=10)
-    imported_csv: str | None = None
+    imported_csv: str | None = Field(default=None, max_length=_MAX_EVENT_CSV_BASE64)
     use_llm: bool = False
     llm_provider: Literal["claude", "openai"] = "claude"
 
@@ -92,10 +99,10 @@ class UpdateRunRequest(BaseModel):
     current_state: str = Field(min_length=1, max_length=_MAX_UPDATE_TEXT)
     change_summary: str = Field(min_length=1, max_length=_MAX_UPDATE_TEXT)
     goal: str = Field(min_length=1, max_length=_MAX_UPDATE_TEXT)
-    expected_benefits: list[UpdateListText] = Field(
+    expected_benefits: list[RequestListText] = Field(
         min_length=1, max_length=_MAX_UPDATE_LIST_ITEMS
     )
-    concerns: list[UpdateListText] = Field(
+    concerns: list[RequestListText] = Field(
         min_length=1, max_length=_MAX_UPDATE_LIST_ITEMS
     )
     scope: str = Field(min_length=1, max_length=_MAX_UPDATE_TEXT)

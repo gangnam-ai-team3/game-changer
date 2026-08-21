@@ -59,13 +59,16 @@ class EventPreflightOrchestrator:
         use_llm: bool = False,
         llm_provider: str | None = None,
         llm_client=None,
+        budget: ClaudeBudget | None = None,
         collector: CollectorAgent | None = None,
         evidence_rag: EvidenceRagAgent | None = None,
         redteam: EventRedteamAgent | None = None,
         audit: AuditStrategyAgent | None = None,
     ) -> None:
         provider = llm_provider or os.getenv("LLM_PROVIDER", "claude")
-        budget = ClaudeBudget() if use_llm and provider == "claude" else None
+        budget = budget if budget is not None else (
+            ClaudeBudget() if use_llm and provider == "claude" else None
+        )
         self.collector = collector or CollectorAgent()
         self.evidence_rag = evidence_rag or EvidenceRagAgent(
             use_llm=use_llm, client=llm_client, provider=provider, budget=budget
@@ -143,8 +146,9 @@ class EventPreflightOrchestrator:
             {event.ref},
         )
         analysis_incomplete = (
-            feedback.input_mode == InputMode.CORPUS
-            and feedback.status == ArtifactStatus.PARTIAL
+            feedback.status == ArtifactStatus.PARTIAL
+            or not feedback.evidence
+            or any(not sample.sufficient for sample in feedback.samples)
         )
         self._write(feedback, log_path)
         try:
@@ -162,7 +166,6 @@ class EventPreflightOrchestrator:
             )
         except StructuredModelError:
             fallback_used = True
-            analysis_incomplete = feedback.input_mode != InputMode.FIXTURE
             evidence = self._deterministic_stage(
                 "evidence_rag_personas",
                 feedback,
@@ -204,7 +207,6 @@ class EventPreflightOrchestrator:
                 )
             except StructuredModelError:
                 fallback_used = True
-                analysis_incomplete = feedback.input_mode != InputMode.FIXTURE
                 risks = self._deterministic_stage(
                     "event_redteam",
                     event,
@@ -249,7 +251,6 @@ class EventPreflightOrchestrator:
                 )
             except StructuredModelError:
                 fallback_used = True
-                analysis_incomplete = feedback.input_mode != InputMode.FIXTURE
                 validated = self._deterministic_stage(
                     "audit_strategy",
                     feedback,

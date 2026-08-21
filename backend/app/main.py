@@ -7,7 +7,7 @@ import os
 from datetime import UTC, datetime, time
 from pathlib import Path
 from queue import Queue
-from threading import Thread
+from threading import Lock, Thread
 from typing import Callable
 from uuid import uuid4
 
@@ -46,6 +46,9 @@ from .schemas import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
+_PUBLIC_DEMO_BUDGET: ClaudeBudget | None = None
+# ponytail: process-local demo lock; use a shared lock before adding workers.
+_PUBLIC_DEMO_RUN_LOCK = Lock()
 app = FastAPI(title="Game Changer API", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
@@ -133,8 +136,50 @@ def _csv_bytes(value: str | None) -> bytes | None:
         raise HTTPException(status_code=422, detail="imported_csv must be base64 encoded") from exc
 
 
-def _team_sidecars():
-    budget = ClaudeBudget(max_requests=3)
+def _public_demo_mode() -> bool:
+    return os.getenv("PUBLIC_DEMO_MODE") == "1"
+
+
+def _public_demo_budget() -> ClaudeBudget:
+    global _PUBLIC_DEMO_BUDGET
+    if _PUBLIC_DEMO_BUDGET is None:
+        _PUBLIC_DEMO_BUDGET = ClaudeBudget(
+            max_requests=int(os.getenv("PUBLIC_DEMO_MAX_REQUESTS", "12")),
+            max_usd=float(os.getenv("PUBLIC_DEMO_MAX_USD", "3.0")),
+        )
+    return _PUBLIC_DEMO_BUDGET
+
+
+def _guard_public_source(source_mode: str) -> None:
+    if _public_demo_mode() and source_mode not in {"fixture", "corpus"}:
+        raise HTTPException(
+            status_code=403,
+            detail="공개 시연에서는 검증된 저장 자료만 사용할 수 있습니다.",
+        )
+
+
+def _acquire_public_run() -> bool:
+    if not _public_demo_mode():
+        return False
+    if not _PUBLIC_DEMO_RUN_LOCK.acquire(blocking=False):
+        raise HTTPException(
+            status_code=429,
+            detail="다른 점검을 실행 중입니다. 완료 후 다시 시도해 주세요.",
+        )
+    return True
+
+
+def _release_public_run(acquired: bool) -> None:
+    if acquired:
+        _PUBLIC_DEMO_RUN_LOCK.release()
+
+
+def _run_log_path(run_id: str) -> Path | None:
+    return None if _public_demo_mode() else ROOT / ".data" / "runs" / f"{run_id}.jsonl"
+
+
+def _team_sidecars(budget: ClaudeBudget | None = None):
+    budget = budget if budget is not None else ClaudeBudget(max_requests=3)
     return budget, JellyRunner(budget=budget), JinbaeProbe(budget=budget)
 
 
@@ -160,23 +205,31 @@ def _run(
     )
     team_mode = request.source_mode == "corpus" and request.use_llm
     team = {}
+    public_budget = (
+        _public_demo_budget() if _public_demo_mode() and request.use_llm else None
+    )
     if team_mode:
-        _budget, runner, probe = _team_sidecars()
+        team_budget, runner, probe = _team_sidecars(public_budget)
         team = {
+            "budget": team_budget,
             "evidence_rag": EvidenceRagAgent(),
             "redteam": EventJellyRedteamAdapter(runner=runner, enabled=True),
             "audit": EventJinbaeAuditAdapter(probe=probe, enabled=True),
         }
+    elif public_budget is not None:
+        team["budget"] = public_budget
     result = EventPreflightOrchestrator(
         use_llm=request.use_llm,
-        llm_provider="claude" if team_mode else request.llm_provider,
+        llm_provider=(
+            "claude" if team_mode or _public_demo_mode() else request.llm_provider
+        ),
         collector=collector,
         **team,
     ).run(
         event,
         options,
         on_event=on_event,
-        log_path=ROOT / ".data" / "runs" / f"{run_id}.jsonl",
+        log_path=_run_log_path(run_id),
     )
     return {
         "brief": result.brief.model_dump(mode="json"),
@@ -259,8 +312,11 @@ def _run_update(
         else None
     )
     team = {}
+    public_budget = (
+        _public_demo_budget() if _public_demo_mode() and request.use_llm else None
+    )
     if request.source_mode == "corpus" and request.use_llm:
-        budget, runner, probe = _team_sidecars()
+        budget, runner, probe = _team_sidecars(public_budget)
         team = {
             "budget": budget,
             "evidence": UpdateEvidenceAgent(
@@ -270,6 +326,8 @@ def _run_update(
             "redteam": UpdateJellyRedteamAdapter(runner=runner, enabled=True),
             "audit": UpdateJinbaeAuditAdapter(probe=probe, enabled=True),
         }
+    elif public_budget is not None:
+        team["budget"] = public_budget
     result = UpdateReviewOrchestrator(
         use_llm=request.use_llm,
         collector=collector,
@@ -278,7 +336,7 @@ def _run_update(
         brief,
         options,
         on_event=on_event,
-        log_path=ROOT / ".data" / "runs" / f"{run_id}.jsonl",
+        log_path=_run_log_path(run_id),
     )
     return UpdateRunResult(
         brief=result.brief,
@@ -301,6 +359,8 @@ def health() -> HealthResponse:
 
 @app.post("/api/runs", response_model=PipelineRunResponse)
 def create_run(request: PipelineRunRequest) -> PipelineRunResponse:
+    _guard_public_source(request.source_mode)
+    acquired = _acquire_public_run()
     run_id = str(uuid4())
     try:
         result = _run(request, run_id)
@@ -310,11 +370,15 @@ def create_run(request: PipelineRunRequest) -> PipelineRunResponse:
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail="검토 실행 중 오류가 발생했습니다.") from exc
+    finally:
+        _release_public_run(acquired)
     return PipelineRunResponse(run_id=run_id, result=result)
 
 
 @app.post("/api/runs/stream")
 def stream_run(request: PipelineRunRequest) -> StreamingResponse:
+    _guard_public_source(request.source_mode)
+    acquired = _acquire_public_run()
     run_id = str(uuid4())
     messages: Queue[tuple[str, dict] | None] = Queue()
 
@@ -332,9 +396,14 @@ def stream_run(request: PipelineRunRequest) -> StreamingResponse:
         except Exception:
             messages.put(("error", {"detail": "검토 실행 중 오류가 발생했습니다.", "status_code": 500}))
         finally:
+            _release_public_run(acquired)
             messages.put(None)
 
-    Thread(target=worker, daemon=True).start()
+    try:
+        Thread(target=worker, daemon=True).start()
+    except Exception:
+        _release_public_run(acquired)
+        raise
 
     def events():
         while True:
@@ -354,6 +423,8 @@ def stream_run(request: PipelineRunRequest) -> StreamingResponse:
 
 @app.post("/api/update-runs", response_model=UpdatePipelineRunResponse)
 def create_update_run(request: UpdateRunRequest) -> UpdatePipelineRunResponse:
+    _guard_public_source(request.source_mode)
+    acquired = _acquire_public_run()
     run_id = str(uuid4())
     try:
         result = _run_update(request, run_id)
@@ -367,11 +438,15 @@ def create_update_run(request: UpdateRunRequest) -> UpdatePipelineRunResponse:
         raise HTTPException(
             status_code=500, detail="업데이트 점검 실행 중 오류가 발생했습니다."
         ) from exc
+    finally:
+        _release_public_run(acquired)
     return UpdatePipelineRunResponse(run_id=run_id, result=result)
 
 
 @app.post("/api/update-runs/stream")
 def stream_update_run(request: UpdateRunRequest) -> StreamingResponse:
+    _guard_public_source(request.source_mode)
+    acquired = _acquire_public_run()
     run_id = str(uuid4())
     messages: Queue[tuple[str, dict] | None] = Queue()
 
@@ -423,9 +498,14 @@ def stream_update_run(request: UpdateRunRequest) -> StreamingResponse:
                 )
             )
         finally:
+            _release_public_run(acquired)
             messages.put(None)
 
-    Thread(target=worker, daemon=True).start()
+    try:
+        Thread(target=worker, daemon=True).start()
+    except Exception:
+        _release_public_run(acquired)
+        raise
 
     def events():
         while True:

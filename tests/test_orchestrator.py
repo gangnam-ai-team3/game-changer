@@ -4,7 +4,7 @@ import pytest
 
 from agents.collector import CollectionOptions, CollectorAgent
 from agents.evidence_rag import EvidenceRagAgent
-from agents.structured import StructuredModelError
+from agents.structured import ClaudeBudget, StructuredModelError
 from connectors import ConnectorError
 from contracts import (
     ArtifactStatus,
@@ -103,6 +103,35 @@ def test_fixture_llm_refusal_retries_once_then_uses_deterministic_fallback(event
     assert ExecutionState.RETRYING in states
     assert ExecutionState.FAILED in states
     assert ExecutionState.COMPLETE in states
+
+
+def test_complete_corpus_budget_exhaustion_uses_non_hold_deterministic_result(
+    event, feedback
+):
+    complete_corpus = feedback.model_copy(
+        update={
+            "input_refs": [event.ref],
+            "input_mode": InputMode.CORPUS,
+            "status": ArtifactStatus.COMPLETE,
+            "errors": [],
+        }
+    )
+
+    class CompleteCorpusCollector:
+        def run(self, _event, _options, on_event=None):
+            return complete_corpus
+
+    result = EventPreflightOrchestrator(
+        collector=CompleteCorpusCollector(),
+        use_llm=True,
+        llm_provider="claude",
+        llm_client=object(),
+        budget=ClaudeBudget(max_requests=0, max_usd=0),
+    ).run(event, CollectionOptions())
+
+    assert result.fallback_used is True
+    assert result.analysis_incomplete is False
+    assert result.brief.decision is Decision.REVISE
 
 
 def test_contract_violation_stops_without_retry_or_fallback(event):
