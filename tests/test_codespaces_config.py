@@ -14,9 +14,13 @@ def test_codespaces_public_demo_configuration() -> None:
         (ROOT / ".devcontainer" / "devcontainer.json").read_text(encoding="utf-8")
     )
     script = ROOT / "scripts" / "start_codespace_demo.sh"
+    dockerfile = (ROOT / ".devcontainer" / "Dockerfile").read_text(encoding="utf-8")
 
-    assert config["image"].endswith("3.12-bookworm")
+    assert config["build"]["dockerfile"] == "Dockerfile"
+    assert "python:1-3.12-bookworm" in dockerfile
+    assert "/etc/apt/sources.list.d/yarn.list" in dockerfile
     assert config["features"]["ghcr.io/devcontainers/features/node:1"]["version"] == "24"
+    assert "ghcr.io/devcontainers/features/sshd:1" in config["features"]
     assert "uv==0.11.26" in config["postCreateCommand"]
     assert config["forwardPorts"] == [3000]
     assert config["portsAttributes"]["8000"]["onAutoForward"] == "ignore"

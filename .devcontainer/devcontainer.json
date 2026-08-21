@@ -1,7 +1,9 @@
 {
   "$schema": "https://raw.githubusercontent.com/devcontainers/spec/main/schemas/devContainer.base.schema.json",
   "name": "Game Changer Demo",
-  "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
   "features": {
     "ghcr.io/devcontainers/features/node:1": {
       "version": "24"
