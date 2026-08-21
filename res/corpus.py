@@ -6,12 +6,13 @@ import hmac
 import json
 import os
 import re
+import secrets
 import sqlite3
 import subprocess
 import tempfile
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 PUBG_APP_ID = 578080
 TAXONOMY_VERSION = "pubg-steam-v1"
 DEFAULT_DB = Path(".data/corpus/pubg_steam.sqlite3")
+PUBLIC_DEMO_DB = Path("fixtures/corpus/pubg_steam_demo.sqlite3")
+PUBLIC_DEMO_CLASSIFIER = "codex-derived-demo-v1"
+PUBLIC_DEMO_CORPUS_VERSION = "pubg-steam-public-demo-v1"
 STEAM_LANGUAGES = {"ko": "koreana", "en": "english"}
 _CODEX_ENV_KEYS = (
     "PATH",
@@ -225,6 +229,52 @@ _HANDLE = re.compile(r"(?<!\w)@[A-Za-z0-9_]{2,32}\b")
 _LONG_ID = re.compile(r"\b\d{12,20}\b")
 _STEAM_MARKUP = re.compile(r"\[/?[A-Za-z0-9_= -]+\]")
 _SPACE = re.compile(r"\s+")
+_CORPUS_TABLES = {
+    "manifest",
+    "evidence",
+    "evidence_fts",
+    "evidence_fts_config",
+    "evidence_fts_content",
+    "evidence_fts_data",
+    "evidence_fts_docsize",
+    "evidence_fts_idx",
+}
+_MANIFEST_KEYS = {
+    "status",
+    "corpus_version",
+    "app_id",
+    "snapshot_at",
+    "target_per_language",
+    "classifier",
+    "taxonomy_version",
+    "completed_at",
+    "ko_count",
+    "en_count",
+    "content_hash",
+}
+_MANIFEST_COLUMNS = (
+    ("key", "TEXT", 0, None, 1),
+    ("value", "TEXT", 1, None, 0),
+)
+_EVIDENCE_COLUMNS = (
+    ("evidence_id", "TEXT", 0, None, 1),
+    ("app_id", "INTEGER", 1, None, 0),
+    ("language", "TEXT", 1, None, 0),
+    ("created_at", "TEXT", 1, None, 0),
+    ("updated_at", "TEXT", 1, None, 0),
+    ("stance", "TEXT", 1, None, 0),
+    ("summary", "TEXT", 1, None, 0),
+    ("reason_codes", "TEXT", 1, None, 0),
+    ("behavior_codes", "TEXT", 1, None, 0),
+    ("topic_tags", "TEXT", 1, None, 0),
+    ("confidence", "REAL", 1, None, 0),
+    ("classifier", "TEXT", 1, None, 0),
+    ("taxonomy_version", "TEXT", 1, None, 0),
+)
+_FTS_COLUMNS = (
+    ("evidence_id", "", 0, None, 0),
+    ("search_text", "", 0, None, 0),
+)
 
 
 def classify_with_codex(
@@ -374,6 +424,114 @@ def build_from_hy_db(
         connection.close()
 
 
+def build_public_demo_corpus(
+    source_db: Path, target_db: Path = PUBLIC_DEMO_DB
+) -> dict[str, Any]:
+    """Publish only closed-code labels from an active local corpus."""
+    source_db = Path(source_db)
+    target_db = Path(target_db)
+    stage_path = target_db.with_name(f"{target_db.name}.staging")
+    key_path = target_db.with_name(f".{target_db.name}.evidence-key")
+    _reject_source_database(source_db, target_db, stage_path, key_path)
+    stage_path.unlink(missing_ok=True)
+    if "evidence-key" in source_db.name or "evidence-key" in target_db.name:
+        raise CorpusBuildError("코퍼스 DB에 ID 키 경로를 사용할 수 없습니다.")
+    if not source_db.is_file():
+        raise CorpusBuildError("활성 코퍼스를 찾지 못했습니다.")
+
+    source = sqlite3.connect(f"{source_db.resolve().as_uri()}?mode=ro", uri=True)
+    try:
+        source.execute("PRAGMA query_only = ON")
+        source.execute("BEGIN")
+        manifest = _validate_public_source(source)
+        rows = source.execute(
+            """
+            SELECT language, stance, reason_codes, behavior_codes, topic_tags,
+                   confidence
+            FROM evidence
+            """
+        ).fetchall()
+    except CorpusBuildError:
+        raise
+    except (json.JSONDecodeError, sqlite3.Error, TypeError, ValueError) as exc:
+        raise CorpusBuildError("활성 코퍼스 형식이 올바르지 않습니다.") from exc
+    finally:
+        source.close()
+
+    secrets.SystemRandom().shuffle(rows)
+    snapshot = datetime.fromisoformat(manifest["snapshot_at"])
+    records: list[EphemeralSteamReview] = []
+    labels: list[ReviewLabel] = []
+    issued_ids: set[str] = set()
+    try:
+        for language, stance, reasons, behaviors, topics, confidence in rows:
+            if language not in STEAM_LANGUAGES:
+                raise ValueError("unexpected language")
+            evidence_id = secrets.token_hex(12)
+            while evidence_id in issued_ids:
+                evidence_id = secrets.token_hex(12)
+            issued_ids.add(evidence_id)
+            records.append(
+                EphemeralSteamReview(
+                    evidence_id=evidence_id,
+                    language=language,
+                    created_at=snapshot,
+                    updated_at=snapshot,
+                    text="",
+                )
+            )
+            labels.append(
+                ReviewLabel(
+                    item_id=evidence_id,
+                    quality=Quality.USABLE,
+                    stance=stance,
+                    reason_codes=json.loads(reasons),
+                    behavior_codes=json.loads(behaviors),
+                    topic_tags=json.loads(topics),
+                    confidence=confidence,
+                )
+            )
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise CorpusBuildError("코퍼스 분류 값이 정의된 형식과 다릅니다.") from exc
+
+    target_db.parent.mkdir(parents=True, exist_ok=True)
+    target: sqlite3.Connection | None = None
+    try:
+        target = sqlite3.connect(stage_path)
+        _initialize_database(
+            target,
+            snapshot=snapshot,
+            target_per_language=500,
+            classifier=PUBLIC_DEMO_CLASSIFIER,
+        )
+        target.execute(
+            "UPDATE manifest SET value = ? WHERE key = 'corpus_version'",
+            (PUBLIC_DEMO_CORPUS_VERSION,),
+        )
+        inserted = _classify_and_store(
+            target,
+            records,
+            lambda _reviews: labels,
+            PUBLIC_DEMO_CLASSIFIER,
+            len(records),
+        )
+        if inserted != 1000:
+            raise CorpusBuildError("공개 시연 코퍼스 1,000건을 생성하지 못했습니다.")
+        result = _finalize_database(target, 500)
+        target.execute("VACUUM")
+        _verify_public_target(target, result)
+        target.close()
+        target = None
+        os.chmod(stage_path, 0o644)
+        os.replace(stage_path, target_db)
+        return result
+    except Exception:
+        if target is not None:
+            target.close()
+        stage_path.unlink(missing_ok=True)
+        raise
+
+
 def _reject_source_database(source_db: Path, *protected_paths: Path) -> None:
     source = source_db.resolve()
     for path in protected_paths:
@@ -386,6 +544,71 @@ def _reject_source_database(source_db: Path, *protected_paths: Path) -> None:
             raise CorpusBuildError(
                 "Hy 원본 DB와 안전 코퍼스 관련 경로는 같을 수 없습니다."
             )
+
+
+def _validate_public_source(connection: sqlite3.Connection) -> dict[str, str]:
+    tables = {
+        row[0]
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        )
+    }
+    schema = {
+        table: tuple(
+            (row[1], row[2].upper(), row[3], row[4], row[5])
+            for row in connection.execute(f"PRAGMA table_info({table})")
+        )
+        for table in ("manifest", "evidence", "evidence_fts")
+    }
+    if tables != _CORPUS_TABLES or schema != {
+        "manifest": _MANIFEST_COLUMNS,
+        "evidence": _EVIDENCE_COLUMNS,
+        "evidence_fts": _FTS_COLUMNS,
+    }:
+        raise CorpusBuildError("활성 코퍼스 스키마가 기대한 형식과 다릅니다.")
+    if connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+        raise CorpusBuildError("활성 코퍼스 파일이 손상됐습니다.")
+
+    manifest = _read_manifest(connection)
+    if set(manifest) != _MANIFEST_KEYS:
+        raise CorpusBuildError("활성 코퍼스 manifest 형식이 올바르지 않습니다.")
+    expected = {
+        "status": "active",
+        "app_id": str(PUBG_APP_ID),
+        "target_per_language": "500",
+        "ko_count": "500",
+        "en_count": "500",
+        "taxonomy_version": TAXONOMY_VERSION,
+    }
+    if any(manifest.get(key) != value for key, value in expected.items()):
+        raise CorpusBuildError("활성 코퍼스 manifest 값이 공개 시연 기준과 다릅니다.")
+    if not re.fullmatch(r"[0-9a-f]{64}", manifest["content_hash"]):
+        raise CorpusBuildError("활성 코퍼스 manifest 해시가 올바르지 않습니다.")
+    try:
+        snapshot = datetime.fromisoformat(manifest["snapshot_at"])
+        completed = datetime.fromisoformat(manifest["completed_at"])
+    except ValueError as exc:
+        raise CorpusBuildError("활성 코퍼스 manifest 시각이 올바르지 않습니다.") from exc
+    if (
+        snapshot.tzinfo is None
+        or snapshot.utcoffset() != timedelta(0)
+        or snapshot.isoformat() != manifest["snapshot_at"]
+        or completed.tzinfo is None
+        or completed.utcoffset() != timedelta(0)
+        or completed < snapshot
+    ):
+        raise CorpusBuildError("활성 코퍼스 manifest 시각이 올바르지 않습니다.")
+
+    counts = dict(
+        connection.execute(
+            "SELECT language, COUNT(*) FROM evidence GROUP BY language"
+        )
+    )
+    if counts != {"en": 500, "ko": 500}:
+        raise CorpusBuildError("활성 코퍼스의 언어별 자료 수가 manifest와 다릅니다.")
+    if connection.execute("SELECT COUNT(*) FROM evidence_fts").fetchone()[0] != 1000:
+        raise CorpusBuildError("활성 코퍼스의 검색 색인이 완전하지 않습니다.")
+    return manifest
 
 
 def _load_or_create_evidence_key(key_path: Path) -> bytes:
@@ -827,23 +1050,67 @@ def _finalize_database(
     if fts_count != target_per_language * 2:
         raise CorpusBuildError("검색 색인과 코퍼스 레코드 수가 일치하지 않습니다.")
 
-    digest = hashlib.sha256()
-    for row in connection.execute(
-        "SELECT * FROM evidence ORDER BY language, evidence_id"
-    ):
-        digest.update(json.dumps(row, ensure_ascii=False, separators=(",", ":")).encode())
     updates = {
         "status": "active",
         "completed_at": datetime.now(UTC).isoformat(),
         "ko_count": str(counts["ko"]),
         "en_count": str(counts["en"]),
-        "content_hash": digest.hexdigest(),
+        "content_hash": _evidence_content_hash(connection),
     }
     connection.executemany(
         "INSERT OR REPLACE INTO manifest (key, value) VALUES (?, ?)", updates.items()
     )
     connection.commit()
     return _read_manifest(connection)
+
+
+def _evidence_content_hash(connection: sqlite3.Connection) -> str:
+    digest = hashlib.sha256()
+    for row in connection.execute(
+        "SELECT * FROM evidence ORDER BY language, evidence_id"
+    ):
+        digest.update(json.dumps(row, ensure_ascii=False, separators=(",", ":")).encode())
+    return digest.hexdigest()
+
+
+def _verify_public_target(
+    connection: sqlite3.Connection, manifest: dict[str, Any]
+) -> None:
+    if _validate_public_source(connection) != manifest:
+        raise CorpusBuildError("공개 시연 코퍼스 manifest가 변경됐습니다.")
+    if connection.execute("PRAGMA freelist_count").fetchone()[0] != 0:
+        raise CorpusBuildError("공개 시연 코퍼스에 삭제된 페이지가 남아 있습니다.")
+    orphaned = connection.execute(
+        """
+        SELECT COUNT(*) FROM evidence_fts AS f
+        LEFT JOIN evidence AS e ON e.evidence_id = f.evidence_id
+        WHERE e.evidence_id IS NULL
+        """
+    ).fetchone()[0]
+    missing = connection.execute(
+        """
+        SELECT COUNT(*) FROM evidence AS e
+        LEFT JOIN evidence_fts AS f ON f.evidence_id = e.evidence_id
+        WHERE f.evidence_id IS NULL
+        """
+    ).fetchone()[0]
+    if orphaned or missing:
+        raise CorpusBuildError("공개 시연 코퍼스와 검색 색인이 일치하지 않습니다.")
+    for summary, reasons, behaviors, topics, search_text in connection.execute(
+        """
+        SELECT e.summary, e.reason_codes, e.behavior_codes, e.topic_tags,
+               f.search_text
+        FROM evidence AS e
+        JOIN evidence_fts AS f ON f.evidence_id = e.evidence_id
+        """
+    ):
+        codes = " ".join(
+            [*json.loads(reasons), *json.loads(behaviors), *json.loads(topics)]
+        )
+        if search_text != f"{summary} {codes}":
+            raise CorpusBuildError("공개 시연 코퍼스 검색 내용이 일치하지 않습니다.")
+    if manifest["content_hash"] != _evidence_content_hash(connection):
+        raise CorpusBuildError("공개 시연 코퍼스 내용 해시가 일치하지 않습니다.")
 
 
 def _read_manifest(connection: sqlite3.Connection) -> dict[str, Any]:
@@ -903,6 +1170,12 @@ def main(argv: list[str] | None = None) -> int:
     build_hy.add_argument("--batch-size", type=int, default=40)
     build_hy.add_argument("--max-pages", type=int, default=20)
 
+    build_demo = subparsers.add_parser(
+        "build-demo", help="활성 코퍼스에서 공개 시연본을 생성합니다"
+    )
+    build_demo.add_argument("--source-db", type=Path, default=DEFAULT_DB)
+    build_demo.add_argument("--db", type=Path, default=PUBLIC_DEMO_DB)
+
     status = subparsers.add_parser("status", help="활성 코퍼스 상태를 확인합니다")
     status.add_argument("--db", type=Path, default=DEFAULT_DB)
 
@@ -924,6 +1197,8 @@ def main(argv: list[str] | None = None) -> int:
                     max_pages=args.max_pages,
                 )
             )
+        elif args.command == "build-demo":
+            _print_json(build_public_demo_corpus(args.source_db, args.db))
         elif args.command == "status":
             _print_json(corpus_status(args.db))
         else:
