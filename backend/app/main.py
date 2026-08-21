@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import math
 import os
 from datetime import UTC, datetime, time
 from pathlib import Path
@@ -143,9 +144,16 @@ def _public_demo_mode() -> bool:
 def _public_demo_budget() -> ClaudeBudget:
     global _PUBLIC_DEMO_BUDGET
     if _PUBLIC_DEMO_BUDGET is None:
+        try:
+            max_requests = int(os.getenv("PUBLIC_DEMO_MAX_REQUESTS", "12"))
+            max_usd = float(os.getenv("PUBLIC_DEMO_MAX_USD", "3.0"))
+        except (ValueError, OverflowError):
+            raise RuntimeError("공개 시연 예산 설정을 확인해야 합니다.") from None
+        if max_requests < 0 or max_usd < 0 or not math.isfinite(max_usd):
+            raise RuntimeError("공개 시연 예산 설정을 확인해야 합니다.")
         _PUBLIC_DEMO_BUDGET = ClaudeBudget(
-            max_requests=int(os.getenv("PUBLIC_DEMO_MAX_REQUESTS", "12")),
-            max_usd=float(os.getenv("PUBLIC_DEMO_MAX_USD", "3.0")),
+            max_requests=max_requests,
+            max_usd=max_usd,
         )
     return _PUBLIC_DEMO_BUDGET
 
@@ -360,8 +368,8 @@ def health() -> HealthResponse:
 @app.post("/api/runs", response_model=PipelineRunResponse)
 def create_run(request: PipelineRunRequest) -> PipelineRunResponse:
     _guard_public_source(request.source_mode)
-    acquired = _acquire_public_run()
     run_id = str(uuid4())
+    acquired = _acquire_public_run()
     try:
         result = _run(request, run_id)
     except (ValueError, PipelineStopped) as exc:
@@ -378,9 +386,9 @@ def create_run(request: PipelineRunRequest) -> PipelineRunResponse:
 @app.post("/api/runs/stream")
 def stream_run(request: PipelineRunRequest) -> StreamingResponse:
     _guard_public_source(request.source_mode)
-    acquired = _acquire_public_run()
     run_id = str(uuid4())
     messages: Queue[tuple[str, dict] | None] = Queue()
+    acquired = _acquire_public_run()
 
     def emit(event: ExecutionEvent) -> None:
         messages.put(("agent_event", {"event": event.model_dump(mode="json")}))
@@ -424,8 +432,8 @@ def stream_run(request: PipelineRunRequest) -> StreamingResponse:
 @app.post("/api/update-runs", response_model=UpdatePipelineRunResponse)
 def create_update_run(request: UpdateRunRequest) -> UpdatePipelineRunResponse:
     _guard_public_source(request.source_mode)
-    acquired = _acquire_public_run()
     run_id = str(uuid4())
+    acquired = _acquire_public_run()
     try:
         result = _run_update(request, run_id)
     except HTTPException:
@@ -446,9 +454,9 @@ def create_update_run(request: UpdateRunRequest) -> UpdatePipelineRunResponse:
 @app.post("/api/update-runs/stream")
 def stream_update_run(request: UpdateRunRequest) -> StreamingResponse:
     _guard_public_source(request.source_mode)
-    acquired = _acquire_public_run()
     run_id = str(uuid4())
     messages: Queue[tuple[str, dict] | None] = Queue()
+    acquired = _acquire_public_run()
 
     def emit(event: ExecutionEvent) -> None:
         # The update orchestrator emits only contract-validated, code-owned

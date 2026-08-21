@@ -84,6 +84,83 @@ def test_public_demo_rejects_a_second_concurrent_run(path, body, public_demo):
     assert "다른 점검" in response.json()["detail"]
 
 
+def _assert_public_lock_available():
+    assert api_main._PUBLIC_DEMO_RUN_LOCK.acquire(blocking=False)
+    api_main._PUBLIC_DEMO_RUN_LOCK.release()
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        ("/api/runs", request_payload()),
+        ("/api/runs/stream", request_payload()),
+        ("/api/update-runs", update_payload()),
+        ("/api/update-runs/stream", update_payload()),
+    ],
+)
+def test_run_id_failure_does_not_leak_public_lock(
+    monkeypatch, path, body, public_demo
+):
+    def fail_uuid():
+        raise RuntimeError("unsafe-uuid-detail")
+
+    monkeypatch.setattr(api_main, "uuid4", fail_uuid)
+
+    response = TestClient(app, raise_server_exceptions=False).post(path, json=body)
+
+    assert response.status_code == 500
+    assert "unsafe-uuid-detail" not in response.text
+    _assert_public_lock_available()
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        ("/api/runs/stream", request_payload()),
+        ("/api/update-runs/stream", update_payload()),
+    ],
+)
+def test_sse_queue_failure_does_not_leak_public_lock(
+    monkeypatch, path, body, public_demo
+):
+    def fail_queue():
+        raise RuntimeError("unsafe-queue-detail")
+
+    monkeypatch.setattr(api_main, "Queue", fail_queue)
+
+    response = TestClient(app, raise_server_exceptions=False).post(path, json=body)
+
+    assert response.status_code == 500
+    assert "unsafe-queue-detail" not in response.text
+    _assert_public_lock_available()
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        ("/api/runs/stream", request_payload()),
+        ("/api/update-runs/stream", update_payload()),
+    ],
+)
+def test_sse_thread_start_failure_releases_public_lock(
+    monkeypatch, path, body, public_demo
+):
+    class FailingThread:
+        def __init__(self, **_kwargs):
+            pass
+
+        def start(self):
+            raise RuntimeError("unsafe-thread-detail")
+
+    monkeypatch.setattr(api_main, "Thread", FailingThread)
+
+    response = TestClient(app, raise_server_exceptions=False).post(path, json=body)
+
+    assert response.status_code == 500
+    assert "unsafe-thread-detail" not in response.text
+    _assert_public_lock_available()
+
+
 @pytest.mark.parametrize(
     ("path", "body"),
     [
@@ -129,6 +206,51 @@ def test_public_demo_does_not_write_run_jsonl(monkeypatch, tmp_path, public_demo
 
     assert response.status_code == 200, response.text
     assert not (tmp_path / ".data" / "runs").exists()
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("PUBLIC_DEMO_MAX_REQUESTS", "invalid-request-count"),
+        ("PUBLIC_DEMO_MAX_REQUESTS", "-1"),
+        ("PUBLIC_DEMO_MAX_USD", "invalid-budget"),
+        ("PUBLIC_DEMO_MAX_USD", "-0.01"),
+        ("PUBLIC_DEMO_MAX_USD", "nan"),
+        ("PUBLIC_DEMO_MAX_USD", "inf"),
+    ],
+)
+def test_invalid_public_budget_fails_before_provider_without_leaking_value(
+    monkeypatch, name, value, public_demo
+):
+    provider_started = False
+
+    class ProviderSpy:
+        def __init__(self, **_kwargs):
+            nonlocal provider_started
+            provider_started = True
+
+    monkeypatch.setenv(name, value)
+    monkeypatch.setattr(api_main, "EventPreflightOrchestrator", ProviderSpy)
+
+    response = TestClient(app).post(
+        "/api/runs", json=request_payload() | {"use_llm": True}
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "검토 실행 중 오류가 발생했습니다."
+    assert value not in response.text
+    assert provider_started is False
+    _assert_public_lock_available()
+
+
+def test_zero_public_budget_is_valid(monkeypatch, public_demo):
+    monkeypatch.setenv("PUBLIC_DEMO_MAX_REQUESTS", "0")
+    monkeypatch.setenv("PUBLIC_DEMO_MAX_USD", "0")
+
+    budget = api_main._public_demo_budget()
+
+    assert budget.max_requests == 0
+    assert budget.max_usd == 0
 
 
 def test_nonpublic_run_keeps_existing_jsonl_behavior(monkeypatch, tmp_path):
