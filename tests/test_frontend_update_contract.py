@@ -63,6 +63,7 @@ def test_user_facing_frontend_copy_does_not_use_middle_dots():
         ROOT / "page.tsx",
         ROOT / "components" / "UpdateReview.tsx",
         ROOT / "components" / "AgentPipeline.tsx",
+        ROOT / "components" / "AudienceCards.tsx",
     ):
         assert "·" not in path.read_text(encoding="utf-8")
 
@@ -86,80 +87,47 @@ def test_language_ratios_are_hidden_when_sample_conclusion_is_hidden():
     assert "sentimentTotal > 0 && conclusion" in cards
 
 
-def test_official_context_is_visually_separate_from_synthetic_evidence():
-    source = (ROOT / "components" / "UpdateReview.tsx").read_text(encoding="utf-8")
+def test_event_uses_shared_collectible_audience_cards():
+    event_source = (ROOT / "page.tsx").read_text(encoding="utf-8")
+    cards = (ROOT / "components" / "AudienceCards.tsx").read_text(encoding="utf-8")
 
-    assert "공식으로 확인된 변경 맥락" in source
-    assert "official_context" in source
-    assert "synthetic" in source
-
-
-def test_shared_pipeline_has_update_contract_names_and_owners():
-    source = (ROOT / "components" / "AgentPipeline.tsx").read_text(encoding="utf-8")
-
-    for contract in (
-        "UpdateFeedbackBundle",
-        "UpdateEvidencePack",
-        "UpdateImpactAssessment",
-        "UpdateValidatedDecision",
-    ):
-        assert contract in source
-    for owner in ("정현예", "유주심", "정아현", "승진배"):
-        assert owner in source
+    assert "PersonaGameCard" in event_source
+    assert "LanguageGameCard" in event_source
+    assert "final-pipeline" not in event_source
+    assert "이용자 예상 카드" in cards
+    assert "언어권 예상 카드" in cards
+    assert "예상 대표 의견" in cards
+    assert "예상 행동" in cards
+    assert "실제 인용이 아닙니다" in cards
+    assert "<blockquote>" not in cards
+    assert 'role="img"' in cards
 
 
-def test_update_client_never_accepts_or_serializes_provider_credentials():
-    source = (ROOT / "components" / "UpdateReview.tsx").read_text(encoding="utf-8")
+def test_both_live_sources_can_select_steam_x_or_both():
+    event_source = (ROOT / "page.tsx").read_text(encoding="utf-8")
+    update_source = (ROOT / "components" / "UpdateReview.tsx").read_text(encoding="utf-8")
 
-    assert "ANTHROPIC_API_KEY" not in source
-    assert "api_key" not in source
-    assert "authorization" not in source.lower()
-    assert "file.name" not in source
-
-
-def _live_period_payload_in_timezone(timezone: str) -> dict[str, str | None]:
-    script = """
-import { utcWallClockToIso } from "./frontend/app/components/utcWallClock.ts";
-
-process.stdout.write(JSON.stringify({
-  period_start: utcWallClockToIso("2026-08-06T00:00"),
-  period_end: utcWallClockToIso("2026-08-13T00:00"),
-  invalid_period: utcWallClockToIso("2026-02-30T00:00"),
-}));
-"""
-    completed = subprocess.run(
-        [
-            "node",
-            "--no-warnings",
-            "--experimental-strip-types",
-            "--input-type=module",
-            "--eval",
-            script,
-        ],
-        cwd=Path(__file__).resolve().parents[1],
-        check=True,
-        capture_output=True,
-        env={**os.environ, "TZ": timezone},
-        text=True,
-    )
-    return json.loads(completed.stdout)
+    for source in (event_source, update_source):
+        assert "checked={useSteam}" in source
+        assert "checked={useX}" in source
+        assert "Steam만, X만, 또는 두 자료를 함께 선택할 수 있습니다" in source
 
 
-def test_live_datetime_payload_keeps_utc_wall_clock_in_non_utc_timezones():
-    source = (ROOT / "components" / "UpdateReview.tsx").read_text(encoding="utf-8")
+def test_mode_switch_preserves_each_review_state_and_blocks_parallel_runs():
+    source = (ROOT / "page.tsx").read_text(encoding="utf-8")
+    update_source = (ROOT / "components" / "UpdateReview.tsx").read_text(encoding="utf-8")
 
-    assert "period_start: livePeriodStart" in source
-    assert "period_end: livePeriodEnd" in source
-    assert "new Date(periodStart).toISOString()" not in source
-    assert "new Date(periodEnd).toISOString()" not in source
-
-    expected = {
-        "period_start": "2026-08-06T00:00:00Z",
-        "period_end": "2026-08-13T00:00:00Z",
-        "invalid_period": None,
-    }
-    assert _live_period_payload_in_timezone("America/New_York") == expected
-    assert _live_period_payload_in_timezone("Asia/Seoul") == expected
+    assert 'hidden={reviewMode !== "event"}' in source
+    assert 'hidden={reviewMode !== "update"}' in source
+    assert "runningMode" in source
+    assert 'runBlocked={runningMode === "update"}' in source
+    assert 'runBlocked={runningMode === "event"}' in source
+    assert "disabled={loading || runBlocked}" in source
+    assert "disabled={loading || runBlocked}" in update_source
+    assert "onRunningChange?.(true)" in source
+    assert "onRunningChange?.(true)" in update_source
+    assert "onRunningChange?.(false)" in source
+    assert "onRunningChange?.(false)" in update_source
 
 
 def test_both_modes_offer_safe_corpus_and_team_agent_choice():
@@ -200,6 +168,21 @@ def test_pipeline_names_corpus_and_team_agent_nodes():
         "jinbae_probe_checked",
     ):
         assert f"{node}:" in source
+
+
+def test_pipeline_marks_and_animates_only_the_current_node():
+    source = (ROOT / "components" / "AgentPipeline.tsx").read_text(encoding="utf-8")
+    styles = (ROOT / "globals.css").read_text(encoding="utf-8")
+
+    assert 'status === "running"' in source
+    assert 'current?.sequence === event.sequence' in source
+    assert 'className={`node node-${visualState}`}' in source
+    assert 'aria-current={isCurrent ? "step" : undefined}' in source
+    assert "지금 작업 중" in source
+    assert ".node-current,.node-current[open]" in styles
+    assert "@keyframes node-working" in styles
+    assert ".node-complete" in styles
+    assert ".node-current { transform:none !important; }" in styles
 
 
 def test_clients_validate_manual_review_dates():
@@ -295,8 +278,6 @@ process.stdout.write(JSON.stringify({
         "todayAllowed": False,
         "tomorrowAllowed": True,
     }
-
-
 
 
 def test_official_context_is_visually_separate_from_synthetic_evidence():

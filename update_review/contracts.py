@@ -203,8 +203,21 @@ class UpdatePersonaImpact(BaseModel):
     positive_signal_ids: list[str]
     negative_signal_ids: list[str]
     split_signal_ids: list[str]
-    evidence_ids: list[str] = Field(min_length=1)
+    evidence_ids: list[str]
     confidence: float = Field(ge=0, le=1)
+
+    @model_validator(mode="after")
+    def require_evidence_only_for_linked_signals(self) -> UpdatePersonaImpact:
+        signal_ids = (
+            self.positive_signal_ids
+            + self.negative_signal_ids
+            + self.split_signal_ids
+        )
+        if signal_ids and not self.evidence_ids:
+            raise ValueError("linked persona signal requires evidence")
+        if not signal_ids and (self.evidence_ids or self.confidence != 0):
+            raise ValueError("unlinked persona cannot claim evidence or confidence")
+        return self
 
 
 class UpdateEvidencePack(Artifact):

@@ -7,8 +7,9 @@ import pytest
 
 from agents.structured import StructuredModelError
 from connectors import RawFeedback
-from contracts import ErrorCode, Language, SourceType
+from contracts import ErrorCode, Language, PersonaKind, SourceType
 from update_review.collector import UpdateCollectionOptions, UpdateCollectorAgent
+from update_review import audit as update_audit_module
 from update_review.contracts import (
     EvidencePeriod,
     Sentiment,
@@ -17,6 +18,7 @@ from update_review.contracts import (
     UpdateType,
 )
 from update_review.fixtures import load_dragunov_brief, load_update_feedback_fixture
+from update_review.evidence import UpdateEvidenceAgent, _persona_reaction
 from update_review.orchestrator import UpdateReviewOrchestrator, _input_snapshot_hash
 from update_review.redteam import UpdateRedteamAgent
 
@@ -27,6 +29,19 @@ EXPECTED_AGENTS = [
     "event_redteam",
     "audit_strategy",
 ]
+
+
+def test_go_without_positive_evidence_does_not_invent_expected_benefit():
+    explanation = update_audit_module._update_reaction_balance(
+        UpdateDecision.GO,
+        "필수 표본과 확인 지표를 갖추고 High 이상으로 검증된 위험이 없습니다.",
+        has_support=False,
+        has_concern=True,
+    )
+
+    assert "긍정 반응을 뒷받침할 근거는 확인되지 않았고" in explanation
+    assert "기대 효과가 확인됐다는 뜻이 아니라" in explanation
+    assert "긍정 반응은 변경 의도와 일치" not in explanation
 
 
 class FakeClaudeMessages:
@@ -141,10 +156,25 @@ def test_dragunov_pipeline_is_reproducible_and_requires_test():
     second = UpdateReviewOrchestrator().run(load_dragunov_brief("stable-run"))
     assert first.brief == second.brief
     assert first.brief.decision is UpdateDecision.TEST
-    assert "긍정 신호" in first.brief.executive_summary
-    assert "이용자 유형" in first.brief.executive_summary
-    assert "언어권" in first.brief.executive_summary
-    assert "따라서" in first.brief.executive_summary
+    assert "전투 경험을 우선하는 이용자" in first.brief.executive_summary
+    assert "가성비를 중시하는 이용자" in first.brief.executive_summary
+    assert "제한된 테스트" in first.brief.executive_summary
+    assert "긍정 반응과 부정 반응이 함께 예상" in first.brief.executive_summary
+    assert "기대 효과와 우려 가능성을 비교" in first.brief.executive_summary
+    assert "예상 긍정 반응을 취합한 결과" in first.brief.executive_summary
+    assert "예상 부정 반응을 취합한 결과" in first.brief.executive_summary
+    assert "운보다 실력으로 승부가 갈린다는 느낌" in first.brief.executive_summary
+    assert "판정은 반응 수가 아니라 검증된 위험의 크기" in first.brief.executive_summary
+    assert "판단에 사용한 자료: 비식별 근거 75건" in first.brief.executive_summary
+    assert "긍정 예상에는 고유 근거 30건" in first.brief.executive_summary
+    assert "부정 예상에는 15건" in first.brief.executive_summary
+    assert "위험 수준은 보통 1개" in first.brief.executive_summary
+    assert "검증 위험 1개 중 1개에 확인 지표" in first.brief.executive_summary
+    assert "판정의 결정적 이유:" in first.brief.executive_summary
+    assert "출시 조건:" in first.brief.executive_summary
+    assert "긍정 신호" not in first.brief.executive_summary
+    assert "이용자은" not in first.brief.executive_summary
+    assert "제거은" not in first.brief.executive_summary
     assert first.feedback.ref in first.evidence.input_refs
     assert first.evidence.ref in first.impact.input_refs
     assert first.impact.ref in first.validated.input_refs
@@ -152,6 +182,155 @@ def test_dragunov_pipeline_is_reproducible_and_requires_test():
     assert {item.sentiment.value for item in first.evidence.negative_signals} == {"negative"}
     assert all(metric.addresses_risk_ids for metric in first.brief.validation_metrics)
     assert not any(item.period.value == "after" for item in first.brief.evidence)
+
+
+def test_expected_reactions_show_user_opinion_and_likely_action():
+    result = UpdateReviewOrchestrator().run(load_dragunov_brief("reaction-copy"))
+
+    reactions = [
+        *[item.summary for item in result.brief.expected_positive],
+        *[item.summary for item in result.brief.expected_negative],
+        *[item.expected_reaction for item in result.brief.persona_impacts],
+    ]
+    assert len(result.brief.persona_impacts) == 4
+    assert all("예상 대표 의견:" in item and "예상 행동:" in item for item in reactions)
+    assert all("에 대한 우려 반응이 예상됩니다" not in item for item in reactions)
+
+    balance_concern = next(
+        item
+        for item in result.brief.expected_negative
+        if "반동" in item.summary
+    )
+    assert "지나치게 강하거나 약해질까 걱정됩니다" in balance_concern.summary
+
+    core_reaction = next(
+        item
+        for item in result.brief.persona_impacts
+        if item.persona.value == "core_combat_first"
+    )
+    assert "피해가 고정돼도 반동과 연사력까지 고려하면" in core_reaction.expected_reaction
+    assert "다른 무기로 돌아가거나 추가 조정을 요청" in core_reaction.expected_reaction
+
+    unlinked = [
+        item
+        for item in result.brief.persona_impacts
+        if not (
+            item.positive_signal_ids
+            or item.negative_signal_ids
+            or item.split_signal_ids
+        )
+    ]
+    assert unlinked
+    assert all(not item.evidence_ids and item.confidence == 0 for item in unlinked)
+    assert all("판단할 근거가 없습니다" in item.expected_reaction for item in unlinked)
+
+    visible_languages = [
+        item for item in result.brief.language_insights if item.conclusion
+    ]
+    assert visible_languages
+    assert all("“" in item.conclusion for item in visible_languages)
+    assert all(not item.conclusion.startswith("긍정 ") for item in visible_languages)
+
+    reversed_pack = UpdateEvidenceAgent().run(
+        result.feedback.model_copy(
+            update={"evidence": list(reversed(result.feedback.evidence))}
+        )
+    )
+    assert [item.conclusion for item in reversed_pack.language_insights] == [
+        item.conclusion for item in result.evidence.language_insights
+    ]
+
+
+def _persona_copy_payload(pack, *, duplicate=False):
+    opinions = {
+        "time_constrained_casual_returning": "현재 자료만으로는 짧은 이용 시간에 미칠 영향을 판단하기 어렵습니다.",
+        "value_seeking_free_low_spend": "투입한 시간에 비해 결과가 더 납득될 것 같습니다.",
+        "collector_high_engagement": "현재 자료만으로는 수집 목표와 보유 가치의 변화를 판단하기 어렵습니다.",
+        "core_combat_first": "실제 교전에서 무기 간 균형이 유지될지 걱정됩니다.",
+    }
+    actions = {
+        "time_constrained_casual_returning": "이용 시간과 이탈 자료를 보강하기 전에는 행동 변화를 예상하기 어렵습니다.",
+        "value_seeking_free_low_spend": "효과와 부담을 비교한 뒤 사용 여부를 정할 가능성이 있습니다.",
+        "collector_high_engagement": "수집 행동 자료를 보강하기 전에는 행동 변화를 예상하기 어렵습니다.",
+        "core_combat_first": "훈련장과 실제 교전에서 성능을 비교할 가능성이 있습니다.",
+    }
+    if duplicate:
+        opinions = {key: next(iter(opinions.values())) for key in opinions}
+        actions = {key: next(iter(actions.values())) for key in actions}
+    return {
+        "personas": [
+            {
+                "persona": item.persona.value,
+                "opinion": opinions[item.persona.value],
+                "action": actions[item.persona.value],
+            }
+            for item in pack.persona_impacts
+        ]
+    }
+
+
+def test_haiku_rewrites_only_distinct_persona_copy_without_raw_evidence():
+    brief = load_dragunov_brief("persona-haiku")
+    bundle = load_update_feedback_fixture(brief)
+    baseline = UpdateEvidenceAgent().run(bundle)
+    fake = FakeClaude([_persona_copy_payload(baseline)])
+    events = []
+
+    rewritten = UpdateEvidenceAgent(
+        client=fake,
+        rewrite_personas=True,
+    ).run(bundle, lambda node, _message, _metrics: events.append(node))
+
+    assert len(fake.messages.calls) == 1
+    assert fake.messages.calls[0]["model"] == "claude-haiku-4-5-20251001"
+    request_text = fake.messages.calls[0]["messages"][0]["content"]
+    assert all(item.summary not in request_text for item in bundle.evidence)
+    assert all(item.source_id not in request_text for item in bundle.evidence)
+    assert "persona_copy_started" in events
+    assert "persona_copy_checked" in events
+    assert len({item.expected_reaction for item in rewritten.persona_impacts}) == 4
+    for before, after in zip(baseline.persona_impacts, rewritten.persona_impacts):
+        assert before.model_dump(exclude={"expected_reaction"}) == after.model_dump(
+            exclude={"expected_reaction"}
+        )
+    assert baseline.model_dump(exclude={"persona_impacts"}) == rewritten.model_dump(
+        exclude={"persona_impacts"}
+    )
+
+
+def test_duplicate_haiku_persona_copy_falls_back_once_to_unique_code_copy():
+    brief = load_dragunov_brief("persona-haiku-duplicate")
+    bundle = load_update_feedback_fixture(brief)
+    baseline = UpdateEvidenceAgent().run(bundle)
+    fake = FakeClaude([_persona_copy_payload(baseline, duplicate=True)])
+    events = []
+
+    result = UpdateEvidenceAgent(client=fake, rewrite_personas=True).run(
+        bundle, lambda node, _message, _metrics: events.append(node)
+    )
+
+    assert len(fake.messages.calls) == 1
+    assert result == baseline
+    assert len({item.expected_reaction for item in result.persona_impacts}) == 4
+    assert events[-1] == "persona_copy_fallback"
+
+
+def test_shared_signal_still_has_distinct_persona_baseline_copy():
+    reactions = {
+        _persona_reaction(
+            persona,
+            ["negative-predictability"],
+            Sentiment.NEGATIVE,
+        )
+        for persona in (
+            PersonaKind.TIME_CONSTRAINED,
+            PersonaKind.VALUE_SEEKING,
+            PersonaKind.COLLECTOR,
+            PersonaKind.CORE_GAMEPLAY,
+        )
+    }
+
+    assert len(reactions) == 4
 
 
 def test_pipeline_exposes_all_agents_and_internal_node_results():

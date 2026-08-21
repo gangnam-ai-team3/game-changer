@@ -34,13 +34,24 @@ def test_fixture_run_returns_pipeline_artifacts():
     assert response.status_code == 200, response.text
     result = response.json()["result"]
     assert result["brief"]["decision"] == "Revise"
-    assert "수정 필요" in result["brief"]["executive_summary"]
-    assert "이용자 유형" in result["brief"]["executive_summary"]
-    assert "언어권" in result["brief"]["executive_summary"]
-    assert "따라서" in result["brief"]["executive_summary"]
+    assert "시간이 부족한 복귀 이용자" in result["brief"]["executive_summary"]
+    assert "가성비를 중시하는 이용자" in result["brief"]["executive_summary"]
+    assert "긍정 반응을 뒷받침할 신호보다" in result["brief"]["executive_summary"]
+    assert "수정을 먼저 반영하는 것이 합당" in result["brief"]["executive_summary"]
+    assert "판정은 반응 수가 아니라 검증된 위험의 크기" in result["brief"]["executive_summary"]
+    assert "수정안을 반영한 뒤 Black Market 2025의 기획안을 다시 검토" in result["brief"]["executive_summary"]
+    assert "이용자 유형" not in result["brief"]["executive_summary"]
     assert result["feedback"]["evidence"]
     assert result["events"]
     assert all("개 우선 위험" not in panel["reaction"] for panel in result["brief"]["panel_results"])
+    assert all(
+        "예상 대표 의견:" in panel["reaction"] and "예상 행동:" in panel["reaction"]
+        for panel in result["brief"]["panel_results"]
+    )
+    assert all(
+        "위험 때문에 원안 참여" not in panel["reaction"]
+        for panel in result["brief"]["panel_results"]
+    )
 
 
 def test_weekly_supply_fixture_is_a_clear_go_case():
@@ -66,6 +77,12 @@ def test_weekly_supply_fixture_is_a_clear_go_case():
     result = response.json()["result"]
     assert result["brief"]["decision"] == "Go"
     assert result["brief"]["top_risks"] == []
+    assert "긍정 반응과 우려 반응을 따로 분류하지 않으므로" in result["brief"]["executive_summary"]
+    assert "높은 위험으로 검증되지 않았으므로" in result["brief"]["executive_summary"]
+    assert all(
+        "예상 대표 의견:" in panel["reaction"] and "예상 행동:" in panel["reaction"]
+        for panel in result["brief"]["panel_results"]
+    )
     assert len(result["feedback"]["evidence"]) == 75
     assert result["feedback"]["evidence"][0]["source_url"].startswith("https://pubg.com/")
 

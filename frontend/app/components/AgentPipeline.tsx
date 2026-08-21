@@ -95,6 +95,9 @@ const nodeLabels: Record<string, string> = {
   language_gate_checked: "언어별 자료 충분성 확인",
   personas_linked: "이용자 유형 연결",
   personas_built: "이용자 유형 정리",
+  persona_copy_started: "페르소나 문구 재구성",
+  persona_copy_checked: "페르소나 중복 확인",
+  persona_copy_fallback: "기본 페르소나 문구 사용",
   pack_ready: "의견 분석 결과 정리",
   embedding_ranked: "관련 의견 우선 정렬",
   structured_output_validated: "AI 설명 형식 확인",
@@ -223,27 +226,39 @@ export function AgentPipeline({
             : running
               ? "running"
               : "waiting";
-        const current = [...visibleEvents]
-          .reverse()
-          .find((event) => ["running", "retrying"].includes(event.state));
+        const current =
+          status === "running"
+            ? [...visibleEvents]
+                .reverse()
+                .find((event) => ["running", "retrying"].includes(event.state))
+            : undefined;
         return { agent, events: visibleEvents, status, current };
       }),
     [events],
   );
   const inputCopy = mode === "update" ? "업데이트 변경안 + 자료" : "이벤트 정보 + 자료";
   const outputCopy = mode === "update" ? "출시 전 업데이트 판정" : "최종 검토 결과";
+  const activeGroup = groups.find((group) => group.current);
+  const activeStatus = activeGroup?.current
+    ? `${agents[activeGroup.agent].label}, ${nodeLabels[activeGroup.current.node] ?? "현재 노드"} 처리 중`
+    : "에이전트가 순서대로 실행 중입니다";
 
   return (
-    <section className="pipeline" aria-live={active ? "polite" : "off"}>
+    <section className="pipeline">
       <div className="pipeline-head">
         <strong>입력</strong>
         <code>{inputCopy}</code>
         <span>→</span>
         <strong>출력</strong>
         <code>{outputCopy}</code>
-        <span className={`pipeline-state ${active ? "is-running" : "is-complete"}`}>
+        <span
+          className={`pipeline-state ${active ? "is-running" : "is-complete"}`}
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
           <i />
-          {active ? "에이전트가 순서대로 실행 중입니다" : "실행이 완료되었습니다"}
+          {active ? activeStatus : "실행이 완료되었습니다"}
         </span>
       </div>
       {groups.map(({ agent, events: nodeEvents, status, current }, index) => {
@@ -263,12 +278,31 @@ export function AgentPipeline({
               <p className="agent-role">{info.role}</p>
             </div>
             <div className="nodes">
-              {nodeEvents.map((event, nodeIndex) => (
-                <details className="node" key={`${event.node}-${nodeIndex}`}>
+              {nodeEvents.map((event, nodeIndex) => {
+                const isCurrent =
+                  status === "running" && current?.sequence === event.sequence;
+                const visualState = isCurrent
+                  ? "current"
+                  : status === "complete" ||
+                      Boolean(current && event.sequence < current.sequence)
+                    ? "complete"
+                    : "waiting";
+                return (
+                <details
+                  className={`node node-${visualState}`}
+                  key={`${event.node}-${nodeIndex}`}
+                  open={active}
+                  aria-current={isCurrent ? "step" : undefined}
+                >
                   <summary>
                     <small>노드 {String(nodeIndex + 1).padStart(2, "0")}</small>
                     <strong>{nodeLabels[event.node] ?? event.node}</strong>
-                    <code>{event.node}</code>
+                    {isCurrent && (
+                      <span className="node-active-badge">
+                        <i />지금 작업 중
+                      </span>
+                    )}
+                    {!active && <code>{event.node}</code>}
                     <p>{businessKorean(event.message)}</p>
                   </summary>
                   <div className="node-detail">
@@ -283,12 +317,16 @@ export function AgentPipeline({
                         .join(", ") || "처리 결과를 확인했습니다."}
                     </p>
                     <p>
-                      <b>처리 상태</b> {stateLabels[event.state] ?? event.state}
+                      <b>처리 상태</b>{" "}
+                      {stateLabels[
+                        visualState === "current" ? "running" : visualState
+                      ]}
                     </p>
-                    <pre>{businessKoreanJson(event)}</pre>
+                    {!active && <pre>{businessKoreanJson(event)}</pre>}
                   </div>
                 </details>
-              ))}
+                );
+              })}
               {nodeEvents.length === 0 && (
                 <div className="node-placeholder">
                   <span className={status === "running" ? "spinner" : "status-dot"} />

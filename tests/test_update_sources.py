@@ -93,15 +93,18 @@ def _csv_row(
 def test_steam_start_at_excludes_older_reviews():
     cutoff = datetime(2026, 8, 13, tzinfo=UTC)
     payload = {
+        "success": 1,
         "reviews": [
             {
                 "timestamp_created": int((cutoff - timedelta(days=2)).timestamp()),
                 "recommendationid": "inside",
+                "language": "english",
                 "review": "Dragunov fixed damage feels predictable",
             },
             {
                 "timestamp_created": int((cutoff - timedelta(days=20)).timestamp()),
                 "recommendationid": "old",
+                "language": "english",
                 "review": "old",
             },
         ],

@@ -13,7 +13,7 @@ from agents.evidence_rag import EvidenceRagAgent
 from agents.evidence_rag import agent as evidence_module
 from agents.structured import StructuredModelError
 from connectors import RawFeedback
-from contracts import Decision, InputMode, Language, LanguageSample, RiskCategory, SourceType
+from contracts import Decision, InputMode, Language, LanguageSample, PersonaKind, RiskCategory, SourceType
 
 OFFICIAL_TARGETS = {
     RiskCategory.DOUBLE_GACHA,
@@ -47,6 +47,32 @@ def test_rag_builds_four_grounded_personas(feedback):
     assert len(pack.personas) == 4
     assert all(len(persona.evidence_ids) >= 15 for persona in pack.personas)
     assert all(insight.conclusion for insight in pack.language_insights)
+    assert all("라는 우려" in insight.conclusion for insight in pack.language_insights)
+
+    reversed_pack = EvidenceRagAgent().run(
+        feedback.model_copy(update={"evidence": list(reversed(feedback.evidence))})
+    )
+    assert [item.conclusion for item in reversed_pack.language_insights] == [
+        item.conclusion for item in pack.language_insights
+    ]
+
+
+def test_event_persona_reaction_has_safe_copy_for_every_policy_risk():
+    for persona in PersonaKind:
+        for category in audit_module.EVENT_RISK_FALLBACK:
+            reaction = audit_module._event_persona_reaction(
+                persona, [SimpleNamespace(category=category)]
+            )
+            assert "예상 대표 의견:" in reaction
+            assert "예상 행동:" in reaction
+
+
+def test_event_persona_reaction_is_neutral_when_evidence_is_inconclusive():
+    reaction = audit_module._event_persona_reaction(
+        PersonaKind.CORE_GAMEPLAY, [], inconclusive=True
+    )
+    assert "판단하기 어렵습니다" in reaction
+    assert "부담 없이" not in reaction
 
 
 def test_redteam_detects_official_mechanism_targets(event, feedback):
@@ -98,6 +124,72 @@ def test_three_insufficient_languages_force_hold(event, feedback):
     decision = AuditStrategyAgent().run(feedback, pack, assessment)
     assert decision.decision == Decision.HOLD
     assert sum(insight.conclusion is None for insight in pack.language_insights) == 3
+
+
+def test_no_risk_hold_keeps_persona_reactions_neutral(event, feedback):
+    samples = [
+        sample.model_copy(update={"general_count": 0, "mechanism_count": 0})
+        if index < 3
+        else sample
+        for index, sample in enumerate(feedback.samples)
+    ]
+    limited = feedback.model_copy(update={"samples": samples})
+    pack = EvidenceRagAgent().run(limited).model_copy(update={"issues": []})
+    assessment = EventRedteamAgent().run(event, pack)
+    agent = AuditStrategyAgent()
+    decision = agent.run(limited, pack, assessment)
+    brief = agent.to_brief(event, pack, decision)
+
+    assert decision.decision is Decision.HOLD
+    assert all("판단하기 어렵습니다" in item.reaction for item in brief.panel_results)
+
+
+def test_sample_only_revise_requests_more_data_without_inventing_risk(event, feedback):
+    samples = [
+        sample.model_copy(update={"general_count": 0, "mechanism_count": 0})
+        if index == 0
+        else sample
+        for index, sample in enumerate(feedback.samples)
+    ]
+    limited = feedback.model_copy(update={"samples": samples})
+    pack = EvidenceRagAgent().run(limited).model_copy(update={"issues": []})
+    assessment = EventRedteamAgent().run(event, pack)
+    agent = AuditStrategyAgent()
+    decision = agent.run(limited, pack, assessment)
+    brief = agent.to_brief(event, pack, decision)
+
+    assert decision.decision is Decision.REVISE
+    assert not decision.validated_risks
+    assert "부족한 언어권 자료부터 보강" in brief.executive_summary
+    assert "높은 위험이" not in brief.executive_summary
+    assert "수정안을 반영" not in brief.executive_summary
+
+
+def test_event_reaction_and_summary_ignore_untrusted_risk_wording(event, feedback):
+    pack = EvidenceRagAgent().run(feedback)
+    assessment = EventRedteamAgent().run(event, pack)
+    agent = AuditStrategyAgent()
+    baseline = agent.to_brief(event, pack, agent.run(feedback, pack, assessment))
+    changed = assessment.model_copy(
+        update={
+            "risks": [
+                risk.model_copy(
+                    update={
+                        "title": "외부 문구 표식 RAW-MARKER",
+                        "failure_path": "외부 문구로 바꾼 실패 경로",
+                    }
+                )
+                for risk in assessment.risks
+            ]
+        }
+    )
+    candidate = agent.to_brief(event, pack, agent.run(feedback, pack, changed))
+
+    assert candidate.executive_summary == baseline.executive_summary
+    assert [item.reaction for item in candidate.panel_results] == [
+        item.reaction for item in baseline.panel_results
+    ]
+    assert "RAW-MARKER" not in candidate.executive_summary
 
 
 def test_audit_rejects_existing_but_semantically_unrelated_evidence(event, feedback):
@@ -228,7 +320,9 @@ def test_audit_llm_text_cannot_override_deterministic_decision_reason(monkeypatc
     first_brief = agent.to_brief(event, pack, first)
     assert first.decision_reason == second.decision_reason == base.decision_reason
     assert first.decision_narrative != second.decision_narrative
-    assert first_brief.executive_summary.endswith(base.decision_reason)
+    assert "이용자" in first_brief.executive_summary
+    assert "권장합니다" in first_brief.executive_summary
+    assert "이용자 유형" not in first_brief.executive_summary
     assert first.decision_narrative not in first_brief.executive_summary
     assert decision_core(first) == decision_core(second) == decision_core(base)
 

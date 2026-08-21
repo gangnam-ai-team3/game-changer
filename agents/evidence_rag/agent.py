@@ -36,6 +36,28 @@ TAG_TITLES = {
     "fixed_reward": "정해진 보상 교환 구조",
     "weekly_reset": "주간 초기화 시점",
 }
+LANGUAGE_REACTION_COPY = {
+    RiskCategory.DOUBLE_GACHA.value: (
+        "원하는 보상까지 얼마가 들지 모르겠습니다.",
+        "최대 비용과 보장 경로가 공개될 때까지 구매를 미룰 가능성이 있습니다.",
+    ),
+    RiskCategory.FRAGMENTED_FLOW.value: (
+        "구매와 개봉, 제작 화면을 계속 오가야 한다면 번거롭습니다.",
+        "참여를 시작하지 않거나 제작 중간에 이탈할 가능성이 있습니다.",
+    ),
+    RiskCategory.OPAQUE_PROGRESS.value: (
+        "몇 번 더 참여하거나 얼마를 써야 목표 보상을 받는지 알고 싶습니다.",
+        "남은 횟수와 비용이 보이지 않으면 참여나 지출을 중단할 가능성이 있습니다.",
+    ),
+    RiskCategory.RANDOM_BONUS.value: (
+        "같은 비용을 써도 보너스 결과가 크게 다르면 손해를 봤다고 느낄 것 같습니다.",
+        "보너스 규칙이 분명해질 때까지 추가 지출을 피할 가능성이 있습니다.",
+    ),
+    RiskCategory.EXPIRING_CURRENCY.value: (
+        "기간 안에 다 쓰지 못한 재화가 사라지면 시간과 비용을 잃은 느낌이 들 것 같습니다.",
+        "소진 기간이 짧다고 느끼면 이벤트 참여 자체를 포기할 가능성이 있습니다.",
+    ),
+}
 
 
 class IssueNarrative(BaseModel):
@@ -246,16 +268,23 @@ class EvidenceRagAgent:
         for language in Language:
             items = [item for item in deduplicated if item.language == language]
             sample = samples.get(language)
-            if sample and sample.sufficient:
+            if sample and sample.sufficient and items:
                 tag_labels = {category.value: title for category, title in ISSUE_TITLES.items()} | TAG_TITLES
-                top_tags = [
-                    tag_labels.get(tag, tag)
-                    for tag, _ in Counter(tag for item in items for tag in item.mechanism_tags).most_common(3)
-                ]
+                tag_counts = Counter(
+                    tag for item in items for tag in item.mechanism_tags
+                )
+                top_tag = min(tag_counts, key=lambda tag: (-tag_counts[tag], tag))
+                reaction = LANGUAGE_REACTION_COPY.get(top_tag)
+                conclusion = (
+                    f"“{reaction[0]}”라는 우려가 가장 클 것으로 예상됩니다. "
+                    f"{reaction[1]}"
+                    if reaction
+                    else f"{tag_labels.get(top_tag, top_tag)} 관련 이해도를 먼저 확인할 필요가 있습니다."
+                )
                 language_insights.append(
                     LanguageInsight(
                         language=language,
-                        conclusion=f"해당 언어권에서는 {', '.join(top_tags)}이 주요 우려로 예상됩니다.",
+                        conclusion=conclusion,
                         evidence_ids=[item.evidence_id for item in items],
                         confidence=_average_relevance(items),
                     )
@@ -265,7 +294,11 @@ class EvidenceRagAgent:
                     LanguageInsight(
                         language=language,
                         conclusion=None,
-                        hidden_reason="일반 의견 100건과 메커니즘 의견 15건의 최소 표본 기준에 미달했습니다.",
+                        hidden_reason=(
+                            "연결된 비식별 근거가 없어 이 언어권의 예상 반응을 공개하지 않습니다."
+                            if not items
+                            else "일반 의견 100건과 메커니즘 의견 15건의 최소 표본 기준에 미달했습니다."
+                        ),
                         evidence_ids=[item.evidence_id for item in items],
                         confidence=0,
                     )

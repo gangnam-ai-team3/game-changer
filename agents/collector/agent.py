@@ -178,7 +178,7 @@ class CollectorAgent:
                 errors.append(
                     PipelineError(
                         code=ErrorCode.INSUFFICIENT_EVIDENCE,
-                        message=f"{sample.language.value}: requires 100 general and 15 mechanism items",
+                        message=f"{sample.language.value} 언어권: 일반 의견 100건과 메커니즘 의견 15건이 필요합니다.",
                     )
                 )
 

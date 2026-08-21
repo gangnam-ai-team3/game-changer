@@ -132,7 +132,7 @@ const severityLabels: Record<string, string> = {
 };
 const decisionLabels: Record<string, string> = {
   Go: "출시 가능",
-  Revise: "수정 필요",
+  Revise: "수정 후 재검토",
   Hold: "판정 보류",
 };
 
@@ -432,7 +432,13 @@ function EventEvidenceDetails({ result }: { result: RunResult }) {
   );
 }
 
-function EventReview() {
+function EventReview({
+  runBlocked = false,
+  onRunningChange,
+}: {
+  runBlocked?: boolean;
+  onRunningChange?: (running: boolean) => void;
+}) {
   const [form, setForm] = useState<FormState>(initialForm);
   const [sourceMode, setSourceMode] = useState<SourceMode>("fixture");
   const [fixtureCase, setFixtureCase] = useState("black_market_2025");
@@ -486,10 +492,15 @@ function EventReview() {
     });
     setCsvData(btoa(binary));
     setCsvName("승인 CSV 선택됨");
+    setError("");
   };
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (runBlocked) {
+      setError("다른 점검이 실행 중입니다. 완료된 뒤 시작해 주세요.");
+      return;
+    }
     if (!form.cutoff_on || !form.starts_on || !form.ends_on) {
       setError("자료 기준일, 이벤트 시작일과 종료일을 모두 입력해 주세요.");
       return;
@@ -506,31 +517,28 @@ function EventReview() {
       setError("사전 구축 코퍼스를 사용하려면 자료 기준일을 오늘(UTC)보다 뒤로 설정해 주세요.");
       return;
     }
-    setLoading(true);
-    setError("");
-    setResult(null);
-    setLiveEvents([]);
     if (sourceMode === "import" && !csvData) {
       setError("승인 CSV 파일을 선택해 주세요.");
-      setLoading(false);
       return;
     }
     if (sourceMode === "live" && !useSteam && !useX) {
       setError("Steam 또는 X 중 하나 이상을 선택해 주세요.");
-      setLoading(false);
       return;
     }
     if (sourceMode === "live" && useSteam && (!steamAppId || Number(steamAppId) < 1)) {
       setError("올바른 Steam 앱 ID를 입력해 주세요.");
-      setLoading(false);
       return;
     }
     if (sourceMode === "live" && useX && !xQuery.trim()) {
       setError("X 검색어를 입력해 주세요.");
-      setLoading(false);
       return;
     }
     const requestSubject = form.event_name.trim() || "이름 없는 이벤트";
+    setLoading(true);
+    onRunningChange?.(true);
+    setError("");
+    setResult(null);
+    setLiveEvents([]);
     try {
       const payload = {
         ...form,
@@ -584,6 +592,7 @@ function EventReview() {
       setError(caught instanceof Error ? caught.message : "검토를 실행할 수 없습니다.");
     } finally {
       setLoading(false);
+      onRunningChange?.(false);
     }
   }
 
@@ -764,22 +773,24 @@ function EventReview() {
           )}
           <label className="toggle">
             <input type="checkbox" checked={useClaude} onChange={(event) => setUseClaude(event.target.checked)} />
-            <span>{sourceMode === "corpus" ? "팀 에이전트로 추가 검증" : "Claude로 자연어 설명 보강"}</span>
+            <span>{sourceMode === "corpus" ? "팀 에이전트로 추가 검증" : "Claude로 설명 보강"}</span>
             <small>{sourceMode === "corpus"
               ? useClaude
                 ? "정아현(Jelly) 위험 점검과 승진배 근거 검증 에이전트를 Claude로 실행합니다."
                 : "저장된 코퍼스와 코드 정책만 사용하며 두 에이전트의 Claude 호출은 생략합니다."
               : useClaude
-                ? "근거와 최종 판정은 코드가 다시 검증합니다."
-                : "결정론적 경로만 실행합니다."}</small>
+                ? "근거 연결과 최종 판정은 코드 정책으로 다시 검증합니다."
+                : "코드 정책만으로 점검합니다."}</small>
           </label>
-          <p className="source-note">
-            저장 데이터는 공식 자료를 바탕으로 만든 합성 시연 사례입니다. 이벤트 조건과 근거 자료를 함께 바꿔 비교할 수 있습니다. API 키는 이 화면에 노출하지 않습니다. 분석 설명은 한국어로 제공하고, 비식별 근거 요약은 왜곡을 막기 위해 출처 언어를 유지합니다.
+          <p className="prelaunch-notice">
+            출시 전 예상이며 실제 이용자 반응이나 출시 후 성과를 의미하지 않습니다.
+            {sourceMode === "fixture" && " 저장 자료는 공식 공개 규칙을 바탕으로 만든 합성 시연 사례입니다."}
+            {" "}API 키와 자료 원문은 화면에 표시하거나 저장하지 않습니다.
           </p>
-          <button className="primary" disabled={loading}>
-            {loading ? "검토 중..." : "AI 검토 시작"}
+          <button className="primary" disabled={loading || runBlocked}>
+            {loading ? "이벤트 점검 중..." : runBlocked ? "다른 점검 실행 중" : "이벤트 점검 시작"}
           </button>
-          {error && <p className="error">{error}</p>}
+          {error && <p className="error" role="alert">{error}</p>}
         </section>
       </form>
 
@@ -787,7 +798,7 @@ function EventReview() {
         <section className="live-panel">
           <div className="section-title">
             <h2>에이전트 실행 중</h2>
-            <p>실행을 시작하면 각 에이전트와 노드의 현재 상태가 바로 표시됩니다.</p>
+            <p>서버에서 받는 즉시 각 에이전트와 노드의 상태를 표시합니다.</p>
           </div>
           <AgentPipeline events={liveEvents} active mode="event" />
         </section>
@@ -815,6 +826,10 @@ function EventReview() {
 
 export default function Home() {
   const [reviewMode, setReviewMode] = useState<"event" | "update">("event");
+  const [runningMode, setRunningMode] = useState<"event" | "update" | null>(null);
+  const updateRunningMode = (mode: "event" | "update", running: boolean) => {
+    setRunningMode((current) => running ? mode : current === mode ? null : current);
+  };
 
   return (
     <main className="shell">
@@ -831,21 +846,34 @@ export default function Home() {
         <button
           type="button"
           aria-pressed={reviewMode === "event"}
+          aria-controls="event-review-panel"
           onClick={() => setReviewMode("event")}
         >
           <strong>이벤트 점검</strong>
-          <span>보상, 참여, 이용 조건을 점검합니다.</span>
+          <span>{runningMode === "event" ? "현재 이벤트 점검을 실행 중입니다." : "보상, 참여, 이용 조건을 점검합니다."}</span>
         </button>
         <button
           type="button"
           aria-pressed={reviewMode === "update"}
+          aria-controls="update-review-panel"
           onClick={() => setReviewMode("update")}
         >
           <strong>업데이트 점검</strong>
-          <span>변경안의 예상 반응과 출시 조건을 점검합니다.</span>
+          <span>{runningMode === "update" ? "현재 업데이트 점검을 실행 중입니다." : "변경안의 예상 반응과 출시 조건을 점검합니다."}</span>
         </button>
       </div>
-      {reviewMode === "update" ? <UpdateReview /> : <EventReview />}
+      <div id="event-review-panel" hidden={reviewMode !== "event"}>
+        <EventReview
+          runBlocked={runningMode === "update"}
+          onRunningChange={(running) => updateRunningMode("event", running)}
+        />
+      </div>
+      <div id="update-review-panel" hidden={reviewMode !== "update"}>
+        <UpdateReview
+          runBlocked={runningMode === "event"}
+          onRunningChange={(running) => updateRunningMode("update", running)}
+        />
+      </div>
     </main>
   );
 }
