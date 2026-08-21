@@ -5,6 +5,7 @@ import { ChangeEvent, FormEvent, useState } from "react";
 import { AgentEvent, AgentPipeline } from "./AgentPipeline";
 import { LanguageGameCard, PersonaGameCard } from "./AudienceCards";
 import { businessKorean, businessKoreanJson } from "./businessKorean";
+import { nextClaudeUsage } from "./claudeUsage";
 import { corpusDemoDates, isFutureUtcDate } from "./corpusDemoDates";
 import { DecisionReport, DecisionReportData } from "./DecisionReport";
 import { utcWallClockToIso } from "./utcWallClock";
@@ -690,7 +691,7 @@ export function UpdateReview({
   const [periodEnd, setPeriodEnd] = useState("2026-08-13T00:00");
   const [csvData, setCsvData] = useState("");
   const [csvName, setCsvName] = useState("");
-  const [useClaude, setUseClaude] = useState(true);
+  const [useClaude, setUseClaude] = useState(false);
   const [result, setResult] = useState<UpdateRunResult | null>(null);
   const [submittedSubject, setSubmittedSubject] = useState(initial.update_name);
   const [events, setEvents] = useState<AgentEvent[]>([]);
@@ -1229,7 +1230,7 @@ export function UpdateReview({
             <input
               type="checkbox"
               checked={useClaude}
-              onChange={(event) => setUseClaude(event.target.checked)}
+              onChange={(event) => setUseClaude(nextClaudeUsage(event.target.checked))}
             />
             <span>{sourceMode === "corpus" ? "팀 에이전트로 추가 검증" : "Claude로 설명 보강"}</span>
             <small>

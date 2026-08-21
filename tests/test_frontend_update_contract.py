@@ -156,6 +156,62 @@ def test_both_modes_offer_safe_corpus_and_team_agent_choice():
     assert 'planned_on: dates.startsOn' in update_source
 
 
+def test_claude_usage_is_off_by_default_and_requires_confirmation():
+    event_source = (ROOT / "page.tsx").read_text(encoding="utf-8")
+    update_source = (ROOT / "components" / "UpdateReview.tsx").read_text(
+        encoding="utf-8"
+    )
+    confirmation = (ROOT / "components" / "claudeUsage.ts").read_text(
+        encoding="utf-8"
+    )
+
+    for source in (event_source, update_source):
+        assert "const [useClaude, setUseClaude] = useState(false);" in source
+        assert "setUseClaude(nextClaudeUsage(event.target.checked))" in source
+        assert "use_llm: useClaude" in source
+
+    assert "Claude API 키로 Claude API를 호출" in confirmation
+    assert "입력 및 출력 토큰이 사용되어 비용이 발생" in confirmation
+
+
+def test_claude_usage_confirmation_never_prompts_when_turning_it_off():
+    script = """
+import { nextClaudeUsage } from "./frontend/app/components/claudeUsage.ts";
+
+let calls = 0;
+const approve = (message) => { calls += 1; return message.includes("토큰"); };
+const reject = () => { calls += 1; return false; };
+
+process.stdout.write(JSON.stringify({
+  off: nextClaudeUsage(false, () => { throw new Error("unexpected prompt"); }),
+  accepted: nextClaudeUsage(true, approve),
+  rejected: nextClaudeUsage(true, reject),
+  calls,
+}));
+"""
+    completed = subprocess.run(
+        [
+            "node",
+            "--no-warnings",
+            "--experimental-strip-types",
+            "--input-type=module",
+            "--eval",
+            script,
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert json.loads(completed.stdout) == {
+        "off": False,
+        "accepted": True,
+        "rejected": False,
+        "calls": 2,
+    }
+
+
 def test_pipeline_names_corpus_and_team_agent_nodes():
     source = (ROOT / "components" / "AgentPipeline.tsx").read_text(encoding="utf-8")
 

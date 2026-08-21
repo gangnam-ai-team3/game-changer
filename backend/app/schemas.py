@@ -126,7 +126,7 @@ class UpdateRunRequest(BaseModel):
     x_query: str = Field(default="PUBG Dragunov damage", min_length=1, max_length=500)
     x_estimated_total_cost_usd: float = Field(default=0, ge=0, le=10)
     imported_csv: str | None = Field(default=None, max_length=_MAX_UPDATE_CSV_BYTES)
-    use_llm: bool = True
+    use_llm: bool = False
 
     @model_validator(mode="before")
     @classmethod

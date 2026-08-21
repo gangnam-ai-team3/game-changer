@@ -5,6 +5,7 @@ import { ChangeEvent, FormEvent, useState } from "react";
 import { AgentEvent, AgentPipeline } from "./components/AgentPipeline";
 import { LanguageGameCard, PersonaGameCard } from "./components/AudienceCards";
 import { businessKorean, businessKoreanJson } from "./components/businessKorean";
+import { nextClaudeUsage } from "./components/claudeUsage";
 import { corpusDemoDates, isFutureUtcDate } from "./components/corpusDemoDates";
 import { DecisionReport, DecisionReportData } from "./components/DecisionReport";
 import { UpdateReview } from "./components/UpdateReview";
@@ -448,7 +449,7 @@ function EventReview({
   const [xQuery, setXQuery] = useState("PUBG Black Market");
   const [csvData, setCsvData] = useState("");
   const [csvName, setCsvName] = useState("");
-  const [useClaude, setUseClaude] = useState(true);
+  const [useClaude, setUseClaude] = useState(false);
   const [result, setResult] = useState<RunResult | null>(null);
   const [submittedSubject, setSubmittedSubject] = useState(initialForm.event_name);
   const [liveEvents, setLiveEvents] = useState<AgentEvent[]>([]);
@@ -772,7 +773,11 @@ function EventReview({
             </label>
           )}
           <label className="toggle">
-            <input type="checkbox" checked={useClaude} onChange={(event) => setUseClaude(event.target.checked)} />
+            <input
+              type="checkbox"
+              checked={useClaude}
+              onChange={(event) => setUseClaude(nextClaudeUsage(event.target.checked))}
+            />
             <span>{sourceMode === "corpus" ? "팀 에이전트로 추가 검증" : "Claude로 설명 보강"}</span>
             <small>{sourceMode === "corpus"
               ? useClaude

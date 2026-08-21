@@ -64,6 +64,16 @@ def test_team_sidecars_reuse_supplied_budget():
     assert returned is runner.budget is probe.budget is budget
 
 
+def test_both_public_requests_default_to_no_llm():
+    event_body = request_payload()
+    update_body = update_payload()
+    event_body.pop("use_llm", None)
+    update_body.pop("use_llm", None)
+
+    assert PipelineRunRequest.model_validate(event_body).use_llm is False
+    assert UpdateRunRequest.model_validate(update_body).use_llm is False
+
+
 @pytest.mark.parametrize(
     ("path", "body"),
     [
