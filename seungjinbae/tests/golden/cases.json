@@ -1,0 +1,24 @@
+[
+  {
+    "name": "single_grounded_claim",
+    "response_text": "The Eiffel Tower is located in Paris, France.",
+    "source_chunks": [
+      {
+        "id": "c1",
+        "text": "The Eiffel Tower is a wrought-iron lattice tower located in Paris, France, completed in 1889."
+      }
+    ],
+    "expected_verdicts": ["grounded"]
+  },
+  {
+    "name": "single_not_grounded_claim",
+    "response_text": "The Eiffel Tower is located in Berlin, Germany.",
+    "source_chunks": [
+      {
+        "id": "c1",
+        "text": "The Eiffel Tower is a wrought-iron lattice tower located in Paris, France, completed in 1889."
+      }
+    ],
+    "expected_verdicts": ["not_grounded"]
+  }
+]

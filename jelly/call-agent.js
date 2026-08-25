@@ -5,10 +5,19 @@ const http = require("http");
 const ROOT_DIR = path.join(__dirname, "..");
 const ENV_PATH = path.join(ROOT_DIR, ".env");
 const ROLE_PATH = path.join(__dirname, "..", ".claude", "agents", "jelly.md");
-const MODEL = "claude-opus-5";
+const MODEL = process.env.CLAUDE_REDTEAM_MODEL?.trim() || "claude-haiku-4-5-20251001";
+const configuredMaxTokens = Number(process.env.CLAUDE_MAX_OUTPUT_TOKENS || "3000");
+const MAX_TOKENS = Number.isSafeInteger(configuredMaxTokens) && configuredMaxTokens > 0
+  ? Math.min(configuredMaxTokens, 3000)
+  : 3000;
 const PORT = process.env.CALL_AGENT_PORT || 8787;
 
 function loadApiKey() {
+  const environmentKey = process.env.ANTHROPIC_API_KEY?.trim();
+  if (environmentKey) return environmentKey;
+  if (!fs.existsSync(ENV_PATH)) {
+    throw new Error(`ANTHROPIC_API_KEY가 ${ENV_PATH} 에 없습니다.`);
+  }
   const envText = fs.readFileSync(ENV_PATH, "utf8");
   for (const line of envText.split("\n")) {
     const trimmed = line.trim();
@@ -26,30 +35,43 @@ function loadRolePrompt() {
   return fs.readFileSync(ROLE_PATH, "utf8");
 }
 
+async function requestClaude(apiKey, body) {
+  let response;
+  try {
+    response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (_) {
+    throw new Error("Claude API 호출에 실패했습니다.");
+  }
+  if (!response?.ok) {
+    const status = Number.isInteger(response?.status) ? response.status : 0;
+    throw new Error(`Claude API 호출에 실패했습니다. (status ${status})`);
+  }
+  try {
+    return await response.json();
+  } catch (_) {
+    throw new Error("Claude API 호출에 실패했습니다.");
+  }
+}
+
 async function callAgent(inputText) {
   const apiKey = loadApiKey();
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY 값이 비어 있습니다.");
   const rolePrompt = loadRolePrompt();
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      max_tokens: 16000,
-      system: rolePrompt,
-      messages: [{ role: "user", content: inputText }],
-    }),
+  const data = await requestClaude(apiKey, {
+    model: MODEL,
+    max_tokens: MAX_TOKENS,
+    system: rolePrompt,
+    messages: [{ role: "user", content: inputText }],
   });
-
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(`API 오류 (${response.status}): ${data.error?.message || JSON.stringify(data)}`);
-  }
   if (data.stop_reason === "refusal") {
     throw new Error("모델이 요청을 거부했습니다.");
   }
@@ -104,41 +126,33 @@ async function analyzeRows(rows) {
   const userText =
     "아래는 화면의 [정보 입력] 표에서 넘어온 근거 행 목록입니다(JSON 배열). 각 행은 index로 구분됩니다.\n" +
     "각 행마다 근거 내용(content)을 보고 동향(긍정/중립/부정/위험 중 하나), 원인(한 문장), " +
-    "개선 방향(한 문장, 판단하기 어려우면 빈 문자열)을 정하세요. " +
-    "원인과 개선 방향 문장은 완전한 문장으로 쓰고 반드시 마침표(.)로 끝내세요. " +
-    "근거 내용이 비어 있는 행은 동향을 중립으로 두고 원인·개선 방향은 빈 문자열로 두세요.\n" +
+    "개선 방향(한 문장)을 정하세요. " +
+    "원인과 개선 방향은 비어 있지 않은 완전한 한국어 문장으로 쓰고 반드시 마침표(.)로 끝내세요. " +
+    "가운뎃점 기호 대신 쉼표나 자연스러운 연결어를 사용하세요.\n" +
     "그리고 전체 행을 종합한 개선 방향(synthesis)을 하나의 긴 문단이 아니라, " +
     "가장 근거가 많고 시급한 것부터 순서대로 2~4개의 항목으로 나눠 작성하세요. " +
     "각 항목은 title(5~15자 정도의 짧은 테마명, 마침표 없이)과 description(1~2문장, 마침표로 끝냄)으로 구성합니다.\n\n" +
     JSON.stringify(rows, null, 2);
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      max_tokens: 16000,
-      system: rolePrompt,
-      messages: [{ role: "user", content: userText }],
-      output_config: { format: { type: "json_schema", schema: ANALYZE_SCHEMA } },
-    }),
+  const data = await requestClaude(apiKey, {
+    model: MODEL,
+    max_tokens: MAX_TOKENS,
+    system: rolePrompt,
+    messages: [{ role: "user", content: userText }],
+    output_config: { format: { type: "json_schema", schema: ANALYZE_SCHEMA } },
   });
-
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(`API 오류 (${response.status}): ${data.error?.message || JSON.stringify(data)}`);
-  }
   if (data.stop_reason === "refusal") {
     throw new Error("모델이 요청을 거부했습니다.");
   }
 
   const textBlock = data.content.find((block) => block.type === "text");
   if (!textBlock) throw new Error("응답에서 결과를 찾지 못했습니다.");
-  const parsed = JSON.parse(textBlock.text);
+  let parsed;
+  try {
+    parsed = JSON.parse(textBlock.text);
+  } catch (_) {
+    throw new Error("Jelly 응답 형식을 확인하지 못했습니다.");
+  }
 
   // 모델이 마침표를 빼먹는 경우에 대비해 원인·개선 문장 끝에 마침표를 보장합니다.
   const ensureFullStop = (s) => {
