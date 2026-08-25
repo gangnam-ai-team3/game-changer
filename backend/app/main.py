@@ -5,6 +5,8 @@ import binascii
 import json
 import math
 import os
+import sqlite3
+from collections import Counter
 from datetime import UTC, datetime, time
 from pathlib import Path
 from queue import Queue
@@ -23,6 +25,18 @@ from agents.structured import ClaudeBudget
 from contracts import ArtifactStatus, EventBrief, Producer
 from execution import ExecutionEvent
 from orchestrator import EventPreflightOrchestrator, PipelineStopped
+from res.corpus import (
+    BEHAVIOR_LABELS,
+    REASON_LABELS,
+    TOPIC_LABELS,
+    BehaviorCode,
+    CorpusBuildError,
+    ReasonCode,
+    Stance,
+    TopicTag,
+    corpus_status,
+    search_corpus,
+)
 from res.corpus_collectors import EventCorpusCollector, UpdateCorpusCollector
 from res.team_adapters import (
     EventJellyRedteamAdapter,
@@ -41,6 +55,12 @@ from .schemas import (
     HealthResponse,
     PipelineRunRequest,
     PipelineRunResponse,
+    TrendCount,
+    TrendEvidence,
+    TrendLanguageCounts,
+    TrendRunRequest,
+    TrendRunResponse,
+    TrendSentimentCounts,
     UpdatePipelineRunResponse,
     UpdateRunRequest,
     UpdateRunResult,
@@ -50,6 +70,16 @@ ROOT = Path(__file__).resolve().parents[2]
 _PUBLIC_DEMO_BUDGET: ClaudeBudget | None = None
 # ponytail: process-local demo lock; use a shared lock before adding workers.
 _PUBLIC_DEMO_RUN_LOCK = Lock()
+_TREND_QUERIES = {
+    "event": "이벤트 보상 진행 구매",
+    "update": "무기 밸런스 성능 화면",
+    "general": "게임 플레이 콘텐츠",
+}
+_TREND_TOPIC_FILTERS = {
+    "event": {"randomness", "reward_system", "progression", "monetization", "event_flow"},
+    "update": {"weapon_balance", "matchmaking", "performance", "anti_cheat", "interface", "core_gameplay"},
+    "general": set(),
+}
 app = FastAPI(title="Game Changer API", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
@@ -358,6 +388,110 @@ def _run_update(
         llm_provider=result.llm_provider,
         llm_requested=result.llm_requested,
     )
+
+
+def _trend_top_counts(counter, enum_type, labels) -> list[TrendCount]:
+    ranked = sorted(
+        ((labels[enum_type(value)], count) for value, count in counter.items()),
+        key=lambda item: (-item[1], item[0]),
+    )
+    return [TrendCount(label=label, count=count) for label, count in ranked[:5]]
+
+
+def _trend_type_records(records, content_type: str):
+    allowed = _TREND_TOPIC_FILTERS[content_type]
+    return [
+        record
+        for record in records
+        if not allowed or allowed.intersection(record.topic_tags)
+    ]
+
+
+@app.post("/api/trends", response_model=TrendRunResponse)
+def create_trend_run(request: TrendRunRequest) -> TrendRunResponse:
+    if request.game.strip().casefold() not in {"pubg", "pubg: battlegrounds"}:
+        raise HTTPException(
+            status_code=422,
+            detail="현재 동향 코퍼스는 PUBG만 지원합니다.",
+        )
+    db_path = ROOT / ".data" / "corpus" / "pubg_steam.sqlite3"
+    try:
+        manifest = corpus_status(db_path)
+        if manifest.get("status") != "active":
+            raise CorpusBuildError("활성 코퍼스가 아닙니다.")
+        snapshot_at = datetime.fromisoformat(manifest["snapshot_at"])
+        if snapshot_at.tzinfo is None:
+            raise ValueError("snapshot_at must be timezone-aware")
+        corpus_count = int(manifest["ko_count"]) + int(manifest["en_count"])
+        if corpus_count < 0:
+            raise ValueError("corpus count must be non-negative")
+
+        base_query = _TREND_QUERIES[request.content_type]
+        by_language = {
+            language: search_corpus(
+                base_query,
+                db_path=db_path,
+                language=language,
+                limit=20,
+            )
+            for language in ("ko", "en")
+        }
+        by_language = {
+            language: _trend_type_records(records, request.content_type)
+            for language, records in by_language.items()
+        }
+        records = [*by_language["ko"], *by_language["en"]]
+        evidence_sample = []
+        for index in range(max(map(len, by_language.values()), default=0)):
+            for language in ("ko", "en"):
+                if index < len(by_language[language]) and len(evidence_sample) < 6:
+                    evidence_sample.append(by_language[language][index])
+
+        sentiments = Counter(Stance(item.stance).value for item in records)
+        languages = Counter(item.language for item in records)
+        topics = Counter(value for item in records for value in item.topic_tags)
+        reasons = Counter(value for item in records for value in item.reason_codes)
+        behaviors = Counter(value for item in records for value in item.behavior_codes)
+        average_confidence = (
+            round(sum(item.confidence for item in records) / len(records), 4)
+            if records
+            else 0
+        )
+
+        return TrendRunResponse(
+            snapshot_at=snapshot_at,
+            corpus_version=manifest["corpus_version"],
+            evidence_count=len(records),
+            corpus_count=corpus_count,
+            average_confidence=average_confidence,
+            sentiment_counts=TrendSentimentCounts(
+                positive=sentiments[Stance.POSITIVE.value],
+                negative=sentiments[Stance.NEGATIVE.value],
+                mixed=sentiments[Stance.MIXED.value],
+                neutral=sentiments[Stance.NEUTRAL.value],
+            ),
+            language_counts=TrendLanguageCounts(
+                ko=languages["ko"],
+                en=languages["en"],
+            ),
+            top_topics=_trend_top_counts(topics, TopicTag, TOPIC_LABELS),
+            top_reasons=_trend_top_counts(reasons, ReasonCode, REASON_LABELS),
+            top_behaviors=_trend_top_counts(behaviors, BehaviorCode, BEHAVIOR_LABELS),
+            evidence=[
+                TrendEvidence(
+                    language=item.language,
+                    stance=item.stance,
+                    summary=item.summary,
+                    confidence=item.confidence,
+                )
+                for item in evidence_sample
+            ],
+        )
+    except (CorpusBuildError, OSError, sqlite3.Error, KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="동향 코퍼스를 불러올 수 없습니다.",
+        ) from exc
 
 
 @app.get("/health", response_model=HealthResponse)

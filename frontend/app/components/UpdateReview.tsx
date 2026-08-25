@@ -445,6 +445,12 @@ function buildUpdateReport(result: UpdateRunResult, subject: string): DecisionRe
       modeLabel,
     ].filter(Boolean).join(", "),
     analysisIncomplete: result.analysis_incomplete,
+    metrics: [
+      { label: "출시 판단", value: decisionLabels[result.brief.decision] ?? "확인 필요" },
+      { label: "검토 근거", value: `${evidenceCount}건` },
+      { label: "공개 언어권", value: `${languageCount}개` },
+      { label: "검증 위험", value: `${result.brief.top_risks.length}개` },
+    ],
     expectedCard: {
       label: "예상 효과",
       title: businessKorean(positive?.title ?? "대표 효과 선정 어려움"),

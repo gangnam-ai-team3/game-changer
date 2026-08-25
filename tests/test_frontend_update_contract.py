@@ -7,13 +7,20 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1] / "frontend" / "app"
 
 
-def test_home_exposes_accessible_review_mode_switch():
+def test_home_exposes_trend_and_scenario_modes():
     source = (ROOT / "page.tsx").read_text(encoding="utf-8")
+    trend_source = (ROOT / "components" / "TrendReview.tsx").read_text(encoding="utf-8")
 
-    assert 'aria-pressed={reviewMode === "event"}' in source
-    assert 'aria-pressed={reviewMode === "update"}' in source
-    assert "이벤트 점검" in source
-    assert "업데이트 점검" in source
+    assert 'aria-pressed={reviewMode === "trend"}' in source
+    assert 'aria-pressed={reviewMode === "scenario"}' in source
+    assert "동향 추출" in source
+    assert "예상 시나리오 점검" in source
+    assert 'aria-pressed={scenarioMode === "event"}' in source
+    assert 'aria-pressed={scenarioMode === "update"}' in source
+    assert "보고서 이름" in trend_source
+    assert "report_title: reportTitle" in trend_source
+    assert "보고서 이름은 결과를 구분하는 용도입니다" in trend_source
+    assert "콘텐츠 범위" not in trend_source
 
 
 def test_existing_event_stream_and_pipeline_mode_are_preserved():
@@ -66,6 +73,7 @@ def test_user_facing_frontend_copy_does_not_use_middle_dots():
         ROOT / "components" / "UpdateReview.tsx",
         ROOT / "components" / "AgentPipeline.tsx",
         ROOT / "components" / "AudienceCards.tsx",
+        ROOT / "components" / "TrendReview.tsx",
     ):
         assert "·" not in path.read_text(encoding="utf-8")
 
@@ -119,8 +127,10 @@ def test_mode_switch_preserves_each_review_state_and_blocks_parallel_runs():
     source = (ROOT / "page.tsx").read_text(encoding="utf-8")
     update_source = (ROOT / "components" / "UpdateReview.tsx").read_text(encoding="utf-8")
 
-    assert 'hidden={reviewMode !== "event"}' in source
-    assert 'hidden={reviewMode !== "update"}' in source
+    assert 'hidden={reviewMode !== "trend"}' in source
+    assert 'hidden={reviewMode !== "scenario"}' in source
+    assert 'hidden={scenarioMode !== "event"}' in source
+    assert 'hidden={scenarioMode !== "update"}' in source
     assert "runningMode" in source
     assert 'runBlocked={runningMode === "update"}' in source
     assert 'runBlocked={runningMode === "event"}' in source
@@ -130,6 +140,40 @@ def test_mode_switch_preserves_each_review_state_and_blocks_parallel_runs():
     assert "onRunningChange?.(true)" in update_source
     assert "onRunningChange?.(false)" in source
     assert "onRunningChange?.(false)" in update_source
+
+
+def test_trend_view_uses_safe_corpus_without_claude_or_fake_metrics():
+    source = (ROOT / "components" / "TrendReview.tsx").read_text(encoding="utf-8")
+
+    assert 'fetch("/api/trends"' in source
+    assert "사전 구축 Steam 코퍼스" in source
+    assert "이 기능은 Claude API를 호출하지 않습니다" in source
+    assert "리뷰 원문과 이용자 식별자는 포함하지 않습니다" in source
+    assert "현재 코퍼스 단면" in source
+    assert "입력한 이름은 보고서를 구분하는 데만 사용합니다" in source
+    assert "코퍼스 근거를 집계한 참고 동향" in source
+    assert "데이터 연동 필요" in source
+    assert "날짜별 변화" in source
+    assert "매출과 이탈" in source
+    assert "window.print()" in source
+    assert "종합 반응 지수" not in source
+    assert "리뷰 폭탄 의심" not in source
+
+
+def test_reports_follow_six_section_one_page_structure_without_added_motion():
+    trend = (ROOT / "components" / "TrendReview.tsx").read_text(encoding="utf-8")
+    decision = (ROOT / "components" / "DecisionReport.tsx").read_text(encoding="utf-8")
+    styles = (ROOT / "globals.css").read_text(encoding="utf-8")
+
+    for number in range(1, 7):
+        assert f"{number:02d}" in trend
+        assert f"{number:02d}" in decision
+    assert "decision-report-metrics" in decision
+    assert "인쇄 또는 PDF 저장" in trend
+    assert "인쇄 또는 PDF 저장" in decision
+    assert ".print-report" in styles
+    assert ".trend-report" in styles
+    assert "@keyframes" not in styles[styles.index(".trend-report{"):]
 
 
 def test_both_modes_offer_safe_corpus_and_team_agent_choice():

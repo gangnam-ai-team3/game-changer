@@ -8,6 +8,7 @@ import { businessKorean, businessKoreanJson } from "./components/businessKorean"
 import { nextClaudeUsage } from "./components/claudeUsage";
 import { corpusDemoDates, isFutureUtcDate } from "./components/corpusDemoDates";
 import { DecisionReport, DecisionReportData } from "./components/DecisionReport";
+import { TrendReview } from "./components/TrendReview";
 import { UpdateReview } from "./components/UpdateReview";
 
 const initialForm = {
@@ -292,6 +293,12 @@ function buildEventReport(result: RunResult, subject: string): DecisionReportDat
       modeLabel,
     ].filter(Boolean).join(", "),
     analysisIncomplete: result.analysis_incomplete,
+    metrics: [
+      { label: "출시 판단", value: decisionLabels[result.brief.decision] ?? "확인 필요" },
+      { label: "검토 근거", value: `${evidenceCount}건` },
+      { label: "공개 언어권", value: `${languageCount}개` },
+      { label: "검증 위험", value: `${result.brief.top_risks.length}개` },
+    ],
     expectedCard: {
       label: "영향이 큰 이용자 반응",
       title: panel ? personaLabels[panel.persona] ?? "이용자 유형 확인 필요" : "대표 반응 선정 어려움",
@@ -828,7 +835,8 @@ function EventReview({
 }
 
 export default function Home() {
-  const [reviewMode, setReviewMode] = useState<"event" | "update">("event");
+  const [reviewMode, setReviewMode] = useState<"trend" | "scenario">("trend");
+  const [scenarioMode, setScenarioMode] = useState<"event" | "update">("event");
   const [runningMode, setRunningMode] = useState<"event" | "update" | null>(null);
   const updateRunningMode = (mode: "event" | "update", running: boolean) => {
     setRunningMode((current) => running ? mode : current === mode ? null : current);
@@ -837,45 +845,76 @@ export default function Home() {
   return (
     <main className="shell">
       <p className="eyebrow">
-        <i /> {reviewMode === "event" ? "게임체인저 / 글로벌 이벤트 사전 검토" : "게임체인저 / 출시 전 업데이트 점검"}
+        <i /> {reviewMode === "trend" ? "게임체인저 / 이용자 동향 분석" : "게임체인저 / 출시 전 시나리오 점검"}
       </p>
       <h1>게임체인저</h1>
       <p className="lead">
-        {reviewMode === "event"
-          ? "출시 예정인 게임 이벤트를 이용자 경험과 이용 조건의 관점에서 점검합니다."
-          : "출시 예정인 게임 업데이트의 예상 반응과 검증 조건을 출시 전에 점검합니다."}
+        {reviewMode === "trend"
+          ? "저장된 이용자 의견에서 현재 반응 분포와 주요 주제를 찾습니다."
+          : "출시 예정 콘텐츠의 예상 반응, 위험, 출시 조건을 근거와 함께 점검합니다."}
       </p>
-      <div className="mode-switch" role="group" aria-label="검토 대상">
+      <div className="mode-switch workspace-switch" role="group" aria-label="분석 기능">
         <button
           type="button"
-          aria-pressed={reviewMode === "event"}
-          aria-controls="event-review-panel"
-          onClick={() => setReviewMode("event")}
+          aria-pressed={reviewMode === "trend"}
+          aria-controls="trend-review-panel"
+          onClick={() => setReviewMode("trend")}
         >
-          <strong>이벤트 점검</strong>
-          <span>{runningMode === "event" ? "현재 이벤트 점검을 실행 중입니다." : "보상, 참여, 이용 조건을 점검합니다."}</span>
+          <strong>동향 추출</strong>
+          <span>현재 코퍼스의 반응 분포와 주요 주제를 정리합니다.</span>
         </button>
         <button
           type="button"
-          aria-pressed={reviewMode === "update"}
-          aria-controls="update-review-panel"
-          onClick={() => setReviewMode("update")}
+          aria-pressed={reviewMode === "scenario"}
+          aria-controls="scenario-review-panel"
+          onClick={() => setReviewMode("scenario")}
         >
-          <strong>업데이트 점검</strong>
-          <span>{runningMode === "update" ? "현재 업데이트 점검을 실행 중입니다." : "변경안의 예상 반응과 출시 조건을 점검합니다."}</span>
+          <strong>예상 시나리오 점검</strong>
+          <span>{runningMode ? "현재 시나리오 점검을 실행 중입니다." : "예정된 이벤트와 업데이트의 반응과 위험을 예측합니다."}</span>
         </button>
       </div>
-      <div id="event-review-panel" hidden={reviewMode !== "event"}>
-        <EventReview
-          runBlocked={runningMode === "update"}
-          onRunningChange={(running) => updateRunningMode("event", running)}
-        />
+      <div id="trend-review-panel" hidden={reviewMode !== "trend"}>
+        <TrendReview />
       </div>
-      <div id="update-review-panel" hidden={reviewMode !== "update"}>
-        <UpdateReview
-          runBlocked={runningMode === "event"}
-          onRunningChange={(running) => updateRunningMode("update", running)}
-        />
+      <div id="scenario-review-panel" hidden={reviewMode !== "scenario"}>
+        <section className="scenario-selector" aria-labelledby="scenario-selector-heading">
+          <div>
+            <p className="eyebrow">콘텐츠 유형</p>
+            <h2 id="scenario-selector-heading">무엇을 점검할까요?</h2>
+          </div>
+          <div className="mode-switch" role="group" aria-label="시나리오 콘텐츠 유형">
+            <button
+              type="button"
+              aria-pressed={scenarioMode === "event"}
+              aria-controls="event-review-panel"
+              onClick={() => setScenarioMode("event")}
+            >
+              <strong>이벤트</strong>
+              <span>보상, 참여, 이용 조건을 점검합니다.</span>
+            </button>
+            <button
+              type="button"
+              aria-pressed={scenarioMode === "update"}
+              aria-controls="update-review-panel"
+              onClick={() => setScenarioMode("update")}
+            >
+              <strong>업데이트</strong>
+              <span>변경안의 예상 반응과 출시 조건을 점검합니다.</span>
+            </button>
+          </div>
+        </section>
+        <div id="event-review-panel" hidden={scenarioMode !== "event"}>
+          <EventReview
+            runBlocked={runningMode === "update"}
+            onRunningChange={(running) => updateRunningMode("event", running)}
+          />
+        </div>
+        <div id="update-review-panel" hidden={scenarioMode !== "update"}>
+          <UpdateReview
+            runBlocked={runningMode === "event"}
+            onRunningChange={(running) => updateRunningMode("update", running)}
+          />
+        </div>
       </div>
     </main>
   );

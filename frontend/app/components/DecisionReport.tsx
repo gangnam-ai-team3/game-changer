@@ -26,6 +26,7 @@ export type DecisionReportData = {
   fullReasoning: string;
   sourceScope: string;
   analysisIncomplete: boolean;
+  metrics: Array<{ label: string; value: string }>;
   expectedCard: ReportCard;
   riskCard: ReportCard;
   actionCard: ReportCard;
@@ -57,6 +58,7 @@ export function DecisionReport({
   fullReasoning,
   sourceScope,
   analysisIncomplete,
+  metrics,
   expectedCard,
   riskCard,
   actionCard,
@@ -75,10 +77,10 @@ export function DecisionReport({
   }, []);
 
   return (
-    <section className="decision-report" aria-labelledby={headingId} data-decision={decisionTone}>
+    <section className="decision-report print-report" aria-labelledby={headingId} data-decision={decisionTone}>
       <header className="decision-report-head">
         <div>
-          <p className="eyebrow">출시 판단 보고서</p>
+          <p className="report-section-label">01 핵심 요약</p>
           <h2 id={headingId} ref={headingRef} tabIndex={-1}>{subject}</h2>
           <p className="decision-report-conclusion">{conclusion}</p>
           <p className="decision-report-scope">{sourceScope}</p>
@@ -97,6 +99,19 @@ export function DecisionReport({
         아래 대표 의견은 AI가 구성한 예상이며 실제 이용자 인용이 아닙니다.
       </p>
 
+      <section className="decision-report-metrics" aria-label="데이터 범위">
+        <p className="report-section-label">02 데이터 범위</p>
+        <div>
+          {metrics.map((metric) => (
+            <article key={metric.label}>
+              <small>{metric.label}</small>
+              <strong>{metric.value}</strong>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <p className="report-section-label decision-report-section-label">03 예상 반응</p>
       <div className="decision-report-card-grid">
         <SummaryCard card={expectedCard} />
         <SummaryCard card={riskCard} />
@@ -104,6 +119,7 @@ export function DecisionReport({
       </div>
 
       <section className="decision-report-risks" aria-labelledby={`${headingId}-risks`}>
+        <p className="report-section-label">04 위험과 대응</p>
         <h3 id={`${headingId}-risks`}>위험과 출시 전 확인</h3>
         {riskRows.length ? (
           <table>
@@ -135,6 +151,7 @@ export function DecisionReport({
       </section>
 
       <div className="decision-report-details">
+        <p className="report-section-label">05 상세 근거</p>
         <details>
           <summary>예상 반응과 이용자 유형</summary>
           <div className="decision-report-detail-body">{reactionDetails}</div>
@@ -154,6 +171,13 @@ export function DecisionReport({
           <div className="decision-report-detail-body">{agentDetails}</div>
         </details>
       </div>
+      <footer className="report-actions">
+        <div>
+          <p className="report-section-label">06 리포트 저장</p>
+          <strong>현재 보고서를 인쇄하거나 PDF로 저장할 수 있습니다.</strong>
+        </div>
+        <button type="button" onClick={() => window.print()}>인쇄 또는 PDF 저장</button>
+      </footer>
     </section>
   );
 }

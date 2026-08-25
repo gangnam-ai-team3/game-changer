@@ -88,6 +88,62 @@ class PipelineRunResponse(BaseModel):
     result: dict
 
 
+class TrendRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    game: str = Field(min_length=1, max_length=200)
+    report_title: str = Field(min_length=1, max_length=300)
+    content_type: Literal["event", "update", "general"] = "event"
+
+
+class TrendCount(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(min_length=1)
+    count: int = Field(ge=1)
+
+
+class TrendSentimentCounts(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    positive: int = Field(ge=0)
+    negative: int = Field(ge=0)
+    mixed: int = Field(ge=0)
+    neutral: int = Field(ge=0)
+
+
+class TrendLanguageCounts(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ko: int = Field(ge=0)
+    en: int = Field(ge=0)
+
+
+class TrendEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    language: Literal["ko", "en"]
+    stance: Literal["positive", "negative", "mixed", "neutral"]
+    summary: str = Field(min_length=1)
+    confidence: float = Field(ge=0, le=1)
+
+
+class TrendRunResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    snapshot_at: datetime
+    corpus_version: str = Field(min_length=1)
+    evidence_count: int = Field(ge=0)
+    corpus_count: int = Field(ge=0)
+    average_confidence: float = Field(ge=0, le=1)
+    sentiment_counts: TrendSentimentCounts
+    language_counts: TrendLanguageCounts
+    top_topics: list[TrendCount]
+    top_reasons: list[TrendCount]
+    top_behaviors: list[TrendCount]
+    evidence: list[TrendEvidence] = Field(max_length=6)
+
+
 class UpdateRunRequest(BaseModel):
     """Validated, size-bounded public input for the update-only pipeline."""
 

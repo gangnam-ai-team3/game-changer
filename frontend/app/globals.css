@@ -1,4 +1,4 @@
-:root { --bg:#f7f8fa; --surface:#fff; --text:#1f2329; --muted:#6b7280; --border:#e5e7eb; --accent:#5e6ad2; }
+:root { --bg:#f2f4f6; --surface:#fff; --text:#191f28; --muted:#6b7684; --border:#e5e8eb; --accent:#3182f6; }
 * { box-sizing:border-box; }
 body { margin:0; color:var(--text); background:var(--bg); font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; }
 .shell { max-width:1180px; margin:0 auto; padding:32px 28px 72px; }
@@ -188,4 +188,38 @@ h2 { margin:0; font-size:23px; letter-spacing:-.035em; }
   .decision-report-risks td{display:grid;grid-template-columns:108px minmax(0,1fr);gap:10px;border-top:1px solid var(--border)}
   .decision-report-risks td:first-child{border-top:0}
   .decision-report-risks td::before{content:attr(data-label);color:var(--muted);font-size:12px;font-weight:650}
+}
+
+.workspace-switch{margin-bottom:18px}
+.scenario-selector{margin:0 0 18px;padding:20px 22px;border:1px solid var(--border);border-radius:16px;background:#fff}
+.scenario-selector>.mode-switch{margin-bottom:0}
+.scenario-selector h2{margin-top:4px}
+.trend-type-field{max-width:540px;margin-top:18px}
+.trend-report{margin-top:28px;padding:28px;border:1px solid var(--border);border-radius:20px;background:#fff;box-shadow:0 10px 30px #191f280a}
+.trend-report-head{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;padding-bottom:24px;border-bottom:1px solid var(--border)}
+.trend-report-head h2{margin:7px 0 12px;font-size:30px}.trend-report-head p:last-child{max-width:760px;margin:0;color:#333d4b;line-height:1.65}
+.trend-report-head h2:focus-visible{outline:3px solid var(--accent);outline-offset:4px;border-radius:6px}
+.trend-report-badge{flex:none;border-radius:999px;background:#e8f3ff;color:#1b64da;padding:8px 12px;font-size:12px;font-weight:750}
+.trend-scope-notice{margin:16px 0 0;padding:12px 14px;border:1px solid #f2c46d;border-radius:10px;background:#fff8e8;color:#714600;font-size:13px;line-height:1.55}
+.report-section-label{margin:0;color:var(--accent);font-size:12px;font-weight:800;letter-spacing:.02em}
+.report-section{padding:26px 0;border-bottom:1px solid var(--border)}
+.report-section-heading{display:flex;align-items:flex-start;gap:12px;margin-bottom:18px}.report-section-heading>span{display:grid;place-items:center;width:28px;height:28px;border-radius:9px;background:#e8f3ff;color:var(--accent);font-size:11px;font-weight:800}.report-section-heading h3{margin:1px 0 5px;font-size:19px}.report-section-heading p{margin:0;color:var(--muted);font-size:13px}
+.trend-sentiment-bar{display:flex;min-height:16px;overflow:hidden;border-radius:999px;background:#edf0f2}.trend-sentiment-bar span{min-width:0}.trend-sentiment-bar .is-positive{background:#20a06b}.trend-sentiment-bar .is-negative{background:#e5484d}.trend-sentiment-bar .is-mixed{background:#6e75e6}.trend-sentiment-bar .is-neutral{background:#a0a9b4}
+.trend-metrics,.trend-data-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:14px}.trend-metrics article,.trend-data-grid article{padding:14px;border-radius:12px;background:var(--bg)}.trend-metrics small,.trend-metrics strong,.trend-metrics span,.trend-data-grid small,.trend-data-grid strong{display:block}.trend-metrics small,.trend-data-grid small{color:var(--muted);font-size:11px}.trend-metrics strong{margin-top:5px;font-size:24px}.trend-metrics span{margin-top:3px;color:var(--muted);font-size:11px}.trend-data-grid strong{margin-top:7px;font-size:16px;line-height:1.35}.trend-language-note{margin:14px 0 0;color:var(--muted);font-size:12px}
+.trend-list-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.trend-list-card{padding:16px;border:1px solid var(--border);border-radius:14px}.trend-list-card h3{margin:0 0 12px;font-size:15px}.trend-list-card ol{margin:0;padding:0;list-style:none}.trend-list-card li{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-top:1px solid var(--border);font-size:12px}.trend-list-card li:first-child{border-top:0}.trend-list-card li strong{color:var(--accent)}.trend-list-card p{color:var(--muted);font-size:12px;line-height:1.5}
+.trend-evidence-details{margin-top:16px;border:1px solid var(--border);border-radius:12px}.trend-evidence-details>summary{cursor:pointer;padding:13px 15px;font-size:13px;font-weight:750}.trend-evidence-details>div{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:0 15px 15px}.trend-evidence-details article{padding:13px;border-radius:10px;background:var(--bg)}.trend-evidence-details strong{font-size:12px}.trend-evidence-details p{font-size:12px;line-height:1.55}.trend-evidence-details small{color:var(--muted);font-size:10px}
+.trend-limit-grid{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(260px,.6fr);gap:18px}.trend-limit-grid>div>p{color:#4e5968;font-size:13px;line-height:1.6}.trend-limit-grid aside{align-self:start;padding:16px;border-radius:14px;background:#fff6e5;color:#7a4e00}.trend-limit-grid aside p{margin:8px 0 0;font-size:12px;line-height:1.55}
+.report-actions{display:flex;align-items:center;justify-content:space-between;gap:20px;padding-top:22px}.report-actions strong{display:block;margin-top:6px;font-size:14px}.report-actions button{border:0;border-radius:10px;background:var(--accent);color:#fff;padding:11px 15px;font:inherit;font-size:13px;font-weight:750;cursor:pointer}.report-actions button:focus-visible{outline:3px solid #191f28;outline-offset:3px}
+.decision-report-metrics{margin-top:18px}.decision-report-metrics>div{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:10px}.decision-report-metrics article{padding:13px;border-radius:10px;background:var(--bg)}.decision-report-metrics small,.decision-report-metrics strong{display:block}.decision-report-metrics small{color:var(--muted);font-size:11px}.decision-report-metrics strong{margin-top:5px;font-size:16px}.decision-report-section-label{margin-top:22px}
+
+@media (max-width:800px){
+  .trend-report{padding:20px 15px}.trend-report-head,.report-actions{display:grid}.trend-report-badge{justify-self:start}
+  .trend-metrics,.trend-data-grid,.trend-list-grid,.trend-evidence-details>div,.trend-limit-grid,.decision-report-metrics>div{grid-template-columns:1fr}
+}
+
+@media print{
+  body *{visibility:hidden!important}
+  .print-report,.print-report *{visibility:visible!important}
+  .print-report{position:absolute;inset:0;width:100%;margin:0;border:0;box-shadow:none}
+  .report-actions,.decision-report-details{display:none!important}
 }
