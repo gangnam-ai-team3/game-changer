@@ -10,8 +10,6 @@ import { corpusDemoDates, isFutureUtcDate } from "./components/corpusDemoDates";
 import { DecisionReport, DecisionReportData } from "./components/DecisionReport";
 import { UpdateReview } from "./components/UpdateReview";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-
 const initialForm = {
   game: "PUBG: BATTLEGROUNDS",
   event_name: "Black Market 2025",
@@ -555,7 +553,7 @@ function EventReview({
         use_llm: useClaude,
         llm_provider: "claude",
       };
-      const response = await fetch(`${API_URL}/api/runs/stream`, {
+      const response = await fetch("/api/runs/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
         body: JSON.stringify(payload),
@@ -669,7 +667,7 @@ function EventReview({
               type="button"
               className="source-mode"
               aria-pressed={sourceMode === "corpus"}
-              onClick={() => selectSourceMode("corpus")}
+              onClick={() => { selectSourceMode("corpus"); applyCorpusDemoDates(); }}
             >
               <strong>사전 구축 Steam 코퍼스</strong>
               <span>한국어와 영어 리뷰에서 파생한 비식별 요약을 미리 분류해 관련 근거를 찾습니다. 리뷰 원문은 포함하지 않습니다.</span>

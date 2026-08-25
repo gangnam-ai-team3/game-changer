@@ -19,7 +19,8 @@ def test_home_exposes_accessible_review_mode_switch():
 def test_existing_event_stream_and_pipeline_mode_are_preserved():
     source = (ROOT / "page.tsx").read_text(encoding="utf-8")
 
-    assert 'fetch(`${API_URL}/api/runs/stream`' in source
+    assert "NEXT_PUBLIC_API_URL" not in source
+    assert 'fetch("/api/runs/stream"' in source
     assert 'mode="event"' in source
     assert "file.name" not in source
 
@@ -33,7 +34,8 @@ def test_update_screen_has_prelaunch_copy_and_four_decision_labels():
     assert 'Revise: "수정 후 재검토"' in source
     assert 'Test: "테스트 후 출시"' in source
     assert 'Hold: "판정 보류"' in source
-    assert 'fetch(`${API_URL}/api/update-runs/stream`' in source
+    assert "NEXT_PUBLIC_API_URL" not in source
+    assert 'fetch("/api/update-runs/stream"' in source
     assert "DecisionReport" in source
     assert "reactionDetails" in source
     assert "evidenceDetails" in source
@@ -137,6 +139,7 @@ def test_both_modes_offer_safe_corpus_and_team_agent_choice():
     for source in (event_source, update_source):
         assert 'type SourceMode = "fixture" | "corpus" | "live" | "import"' in source
         assert 'aria-pressed={sourceMode === "corpus"}' in source
+        assert 'selectSourceMode("corpus"); applyCorpusDemoDates();' in source
         assert '사전 구축 Steam 코퍼스' in source
         assert '한국어와 영어 리뷰에서 파생한 비식별 요약' in source
         assert '리뷰 원문은 포함하지 않습니다' in source

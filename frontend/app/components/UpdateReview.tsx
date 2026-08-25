@@ -10,8 +10,6 @@ import { corpusDemoDates, isFutureUtcDate } from "./corpusDemoDates";
 import { DecisionReport, DecisionReportData } from "./DecisionReport";
 import { utcWallClockToIso } from "./utcWallClock";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-
 type UpdateType = "weapon_balance" | "ui_ux" | "system_rules";
 type SourceMode = "fixture" | "corpus" | "live" | "import";
 
@@ -832,7 +830,7 @@ export function UpdateReview({
         imported_csv: sourceMode === "import" ? csvData : null,
         use_llm: useClaude,
       };
-      const response = await fetch(`${API_URL}/api/update-runs/stream`, {
+      const response = await fetch("/api/update-runs/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
         body: JSON.stringify(payload),
@@ -1118,7 +1116,7 @@ export function UpdateReview({
               type="button"
               className="source-mode"
               aria-pressed={sourceMode === "corpus"}
-              onClick={() => selectSourceMode("corpus")}
+              onClick={() => { selectSourceMode("corpus"); applyCorpusDemoDates(); }}
             >
               <strong>사전 구축 Steam 코퍼스</strong>
               <span>한국어와 영어 리뷰에서 파생한 비식별 요약을 미리 분류해 관련 근거를 찾습니다. 리뷰 원문은 포함하지 않습니다.</span>
