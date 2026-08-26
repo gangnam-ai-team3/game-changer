@@ -1,5 +1,4 @@
 import json
-import os
 from pathlib import Path
 import subprocess
 
@@ -57,14 +56,14 @@ def test_event_result_uses_shared_decision_report():
     assert "decisionHeading" not in event_source
 
 
-def test_event_live_source_can_select_steam_x_or_both():
+def test_event_uses_only_the_prebuilt_steam_corpus():
     source = (ROOT / "page.tsx").read_text(encoding="utf-8")
 
-    assert "checked={useSteam}" in source
-    assert "checked={useX}" in source
-    assert 'use_x: sourceMode === "live" ? useX : false' in source
-    assert 'sourceMode === "live" && useSteam ? Number(steamAppId) : null' in source
-    assert "Steam만, X만, 또는 두 자료를 함께 선택할 수 있습니다" in source
+    assert 'source_mode: "corpus"' in source
+    assert "source-mode-fixed" in source
+    assert "checked={useSteam}" not in source
+    assert "checked={useX}" not in source
+    assert "handleCsv" not in source
 
 
 def test_user_facing_frontend_copy_does_not_use_middle_dots():
@@ -113,14 +112,16 @@ def test_event_uses_shared_collectible_audience_cards():
     assert 'role="img"' in cards
 
 
-def test_both_live_sources_can_select_steam_x_or_both():
+def test_trend_view_removes_unavailable_source_choices():
     event_source = (ROOT / "page.tsx").read_text(encoding="utf-8")
     update_source = (ROOT / "components" / "UpdateReview.tsx").read_text(encoding="utf-8")
+    trend_source = (ROOT / "components" / "TrendReview.tsx").read_text(encoding="utf-8")
 
-    for source in (event_source, update_source):
-        assert "checked={useSteam}" in source
-        assert "checked={useX}" in source
-        assert "Steam만, X만, 또는 두 자료를 함께 선택할 수 있습니다" in source
+    for source in (event_source, update_source, trend_source):
+        assert "사전 구축 Steam 코퍼스" in source
+        assert "Steam과 X 실시간" not in source
+        assert "CSV 가져오기" not in source
+        assert "파일 가져오기" not in source
 
 
 def test_mode_switch_preserves_each_review_state_and_blocks_parallel_runs():
@@ -176,14 +177,13 @@ def test_reports_follow_six_section_one_page_structure_without_added_motion():
     assert "@keyframes" not in styles[styles.index(".trend-report{"):]
 
 
-def test_both_modes_offer_safe_corpus_and_team_agent_choice():
+def test_both_scenario_modes_are_corpus_only_with_explicit_claude_choice():
     event_source = (ROOT / "page.tsx").read_text(encoding="utf-8")
     update_source = (ROOT / "components" / "UpdateReview.tsx").read_text(encoding="utf-8")
 
     for source in (event_source, update_source):
-        assert 'type SourceMode = "fixture" | "corpus" | "live" | "import"' in source
-        assert 'aria-pressed={sourceMode === "corpus"}' in source
-        assert 'selectSourceMode("corpus"); applyCorpusDemoDates();' in source
+        assert 'source_mode: "corpus"' in source
+        assert 'className="source-mode source-mode-fixed"' in source
         assert '사전 구축 Steam 코퍼스' in source
         assert '한국어와 영어 리뷰에서 파생한 비식별 요약' in source
         assert '리뷰 원문은 포함하지 않습니다' in source
@@ -193,10 +193,12 @@ def test_both_modes_offer_safe_corpus_and_team_agent_choice():
         assert 'isFutureUtcDate(form.cutoff_on)' in source
         assert '자료 기준일을 오늘(UTC)보다 뒤로' in source
         assert '2026년 8월 19일' not in source
-        assert '{sourceMode === "live" && (' in source
-        assert '{sourceMode === "import" && (' in source
-        assert '정아현(Jelly) 위험 점검과 승진배 근거 검증 에이전트' in source
-        assert '저장된 코퍼스와 코드 정책만 사용' in source
+        assert 'type SourceMode' not in source
+        assert 'sourceMode' not in source
+        assert 'handleCsv' not in source
+        assert 'Claude API로 팀 에이전트 추가 검증' in source
+        assert 'Claude API를 호출합니다. 토큰 비용이 발생할 수 있습니다.' in source
+        assert 'Claude API를 호출하지 않습니다. 사전 구축 Steam 코퍼스와 코드 정책만 사용합니다.' in source
 
     assert 'starts_on: dates.startsOn' in event_source
     assert 'ends_on: dates.endsOn' in event_source
@@ -217,7 +219,7 @@ def test_claude_usage_is_off_by_default_and_requires_confirmation():
         assert "setUseClaude(nextClaudeUsage(event.target.checked))" in source
         assert "use_llm: useClaude" in source
 
-    assert "Claude API 키로 Claude API를 호출" in confirmation
+    assert "Claude API로 팀 에이전트 추가 검증을 실행" in confirmation
     assert "입력 및 출력 토큰이 사용되어 비용이 발생" in confirmation
 
 
@@ -412,51 +414,6 @@ def test_update_client_never_accepts_or_serializes_provider_credentials():
     assert "api_key" not in source
     assert "authorization" not in source.lower()
     assert "file.name" not in source
-
-
-def _live_period_payload_in_timezone(timezone: str) -> dict[str, str | None]:
-    script = """
-import { utcWallClockToIso } from "./frontend/app/components/utcWallClock.ts";
-
-process.stdout.write(JSON.stringify({
-  period_start: utcWallClockToIso("2026-08-06T00:00"),
-  period_end: utcWallClockToIso("2026-08-13T00:00"),
-  invalid_period: utcWallClockToIso("2026-02-30T00:00"),
-}));
-"""
-    completed = subprocess.run(
-        [
-            "node",
-            "--no-warnings",
-            "--experimental-strip-types",
-            "--input-type=module",
-            "--eval",
-            script,
-        ],
-        cwd=Path(__file__).resolve().parents[1],
-        check=True,
-        capture_output=True,
-        env={**os.environ, "TZ": timezone},
-        text=True,
-    )
-    return json.loads(completed.stdout)
-
-
-def test_live_datetime_payload_keeps_utc_wall_clock_in_non_utc_timezones():
-    source = (ROOT / "components" / "UpdateReview.tsx").read_text(encoding="utf-8")
-
-    assert "period_start: livePeriodStart" in source
-    assert "period_end: livePeriodEnd" in source
-    assert "new Date(periodStart).toISOString()" not in source
-    assert "new Date(periodEnd).toISOString()" not in source
-
-    expected = {
-        "period_start": "2026-08-06T00:00:00Z",
-        "period_end": "2026-08-13T00:00:00Z",
-        "invalid_period": None,
-    }
-    assert _live_period_payload_in_timezone("America/New_York") == expected
-    assert _live_period_payload_in_timezone("Asia/Seoul") == expected
 
 
 def test_shared_decision_report_has_accessible_one_page_structure():

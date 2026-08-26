@@ -8,10 +8,8 @@ import { businessKorean, businessKoreanJson } from "./businessKorean";
 import { nextClaudeUsage } from "./claudeUsage";
 import { corpusDemoDates, isFutureUtcDate } from "./corpusDemoDates";
 import { DecisionReport, DecisionReportData } from "./DecisionReport";
-import { utcWallClockToIso } from "./utcWallClock";
 
 type UpdateType = "weapon_balance" | "ui_ux" | "system_rules";
-type SourceMode = "fixture" | "corpus" | "live" | "import";
 
 type Evidence = {
   evidence_id: string;
@@ -204,11 +202,6 @@ const mechanismLabels: Record<string, string> = {
 
 const sourceLabels: Record<string, string> = {
   steam: "Steam",
-  x: "X",
-  reddit_import: "승인된 Reddit 자료",
-  threads_import: "승인된 Threads 자료",
-  instagram_import: "승인된 Instagram 자료",
-  synthetic: "검증된 저장 자료",
 };
 
 const initial: UpdateForm = {
@@ -419,10 +412,7 @@ function buildUpdateReport(result: UpdateRunResult, subject: string): DecisionRe
   const recommendation = findUpdateRecommendation(result.brief.recommendations, primaryRisk?.risk_id);
   const metric = findUpdateMetric(result.brief.validation_metrics, recommendation, primaryRisk?.risk_id);
   const modeLabels: Record<string, string> = {
-    fixture: "검증된 저장 자료",
     corpus: "사전 구축 코퍼스",
-    live: "실시간 공개 자료",
-    import: "승인 CSV",
   };
   const modeLabel = result.feedback.input_mode ? modeLabels[result.feedback.input_mode] : undefined;
   const evidenceCount = new Set(result.brief.evidence.map((item) => item.evidence_id)).size;
@@ -685,16 +675,14 @@ export function UpdateReview({
   runBlocked?: boolean;
   onRunningChange?: (running: boolean) => void;
 }) {
-  const [form, setForm] = useState<UpdateForm>(initial);
-  const [sourceMode, setSourceMode] = useState<SourceMode>("fixture");
-  const [steamAppId, setSteamAppId] = useState("578080");
-  const [useSteam, setUseSteam] = useState(true);
-  const [useX, setUseX] = useState(false);
-  const [xQuery, setXQuery] = useState("PUBG Dragunov damage");
-  const [periodStart, setPeriodStart] = useState("2026-08-06T00:00");
-  const [periodEnd, setPeriodEnd] = useState("2026-08-13T00:00");
-  const [csvData, setCsvData] = useState("");
-  const [csvName, setCsvName] = useState("");
+  const [form, setForm] = useState<UpdateForm>(() => {
+    const dates = corpusDemoDates();
+    return {
+      ...initial,
+      cutoff_on: dates.cutoffOn,
+      planned_on: dates.startsOn,
+    };
+  });
   const [useClaude, setUseClaude] = useState(false);
   const [result, setResult] = useState<UpdateRunResult | null>(null);
   const [submittedSubject, setSubmittedSubject] = useState(initial.update_name);
@@ -711,18 +699,7 @@ export function UpdateReview({
 
   const selectUpdateType = (next: UpdateType) => {
     setForm((previous) => ({ ...previous, update_type: next }));
-    if (next !== "weapon_balance" && sourceMode === "fixture") {
-      setSourceMode("live");
-    }
     setResult(null);
-    setError("");
-  };
-
-  const selectSourceMode = (next: SourceMode) => {
-    if (next === "fixture" && form.update_type !== "weapon_balance") {
-      return;
-    }
-    setSourceMode(next);
     setError("");
   };
 
@@ -733,27 +710,6 @@ export function UpdateReview({
       cutoff_on: dates.cutoffOn,
       planned_on: dates.startsOn,
     }));
-    setError("");
-  };
-
-  const handleCsv = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    if (file.size > 2_000_000) {
-      setCsvData("");
-      setCsvName("");
-      setError("승인 CSV는 UTF-8 기준 2 MB 이하만 사용할 수 있습니다.");
-      return;
-    }
-    const text = await file.text();
-    if (new TextEncoder().encode(text).byteLength > 2_000_000) {
-      setCsvData("");
-      setCsvName("");
-      setError("승인 CSV는 UTF-8 기준 2 MB 이하만 사용할 수 있습니다.");
-      return;
-    }
-    setCsvData(text);
-    setCsvName("승인 CSV 선택됨");
     setError("");
   };
 
@@ -771,31 +727,8 @@ export function UpdateReview({
       setError("자료 기준일은 출시 예정일과 같거나 앞선 날짜로 설정해 주세요.");
       return;
     }
-    if (sourceMode === "corpus" && !isFutureUtcDate(form.cutoff_on)) {
+    if (!isFutureUtcDate(form.cutoff_on)) {
       setError("사전 구축 코퍼스를 사용하려면 자료 기준일을 오늘(UTC)보다 뒤로 설정해 주세요.");
-      return;
-    }
-    if (sourceMode === "import" && !csvData) {
-      setError("승인 CSV 파일을 선택해 주세요.");
-      return;
-    }
-    if (sourceMode === "live" && !useSteam && !useX) {
-      setError("Steam 또는 X 중 하나 이상을 선택해 주세요.");
-      return;
-    }
-    if (sourceMode === "live" && useSteam && (!steamAppId || Number(steamAppId) < 1)) {
-      setError("올바른 Steam 앱 ID를 입력해 주세요.");
-      return;
-    }
-    if (sourceMode === "live" && useX && !xQuery.trim()) {
-      setError("X 검색어를 입력해 주세요.");
-      return;
-    }
-
-    const livePeriodStart = sourceMode === "live" ? utcWallClockToIso(periodStart) : null;
-    const livePeriodEnd = sourceMode === "live" ? utcWallClockToIso(periodEnd) : null;
-    if (sourceMode === "live" && (!livePeriodStart || !livePeriodEnd)) {
-      setError("수집 시각을 UTC 기준 YYYY-MM-DDTHH:mm 형식으로 정확히 입력해 주세요.");
       return;
     }
 
@@ -822,18 +755,7 @@ export function UpdateReview({
         official_context_url: form.official_context_url || null,
         official_context: form.official_context || null,
         details: updateDetails(form),
-        source_mode: sourceMode,
-        fixture_case: "dragunov_random_damage_removal",
-        steam_app_id:
-          sourceMode === "live" && useSteam ? Number(steamAppId) : null,
-        use_x: sourceMode === "live" ? useX : false,
-        x_query:
-          sourceMode === "live" && xQuery.trim()
-            ? xQuery.trim()
-            : "PUBG Dragunov damage",
-        period_start: livePeriodStart,
-        period_end: livePeriodEnd,
-        imported_csv: sourceMode === "import" ? csvData : null,
+        source_mode: "corpus",
         use_llm: useClaude,
       };
       const response = await fetch("/api/update-runs/stream", {
@@ -1102,154 +1024,36 @@ export function UpdateReview({
           <header>
             <span>04</span>
             <div>
-              <h2>자료 출처와 실행</h2>
-              <p>시연 자료와 외부 자료는 분리합니다. 외부 실패는 저장 사례로 대체하지 않습니다.</p>
+              <h2>자료와 실행</h2>
+              <p>모든 점검은 사전 구축 Steam 코퍼스만 사용합니다.</p>
             </div>
           </header>
           <div className="source-mode-grid" role="group" aria-label="업데이트 자료 출처">
-            {form.update_type === "weapon_balance" && (
-              <button
-                type="button"
-                className="source-mode"
-                aria-pressed={sourceMode === "fixture"}
-                onClick={() => selectSourceMode("fixture")}
-              >
-                <strong>검증된 저장 데이터</strong>
-                <span>Dragunov 합성 비교 자료로 안정적으로 시연합니다.</span>
-              </button>
-            )}
-            <button
-              type="button"
-              className="source-mode"
-              aria-pressed={sourceMode === "corpus"}
-              onClick={() => { selectSourceMode("corpus"); applyCorpusDemoDates(); }}
-            >
+            <div className="source-mode source-mode-fixed">
               <strong>사전 구축 Steam 코퍼스</strong>
               <span>한국어와 영어 리뷰에서 파생한 비식별 요약을 미리 분류해 관련 근거를 찾습니다. 리뷰 원문은 포함하지 않습니다.</span>
-            </button>
-            <button
-              type="button"
-              className="source-mode"
-              aria-pressed={sourceMode === "live"}
-              onClick={() => selectSourceMode("live")}
-            >
-              <strong>Steam과 X 실시간 갱신</strong>
-              <span>기준일 이전의 선택한 공개 자료만 수집합니다.</span>
-            </button>
-            <button
-              type="button"
-              className="source-mode"
-              aria-pressed={sourceMode === "import"}
-              onClick={() => selectSourceMode("import")}
-            >
-              <strong>승인 CSV 가져오기</strong>
-              <span>개인정보와 원문 열이 없는 승인된 UTF-8 CSV만 사용합니다.</span>
-            </button>
+            </div>
           </div>
 
-          {sourceMode === "fixture" && (
-            <p className="source-note">
-              모든 근거는 합성 비교 참고 자료이며 실제 이용자 여론이나 사후 결과가 아닙니다.
-            </p>
-          )}
-          {sourceMode === "corpus" && (
-            <div className="source-note corpus-note">
-              <p>자료 기준일은 내일(UTC), 검토 대상 시작일은 그다음 날로 설정합니다. 코퍼스에는 한국어와 영어 비식별 요약과 분류값만 저장되며, 리뷰 원문은 포함하지 않습니다.</p>
-              <button type="button" className="corpus-date-action" onClick={applyCorpusDemoDates}>
-                코퍼스 데모 날짜 적용
-              </button>
-            </div>
-          )}
-          {sourceMode === "live" && (
-            <div className="source-fields">
-              <div className="grid two" role="group" aria-label="실시간 자료 선택">
-                <label className="toggle source-toggle">
-                  <input
-                    type="checkbox"
-                    checked={useSteam}
-                    onChange={(event) => setUseSteam(event.target.checked)}
-                  />
-                  <span>Steam 공개 리뷰 수집</span>
-                  <small>선택하면 입력한 앱 ID의 공개 리뷰를 확인합니다.</small>
-                </label>
-                <label className="toggle source-toggle">
-                  <input
-                    type="checkbox"
-                    checked={useX}
-                    onChange={(event) => setUseX(event.target.checked)}
-                  />
-                  <span>X 공개 게시물 수집</span>
-                  <small>선택하면 서버에 설정된 X API 연결을 사용합니다.</small>
-                </label>
-              </div>
-              <div className="grid two source-fields">
-                {useSteam && (
-                  <label className="field">
-                    <span>Steam 앱 ID</span>
-                    <input
-                      inputMode="numeric"
-                      value={steamAppId}
-                      onChange={(event) => setSteamAppId(event.target.value)}
-                    />
-                  </label>
-                )}
-                {useX && (
-                  <label className="field">
-                    <span>X 검색어</span>
-                    <input value={xQuery} onChange={(event) => setXQuery(event.target.value)} />
-                  </label>
-                )}
-                <label className="field">
-                  <span>수집 시작 시각 (UTC)</span>
-                  <input
-                    type="datetime-local"
-                    value={periodStart}
-                    onChange={(event) => setPeriodStart(event.target.value)}
-                  />
-                </label>
-                <label className="field">
-                  <span>수집 종료 및 기준 시각 (UTC)</span>
-                  <input
-                    type="datetime-local"
-                    value={periodEnd}
-                    onChange={(event) => setPeriodEnd(event.target.value)}
-                  />
-                </label>
-              </div>
-              <p className="source-note">
-                Steam만, X만, 또는 두 자료를 함께 선택할 수 있습니다. 비밀 키는 서버 환경 변수에서만 읽습니다.
-              </p>
-            </div>
-          )}
-          {sourceMode === "import" && (
-            <label className="field">
-              <span>승인 CSV 파일</span>
-              <input type="file" accept=".csv,text/csv" onChange={handleCsv} />
-              <small className="field-help">
-                {csvName || "UTF-8 텍스트 2 MB 이하의 승인 CSV만 전송합니다. 원문은 화면에 표시하지 않습니다."}
-              </small>
-            </label>
-          )}
+          <div className="source-note corpus-note">
+            <p>자료 기준일은 내일(UTC), 검토 대상 시작일은 그다음 날로 설정합니다. 코퍼스에는 한국어와 영어 비식별 요약과 분류값만 저장되며, 리뷰 원문은 포함하지 않습니다.</p>
+            <button type="button" className="corpus-date-action" onClick={applyCorpusDemoDates}>
+              코퍼스 데모 날짜 적용
+            </button>
+          </div>
           <label className="toggle">
             <input
               type="checkbox"
               checked={useClaude}
               onChange={(event) => setUseClaude(nextClaudeUsage(event.target.checked))}
             />
-            <span>{sourceMode === "corpus" ? "팀 에이전트로 추가 검증" : "Claude로 설명 보강"}</span>
-            <small>
-              {sourceMode === "corpus"
-                ? useClaude
-                  ? "유주심 에이전트가 Haiku로 이용자 유형별 문구를 정리하고, 정아현(Jelly) 위험 점검과 승진배 근거 검증 에이전트는 Sonnet 5로 실행됩니다."
-                  : "저장된 코퍼스와 코드 정책만 사용하며 페르소나 문구 정리와 두 팀 에이전트의 Claude 호출은 생략합니다."
-                : useClaude
-                  ? "근거 연결과 최종 판정은 코드 정책으로 다시 검증합니다."
-                  : "코드 정책만으로 점검합니다."}
-            </small>
+            <span>Claude API로 팀 에이전트 추가 검증</span>
+            <small>{useClaude
+              ? "Claude API를 호출합니다. 토큰 비용이 발생할 수 있습니다."
+              : "Claude API를 호출하지 않습니다. 사전 구축 Steam 코퍼스와 코드 정책만 사용합니다."}</small>
           </label>
           <p className="prelaunch-notice">
             출시 전 예상이며 실제 이용자 반응이나 출시 후 성과를 의미하지 않습니다.
-            {sourceMode === "fixture" && " 저장 자료는 합성 비교 사례입니다."}
             {" "}API 키와 자료 원문은 화면에 표시하거나 저장하지 않습니다.
           </p>
           <button className="primary" disabled={loading || runBlocked}>

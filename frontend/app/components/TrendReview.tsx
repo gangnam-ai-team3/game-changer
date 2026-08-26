@@ -153,19 +153,11 @@ export function TrendReview() {
               <p>현재 버전은 사전 구축 Steam 코퍼스를 사용합니다.</p>
             </div>
           </header>
-          <div className="source-mode-grid">
-            <button type="button" className="source-mode" aria-pressed="true">
+          <div className="source-mode-grid" role="group" aria-label="동향 자료 출처">
+            <div className="source-mode source-mode-fixed">
               <strong>사전 구축 Steam 코퍼스</strong>
               <span>한국어와 영어 리뷰에서 만든 비식별 파생 자료를 사용합니다.</span>
-            </button>
-            <button type="button" className="source-mode" disabled>
-              <strong>Steam과 X 실시간 자료</strong>
-              <span>수집 기준과 갱신 상태를 확정한 뒤 연결할 예정입니다.</span>
-            </button>
-            <button type="button" className="source-mode" disabled>
-              <strong>파일 가져오기</strong>
-              <span>승인 형식과 개인정보 검사를 확정한 뒤 연결할 예정입니다.</span>
-            </button>
+            </div>
           </div>
           <p className="prelaunch-notice">
             리뷰 원문과 이용자 식별자는 포함하지 않습니다. 이 기능은 Claude API를 호출하지 않습니다.

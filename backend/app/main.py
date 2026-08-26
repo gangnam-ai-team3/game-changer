@@ -188,11 +188,11 @@ def _public_demo_budget() -> ClaudeBudget:
     return _PUBLIC_DEMO_BUDGET
 
 
-def _guard_public_source(source_mode: str) -> None:
-    if _public_demo_mode() and source_mode not in {"fixture", "corpus"}:
+def _guard_corpus_source(source_mode: str) -> None:
+    if source_mode != "corpus":
         raise HTTPException(
             status_code=403,
-            detail="공개 시연에서는 검증된 저장 자료만 사용할 수 있습니다.",
+            detail="이 서비스에서는 사전 구축 Steam 코퍼스만 사용할 수 있습니다.",
         )
 
 
@@ -501,7 +501,7 @@ def health() -> HealthResponse:
 
 @app.post("/api/runs", response_model=PipelineRunResponse)
 def create_run(request: PipelineRunRequest) -> PipelineRunResponse:
-    _guard_public_source(request.source_mode)
+    _guard_corpus_source(request.source_mode)
     run_id = str(uuid4())
     acquired = _acquire_public_run()
     try:
@@ -519,7 +519,7 @@ def create_run(request: PipelineRunRequest) -> PipelineRunResponse:
 
 @app.post("/api/runs/stream")
 def stream_run(request: PipelineRunRequest) -> StreamingResponse:
-    _guard_public_source(request.source_mode)
+    _guard_corpus_source(request.source_mode)
     run_id = str(uuid4())
     messages: Queue[tuple[str, dict] | None] = Queue()
     acquired = _acquire_public_run()
@@ -565,7 +565,7 @@ def stream_run(request: PipelineRunRequest) -> StreamingResponse:
 
 @app.post("/api/update-runs", response_model=UpdatePipelineRunResponse)
 def create_update_run(request: UpdateRunRequest) -> UpdatePipelineRunResponse:
-    _guard_public_source(request.source_mode)
+    _guard_corpus_source(request.source_mode)
     run_id = str(uuid4())
     acquired = _acquire_public_run()
     try:
@@ -587,7 +587,7 @@ def create_update_run(request: UpdateRunRequest) -> UpdatePipelineRunResponse:
 
 @app.post("/api/update-runs/stream")
 def stream_update_run(request: UpdateRunRequest) -> StreamingResponse:
-    _guard_public_source(request.source_mode)
+    _guard_corpus_source(request.source_mode)
     run_id = str(uuid4())
     messages: Queue[tuple[str, dict] | None] = Queue()
     acquired = _acquire_public_run()

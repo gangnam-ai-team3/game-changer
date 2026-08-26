@@ -19,6 +19,23 @@ def public_demo(monkeypatch):
     monkeypatch.setattr(api_main, "_PUBLIC_DEMO_BUDGET", None)
 
 
+def _public_event_payload():
+    return request_payload() | {
+        "source_mode": "corpus",
+        "cutoff_on": "2026-08-27",
+        "starts_on": "2026-08-28",
+        "ends_on": "2026-09-04",
+    }
+
+
+def _public_update_payload():
+    return update_payload() | {
+        "source_mode": "corpus",
+        "cutoff_on": "2026-08-27",
+        "planned_on": "2026-08-28",
+    }
+
+
 def test_public_budget_is_reused_by_sequential_event_and_update_runs(
     monkeypatch, public_demo
 ):
@@ -69,18 +86,25 @@ def test_both_public_requests_default_to_no_llm():
     update_body = update_payload()
     event_body.pop("use_llm", None)
     update_body.pop("use_llm", None)
+    event_body.pop("source_mode", None)
+    update_body.pop("source_mode", None)
 
-    assert PipelineRunRequest.model_validate(event_body).use_llm is False
-    assert UpdateRunRequest.model_validate(update_body).use_llm is False
+    event_request = PipelineRunRequest.model_validate(event_body)
+    update_request = UpdateRunRequest.model_validate(update_body)
+
+    assert event_request.use_llm is False
+    assert update_request.use_llm is False
+    assert event_request.source_mode == "corpus"
+    assert update_request.source_mode == "corpus"
 
 
 @pytest.mark.parametrize(
     ("path", "body"),
     [
-        ("/api/runs", request_payload()),
-        ("/api/runs/stream", request_payload()),
-        ("/api/update-runs", update_payload()),
-        ("/api/update-runs/stream", update_payload()),
+        ("/api/runs", _public_event_payload()),
+        ("/api/runs/stream", _public_event_payload()),
+        ("/api/update-runs", _public_update_payload()),
+        ("/api/update-runs/stream", _public_update_payload()),
     ],
 )
 def test_public_demo_rejects_a_second_concurrent_run(path, body, public_demo):
@@ -102,10 +126,10 @@ def _assert_public_lock_available():
 @pytest.mark.parametrize(
     ("path", "body"),
     [
-        ("/api/runs", request_payload()),
-        ("/api/runs/stream", request_payload()),
-        ("/api/update-runs", update_payload()),
-        ("/api/update-runs/stream", update_payload()),
+        ("/api/runs", _public_event_payload()),
+        ("/api/runs/stream", _public_event_payload()),
+        ("/api/update-runs", _public_update_payload()),
+        ("/api/update-runs/stream", _public_update_payload()),
     ],
 )
 def test_run_id_failure_does_not_leak_public_lock(
@@ -126,8 +150,8 @@ def test_run_id_failure_does_not_leak_public_lock(
 @pytest.mark.parametrize(
     ("path", "body"),
     [
-        ("/api/runs/stream", request_payload()),
-        ("/api/update-runs/stream", update_payload()),
+        ("/api/runs/stream", _public_event_payload()),
+        ("/api/update-runs/stream", _public_update_payload()),
     ],
 )
 def test_sse_queue_failure_does_not_leak_public_lock(
@@ -148,8 +172,8 @@ def test_sse_queue_failure_does_not_leak_public_lock(
 @pytest.mark.parametrize(
     ("path", "body"),
     [
-        ("/api/runs/stream", request_payload()),
-        ("/api/update-runs/stream", update_payload()),
+        ("/api/runs/stream", _public_event_payload()),
+        ("/api/update-runs/stream", _public_update_payload()),
     ],
 )
 def test_sse_thread_start_failure_releases_public_lock(
@@ -176,10 +200,14 @@ def test_sse_thread_start_failure_releases_public_lock(
     [
         (
             "/api/runs",
-            request_payload() | {"source_mode": "live", "steam_app_id": 578080},
+            request_payload() | {"source_mode": "fixture"},
         ),
         (
             "/api/runs/stream",
+            request_payload() | {"source_mode": "live", "steam_app_id": 578080},
+        ),
+        (
+            "/api/runs",
             request_payload()
             | {
                 "source_mode": "import",
@@ -188,6 +216,10 @@ def test_sse_thread_start_failure_releases_public_lock(
         ),
         (
             "/api/update-runs",
+            update_payload() | {"source_mode": "fixture"},
+        ),
+        (
+            "/api/update-runs/stream",
             update_payload()
             | {
                 "source_mode": "live",
@@ -197,24 +229,42 @@ def test_sse_thread_start_failure_releases_public_lock(
             },
         ),
         (
-            "/api/update-runs/stream",
+            "/api/update-runs",
             update_payload() | {"source_mode": "import", "imported_csv": "safe"},
         ),
     ],
 )
-def test_public_demo_allows_only_fixture_or_corpus(path, body, public_demo):
+def test_public_demo_allows_only_corpus(path, body, public_demo):
     response = TestClient(app).post(path, json=body)
 
     assert response.status_code == 403
-    assert "검증된 저장 자료" in response.json()["detail"]
+    assert "사전 구축 Steam 코퍼스" in response.json()["detail"]
+
+
+def test_http_source_guard_is_corpus_only_without_public_demo_env(monkeypatch):
+    monkeypatch.delenv("PUBLIC_DEMO_MODE", raising=False)
+    pipeline_started = False
+
+    def unexpected_run(*_args, **_kwargs):
+        nonlocal pipeline_started
+        pipeline_started = True
+        return {}
+
+    monkeypatch.setattr(api_main, "_run", unexpected_run)
+    response = TestClient(app).post(
+        "/api/runs",
+        json=request_payload() | {"source_mode": "live", "steam_app_id": 578080},
+    )
+
+    assert response.status_code == 403
+    assert "사전 구축 Steam 코퍼스" in response.json()["detail"]
+    assert pipeline_started is False
 
 
 def test_public_demo_does_not_write_run_jsonl(monkeypatch, tmp_path, public_demo):
     monkeypatch.setattr(api_main, "ROOT", tmp_path)
 
-    response = TestClient(app).post("/api/runs", json=request_payload())
-
-    assert response.status_code == 200, response.text
+    assert api_main._run_log_path("public-run") is None
     assert not (tmp_path / ".data" / "runs").exists()
 
 
@@ -243,7 +293,7 @@ def test_invalid_public_budget_fails_before_provider_without_leaking_value(
     monkeypatch.setattr(api_main, "EventPreflightOrchestrator", ProviderSpy)
 
     response = TestClient(app).post(
-        "/api/runs", json=request_payload() | {"use_llm": True}
+        "/api/runs", json=_public_event_payload() | {"use_llm": True}
     )
 
     assert response.status_code == 500
@@ -267,9 +317,11 @@ def test_nonpublic_run_keeps_existing_jsonl_behavior(monkeypatch, tmp_path):
     monkeypatch.delenv("PUBLIC_DEMO_MODE", raising=False)
     monkeypatch.setattr(api_main, "ROOT", tmp_path)
 
-    response = TestClient(app).post("/api/runs", json=request_payload())
+    result = api_main._run(
+        PipelineRunRequest.model_validate(request_payload()), "internal-fixture"
+    )
 
-    assert response.status_code == 200, response.text
+    assert result["feedback"]["input_mode"] == "fixture"
     assert len(list((tmp_path / ".data" / "runs").glob("*.jsonl"))) == 1
 
 

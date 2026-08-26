@@ -64,7 +64,7 @@ class EventBriefRequest(BaseModel):
 
 
 class PipelineRunRequest(EventBriefRequest):
-    source_mode: Literal["fixture", "live", "import", "corpus"] = "fixture"
+    source_mode: Literal["fixture", "live", "import", "corpus"] = "corpus"
     fixture_case: Literal["black_market_2025", "weekly_supply_2025"] = "black_market_2025"
     steam_app_id: int | None = Field(default=None, ge=1)
     use_x: bool = False
@@ -171,7 +171,7 @@ class UpdateRunRequest(BaseModel):
         default=None, min_length=1, max_length=_MAX_UPDATE_TEXT
     )
     details: UpdateDetails
-    source_mode: Literal["fixture", "live", "import", "corpus"] = "fixture"
+    source_mode: Literal["fixture", "live", "import", "corpus"] = "corpus"
     fixture_case: Literal["dragunov_random_damage_removal"] = (
         "dragunov_random_damage_removal"
     )

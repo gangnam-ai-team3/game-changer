@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 import tomllib
 
@@ -8,6 +7,8 @@ from fastapi.testclient import TestClient
 
 import backend.app.main as api_main
 from backend.app.main import app
+from backend.app.schemas import UpdateRunRequest
+from tests.test_api import _install_public_corpus
 
 
 def test_api_runtime_dependencies_are_declared_locked_and_importable():
@@ -84,11 +85,17 @@ def payload() -> dict:
     }
 
 
-def test_update_fixture_endpoint_returns_prelaunch_test_decision():
-    response = TestClient(app).post("/api/update-runs", json=payload())
+def _run_internal_update_fixture(body: dict) -> dict:
+    return api_main._run_update(
+        UpdateRunRequest.model_validate(body), "internal-update-fixture"
+    ).model_dump(mode="json")
 
-    assert response.status_code == 200, response.text
-    result = response.json()["result"]
+
+def test_internal_update_fixture_returns_prelaunch_test_decision(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(api_main, "ROOT", tmp_path)
+    result = _run_internal_update_fixture(payload())
     assert result["brief"]["decision"] == "Test"
     assert result["feedback"]["input_mode"] == "fixture"
     assert {item["period"] for item in result["brief"]["evidence"]} == {
@@ -142,8 +149,17 @@ def test_dragunov_fixture_is_available_only_for_weapon_balance():
     assert "Dragunov fixture requires weapon_balance" in response.text
 
 
-def test_update_stream_emits_agent_nodes_and_result():
-    response = TestClient(app).post("/api/update-runs/stream", json=payload())
+def test_update_corpus_stream_emits_agent_nodes_and_result(monkeypatch, tmp_path):
+    _install_public_corpus(monkeypatch, tmp_path)
+    response = TestClient(app).post(
+        "/api/update-runs/stream",
+        json=payload()
+        | {
+            "source_mode": "corpus",
+            "cutoff_on": "2026-08-27",
+            "planned_on": "2026-08-28",
+        },
+    )
 
     assert response.status_code == 200
     frames = [frame for frame in response.text.split("\n\n") if frame]
@@ -156,10 +172,10 @@ def test_update_stream_emits_agent_nodes_and_result():
     assert event_names[0] == "started"
     assert event_names[-2:] == ["result", "done"]
     assert event_names.count("agent_event") >= 4
-    assert '"decision": "Test"' in response.text
+    assert '"decision": "Revise"' in response.text
 
 
-def test_update_import_failure_is_partial_hold_and_never_persists_raw_text(
+def test_update_import_is_rejected_and_never_persists_raw_text(
     monkeypatch, tmp_path
 ):
     secret = "raw-import-secret-should-never-persist"
@@ -177,16 +193,9 @@ def test_update_import_failure_is_partial_hold_and_never_persists_raw_text(
         | {"source_mode": "import", "imported_csv": csv_with_banned_column},
     )
 
-    assert response.status_code == 200, response.text
-    result = response.json()["result"]
-    assert result["feedback"]["status"] == "partial"
-    assert result["brief"]["decision"] == "Hold"
-    assert result["analysis_incomplete"] is True
-    persisted = "\n".join(
-        path.read_text(encoding="utf-8") for path in (tmp_path / ".data" / "runs").glob("*.jsonl")
-    )
-    assert secret not in json.dumps(result, ensure_ascii=False)
-    assert secret not in persisted
+    assert response.status_code == 403
+    assert secret not in response.text
+    assert not (tmp_path / ".data" / "runs").exists()
 
 
 def test_update_request_rejects_key_fields_without_reflecting_secret():
@@ -200,7 +209,9 @@ def test_update_request_rejects_key_fields_without_reflecting_secret():
     assert secret not in response.text
 
 
-def test_update_stream_never_exposes_import_raw_text(monkeypatch, tmp_path):
+def test_update_stream_rejects_import_without_exposing_raw_text(
+    monkeypatch, tmp_path
+):
     secret = "raw-stream-secret-should-never-persist"
     csv_with_banned_column = (
         "source,source_url,source_id,language,observed_at,period,sentiment,summary,"
@@ -216,14 +227,12 @@ def test_update_stream_never_exposes_import_raw_text(monkeypatch, tmp_path):
         | {"source_mode": "import", "imported_csv": csv_with_banned_column},
     )
 
-    assert response.status_code == 200
-    assert '"decision": "Hold"' in response.text
+    assert response.status_code == 403
     assert secret not in response.text
-    assert "event: done" in response.text
+    assert not (tmp_path / ".data" / "runs").exists()
 
 
-def test_existing_event_endpoint_still_works():
+def test_event_endpoint_rejects_internal_fixture_source():
     response = TestClient(app).post("/api/runs", json=event_payload())
 
-    assert response.status_code == 200
-    assert response.json()["result"]["brief"]["decision"] == "Revise"
+    assert response.status_code == 403

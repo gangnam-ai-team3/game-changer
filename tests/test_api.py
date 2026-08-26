@@ -1,6 +1,14 @@
+import shutil
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
+import backend.app.main as api_main
 from backend.app.main import app
+from backend.app.schemas import PipelineRunRequest
+
+
+PUBLIC_CORPUS = Path("fixtures/corpus/pubg_steam_demo.sqlite3")
 
 
 def request_payload() -> dict:
@@ -29,10 +37,20 @@ def test_health_endpoint():
     assert response.json()["status"] == "ok"
 
 
-def test_fixture_run_returns_pipeline_artifacts():
-    response = TestClient(app).post("/api/runs", json=request_payload())
-    assert response.status_code == 200, response.text
-    result = response.json()["result"]
+def _run_internal_fixture(body: dict) -> dict:
+    return api_main._run(PipelineRunRequest.model_validate(body), "internal-fixture")
+
+
+def _install_public_corpus(monkeypatch, tmp_path):
+    target = tmp_path / ".data" / "corpus" / "pubg_steam.sqlite3"
+    target.parent.mkdir(parents=True)
+    shutil.copyfile(PUBLIC_CORPUS, target)
+    monkeypatch.setattr(api_main, "ROOT", tmp_path)
+
+
+def test_internal_fixture_run_returns_pipeline_artifacts(monkeypatch, tmp_path):
+    monkeypatch.setattr(api_main, "ROOT", tmp_path)
+    result = _run_internal_fixture(request_payload())
     assert result["brief"]["decision"] == "Revise"
     assert "시간이 부족한 복귀 이용자" in result["brief"]["executive_summary"]
     assert "가성비를 중시하는 이용자" in result["brief"]["executive_summary"]
@@ -54,10 +72,10 @@ def test_fixture_run_returns_pipeline_artifacts():
     )
 
 
-def test_weekly_supply_fixture_is_a_clear_go_case():
-    response = TestClient(app).post(
-        "/api/runs",
-        json=request_payload()
+def test_internal_weekly_supply_fixture_is_a_clear_go_case(monkeypatch, tmp_path):
+    monkeypatch.setattr(api_main, "ROOT", tmp_path)
+    result = _run_internal_fixture(
+        request_payload()
         | {
             "event_name": "Weekly Supply",
             "goal": "주간 미션과 BP 보상을 명확히 이해하도록 한다.",
@@ -73,8 +91,6 @@ def test_weekly_supply_fixture_is_a_clear_go_case():
             "fixture_case": "weekly_supply_2025",
         },
     )
-    assert response.status_code == 200, response.text
-    result = response.json()["result"]
     assert result["brief"]["decision"] == "Go"
     assert result["brief"]["top_risks"] == []
     assert "긍정 반응과 우려 반응을 따로 분류하지 않으므로" in result["brief"]["executive_summary"]
@@ -87,11 +103,10 @@ def test_weekly_supply_fixture_is_a_clear_go_case():
     assert result["feedback"]["evidence"][0]["source_url"].startswith("https://pubg.com/")
 
 
-def test_claude_request_without_key_uses_fixture_fallback(monkeypatch):
+def test_claude_request_without_key_uses_fixture_fallback(monkeypatch, tmp_path):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    response = TestClient(app).post("/api/runs", json=request_payload() | {"use_llm": True})
-    assert response.status_code == 200, response.text
-    result = response.json()["result"]
+    monkeypatch.setattr(api_main, "ROOT", tmp_path)
+    result = _run_internal_fixture(request_payload() | {"use_llm": True})
     assert result["llm_requested"] is True
     assert result["llm_provider"] == "claude"
     assert result["fallback_used"] is True
@@ -105,8 +120,18 @@ def test_live_source_requires_connector():
     assert "live source requires" in response.json()["detail"][0]["msg"]
 
 
-def test_stream_run_emits_agent_events_and_final_result():
-    response = TestClient(app).post("/api/runs/stream", json=request_payload())
+def test_corpus_stream_emits_agent_events_and_final_result(monkeypatch, tmp_path):
+    _install_public_corpus(monkeypatch, tmp_path)
+    response = TestClient(app).post(
+        "/api/runs/stream",
+        json=request_payload()
+        | {
+            "source_mode": "corpus",
+            "cutoff_on": "2026-08-27",
+            "starts_on": "2026-08-28",
+            "ends_on": "2026-09-04",
+        },
+    )
     assert response.status_code == 200
     assert "event: agent_event" in response.text
     assert '"decision": "Revise"' in response.text

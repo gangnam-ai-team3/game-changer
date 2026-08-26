@@ -29,27 +29,6 @@ const initialForm = {
 };
 
 type FormState = typeof initialForm;
-type SourceMode = "fixture" | "corpus" | "live" | "import";
-
-const fixturePresets: Record<string, FormState> = {
-  black_market_2025: initialForm,
-  weekly_supply_2025: {
-    game: "PUBG: BATTLEGROUNDS",
-    event_name: "Weekly Supply",
-    goal: "주간 미션을 완료한 이용자가 획득 가능한 BP와 참여 조건을 명확히 이해하도록 한다.",
-    target_users: "모든 이용자, 무과금 및 소과금 이용자, 주간 플레이 이용자",
-    starts_on: "2025-06-11",
-    ends_on: "2025-07-09",
-    cutoff_on: "2025-06-11",
-    participation_rule: "주간 미션을 완료하고 포인트를 BP로 교환",
-    repeat_rule: "매주 수요일 UTC 02:00 초기화, 미션과 보상은 주 1회 수령",
-    rewards: "최대 23,000 BP",
-    currencies: "BP, 주간 미션 포인트",
-    probability_guarantee: "확률 없음. 미션 완료 포인트를 정해진 BP 보상으로 교환",
-    monetization_policy: "유료 구매 없음. 게임 플레이로 참여",
-    expiration_policy: "주간 초기화 전에 해당 주의 미션과 보상을 직접 수령",
-  },
-};
 
 type Risk = {
   risk_id: string;
@@ -204,10 +183,7 @@ function ArtifactDetails({ result }: { result: RunResult }) {
 }
 
 const inputModeLabels: Record<string, string> = {
-  fixture: "검증된 저장 자료",
   corpus: "사전 구축 코퍼스",
-  live: "실시간 공개 자료",
-  import: "승인 CSV",
 };
 
 function uniqueEvidenceCount(ids: string[]) {
@@ -445,15 +421,15 @@ function EventReview({
   runBlocked?: boolean;
   onRunningChange?: (running: boolean) => void;
 }) {
-  const [form, setForm] = useState<FormState>(initialForm);
-  const [sourceMode, setSourceMode] = useState<SourceMode>("fixture");
-  const [fixtureCase, setFixtureCase] = useState("black_market_2025");
-  const [steamAppId, setSteamAppId] = useState("578080");
-  const [useSteam, setUseSteam] = useState(true);
-  const [useX, setUseX] = useState(false);
-  const [xQuery, setXQuery] = useState("PUBG Black Market");
-  const [csvData, setCsvData] = useState("");
-  const [csvName, setCsvName] = useState("");
+  const [form, setForm] = useState<FormState>(() => {
+    const dates = corpusDemoDates();
+    return {
+      ...initialForm,
+      cutoff_on: dates.cutoffOn,
+      starts_on: dates.startsOn,
+      ends_on: dates.endsOn,
+    };
+  });
   const [useClaude, setUseClaude] = useState(false);
   const [result, setResult] = useState<RunResult | null>(null);
   const [submittedSubject, setSubmittedSubject] = useState(initialForm.event_name);
@@ -466,11 +442,6 @@ function EventReview({
     setForm((previous) => ({ ...previous, [name]: event.target.value }) as FormState);
   };
 
-  const selectSourceMode = (next: SourceMode) => {
-    setSourceMode(next);
-    setError("");
-  };
-
   const applyCorpusDemoDates = () => {
     const dates = corpusDemoDates();
     setForm((previous) => ({
@@ -479,25 +450,6 @@ function EventReview({
       starts_on: dates.startsOn,
       ends_on: dates.endsOn,
     }));
-    setError("");
-  };
-
-  const handleCsv = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    if (file.size > 2_000_000) {
-      setCsvData("");
-      setCsvName("");
-      setError("승인 CSV는 2 MB 이하만 사용할 수 있습니다.");
-      return;
-    }
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    let binary = "";
-    bytes.forEach((byte) => {
-      binary += String.fromCharCode(byte);
-    });
-    setCsvData(btoa(binary));
-    setCsvName("승인 CSV 선택됨");
     setError("");
   };
 
@@ -519,24 +471,8 @@ function EventReview({
       setError("이벤트 종료일은 시작일 이후로 설정해 주세요.");
       return;
     }
-    if (sourceMode === "corpus" && !isFutureUtcDate(form.cutoff_on)) {
+    if (!isFutureUtcDate(form.cutoff_on)) {
       setError("사전 구축 코퍼스를 사용하려면 자료 기준일을 오늘(UTC)보다 뒤로 설정해 주세요.");
-      return;
-    }
-    if (sourceMode === "import" && !csvData) {
-      setError("승인 CSV 파일을 선택해 주세요.");
-      return;
-    }
-    if (sourceMode === "live" && !useSteam && !useX) {
-      setError("Steam 또는 X 중 하나 이상을 선택해 주세요.");
-      return;
-    }
-    if (sourceMode === "live" && useSteam && (!steamAppId || Number(steamAppId) < 1)) {
-      setError("올바른 Steam 앱 ID를 입력해 주세요.");
-      return;
-    }
-    if (sourceMode === "live" && useX && !xQuery.trim()) {
-      setError("X 검색어를 입력해 주세요.");
       return;
     }
     const requestSubject = form.event_name.trim() || "이름 없는 이벤트";
@@ -551,12 +487,7 @@ function EventReview({
         target_users: form.target_users.split(",").map((item) => item.trim()).filter(Boolean),
         rewards: form.rewards.split(",").map((item) => item.trim()).filter(Boolean),
         currencies: form.currencies.split(",").map((item) => item.trim()).filter(Boolean),
-        source_mode: sourceMode,
-        fixture_case: fixtureCase,
-        steam_app_id: sourceMode === "live" && useSteam ? Number(steamAppId) : null,
-        use_x: sourceMode === "live" ? useX : false,
-        x_query: xQuery.trim() || "PUBG Black Market",
-        imported_csv: sourceMode === "import" ? csvData : null,
+        source_mode: "corpus",
         use_llm: useClaude,
         llm_provider: "claude",
       };
@@ -656,145 +587,35 @@ function EventReview({
           <header>
             <span>04</span>
             <div>
-              <h2>자료 출처와 실행</h2>
-              <p>저장 자료로 안정적으로 시연하고, 필요할 때 실시간 자료를 선택합니다.</p>
+              <h2>자료와 실행</h2>
+              <p>모든 점검은 사전 구축 Steam 코퍼스만 사용합니다.</p>
             </div>
           </header>
           <div className="source-mode-grid" role="group" aria-label="이벤트 자료 출처">
-            <button
-              type="button"
-              className="source-mode"
-              aria-pressed={sourceMode === "fixture"}
-              onClick={() => selectSourceMode("fixture")}
-            >
-              <strong>검증된 저장 데이터</strong>
-              <span>공식 공개 규칙을 바탕으로 만든 합성 사례로 안정적으로 시연합니다.</span>
-            </button>
-            <button
-              type="button"
-              className="source-mode"
-              aria-pressed={sourceMode === "corpus"}
-              onClick={() => { selectSourceMode("corpus"); applyCorpusDemoDates(); }}
-            >
+            <div className="source-mode source-mode-fixed">
               <strong>사전 구축 Steam 코퍼스</strong>
               <span>한국어와 영어 리뷰에서 파생한 비식별 요약을 미리 분류해 관련 근거를 찾습니다. 리뷰 원문은 포함하지 않습니다.</span>
-            </button>
-            <button
-              type="button"
-              className="source-mode"
-              aria-pressed={sourceMode === "live"}
-              onClick={() => selectSourceMode("live")}
-            >
-              <strong>Steam과 X 실시간 갱신</strong>
-              <span>Steam만, X만, 또는 두 자료를 함께 수집합니다.</span>
-            </button>
-            <button
-              type="button"
-              className="source-mode"
-              aria-pressed={sourceMode === "import"}
-              onClick={() => selectSourceMode("import")}
-            >
-              <strong>승인 CSV 가져오기</strong>
-              <span>개인정보와 원문 열이 없는 승인된 CSV만 사용합니다.</span>
+            </div>
+          </div>
+          <div className="source-note corpus-note">
+            <p>자료 기준일은 내일(UTC), 검토 대상 시작일은 그다음 날로 설정합니다. 코퍼스에는 한국어와 영어 비식별 요약과 분류값만 저장되며, 리뷰 원문은 포함하지 않습니다.</p>
+            <button type="button" className="corpus-date-action" onClick={applyCorpusDemoDates}>
+              코퍼스 데모 날짜 적용
             </button>
           </div>
-          {sourceMode === "fixture" && (
-            <label className="field">
-              <span>시연 사례</span>
-              <select
-                value={fixtureCase}
-                onChange={(event) => {
-                  const next = event.target.value;
-                  setFixtureCase(next);
-                  setForm(fixturePresets[next]);
-                  setResult(null);
-                  setError("");
-                }}
-              >
-                <option value="black_market_2025">대규모 확률형 이벤트: Black Market 2025</option>
-                <option value="weekly_supply_2025">단순 주간 미션: Weekly Supply</option>
-              </select>
-              <small className="field-help">공식 공개 규칙을 바탕으로 만든 비식별 합성 의견입니다.</small>
-            </label>
-          )}
-          {sourceMode === "corpus" && (
-            <div className="source-note corpus-note">
-              <p>자료 기준일은 내일(UTC), 검토 대상 시작일은 그다음 날로 설정합니다. 코퍼스에는 한국어와 영어 비식별 요약과 분류값만 저장되며, 리뷰 원문은 포함하지 않습니다.</p>
-              <button type="button" className="corpus-date-action" onClick={applyCorpusDemoDates}>
-                코퍼스 데모 날짜 적용
-              </button>
-            </div>
-          )}
-          {sourceMode === "live" && (
-            <div className="source-fields">
-              <div className="grid two" role="group" aria-label="실시간 자료 선택">
-                <label className="toggle source-toggle">
-                  <input
-                    type="checkbox"
-                    checked={useSteam}
-                    onChange={(event) => setUseSteam(event.target.checked)}
-                  />
-                  <span>Steam 공개 리뷰 수집</span>
-                  <small>선택하면 입력한 앱 ID의 공개 리뷰를 확인합니다.</small>
-                </label>
-                <label className="toggle source-toggle">
-                  <input
-                    type="checkbox"
-                    checked={useX}
-                    onChange={(event) => setUseX(event.target.checked)}
-                  />
-                  <span>X 공개 게시물 수집</span>
-                  <small>선택하면 서버에 설정된 X API 연결을 사용합니다.</small>
-                </label>
-              </div>
-              <div className="grid two source-fields">
-                {useSteam && (
-                  <label className="field">
-                    <span>Steam 앱 ID</span>
-                    <input
-                      inputMode="numeric"
-                      value={steamAppId}
-                      onChange={(event) => setSteamAppId(event.target.value)}
-                    />
-                  </label>
-                )}
-                {useX && (
-                  <label className="field">
-                    <span>X 검색어</span>
-                    <input value={xQuery} onChange={(event) => setXQuery(event.target.value)} />
-                  </label>
-                )}
-              </div>
-              <p className="source-note">
-                Steam만, X만, 또는 두 자료를 함께 선택할 수 있습니다. 비밀 키는 서버 환경 변수에서만 읽습니다.
-              </p>
-            </div>
-          )}
-          {sourceMode === "import" && (
-            <label className="field">
-              <span>승인 CSV 파일</span>
-              <input type="file" accept=".csv,text/csv" onChange={handleCsv} />
-              <small className="field-help">{csvName || "개인정보와 원문 열이 없는 승인 CSV만 사용합니다."}</small>
-            </label>
-          )}
           <label className="toggle">
             <input
               type="checkbox"
               checked={useClaude}
               onChange={(event) => setUseClaude(nextClaudeUsage(event.target.checked))}
             />
-            <span>{sourceMode === "corpus" ? "팀 에이전트로 추가 검증" : "Claude로 설명 보강"}</span>
-            <small>{sourceMode === "corpus"
-              ? useClaude
-                ? "정아현(Jelly) 위험 점검과 승진배 근거 검증 에이전트를 Claude로 실행합니다."
-                : "저장된 코퍼스와 코드 정책만 사용하며 두 에이전트의 Claude 호출은 생략합니다."
-              : useClaude
-                ? "근거 연결과 최종 판정은 코드 정책으로 다시 검증합니다."
-                : "코드 정책만으로 점검합니다."}</small>
+            <span>Claude API로 팀 에이전트 추가 검증</span>
+            <small>{useClaude
+              ? "Claude API를 호출합니다. 토큰 비용이 발생할 수 있습니다."
+              : "Claude API를 호출하지 않습니다. 사전 구축 Steam 코퍼스와 코드 정책만 사용합니다."}</small>
           </label>
           <p className="prelaunch-notice">
             출시 전 예상이며 실제 이용자 반응이나 출시 후 성과를 의미하지 않습니다.
-            {sourceMode === "fixture" && " 저장 자료는 공식 공개 규칙을 바탕으로 만든 합성 시연 사례입니다."}
             {" "}API 키와 자료 원문은 화면에 표시하거나 저장하지 않습니다.
           </p>
           <button className="primary" disabled={loading || runBlocked}>
