@@ -44,6 +44,22 @@ def test_codespaces_public_demo_configuration() -> None:
         cwd=ROOT,
         check=True,
     )
+    subprocess.run(
+        [
+            "node",
+            "--input-type=module",
+            "--eval",
+            (
+                "process.env.GAME_CHANGER_BACKEND_URL='http://127.0.0.1:8100';"
+                "const {default: config} = await import('./frontend/next.config.mjs');"
+                "const rules = await config.rewrites();"
+                "if (rules[0].destination !== 'http://127.0.0.1:8100/api/:path*') "
+                "process.exit(1);"
+            ),
+        ],
+        cwd=ROOT,
+        check=True,
+    )
 
     env = os.environ.copy()
     env.pop("ANTHROPIC_API_KEY", None)
