@@ -1,5 +1,6 @@
 import shutil
 from pathlib import Path
+from queue import Queue
 
 from fastapi.testclient import TestClient
 
@@ -136,3 +137,13 @@ def test_corpus_stream_emits_agent_events_and_final_result(monkeypatch, tmp_path
     assert "event: agent_event" in response.text
     assert '"decision": "Revise"' in response.text
     assert "event: done" in response.text
+
+
+def test_sse_stream_keeps_quiet_model_calls_alive(monkeypatch):
+    monkeypatch.setattr(api_main, "_SSE_HEARTBEAT_SECONDS", 0.001)
+    messages = Queue()
+    events = api_main._sse_events(messages)
+
+    assert next(events) == ": keepalive\n\n"
+    messages.put(None)
+    assert next(events) == "event: done\ndata: {}\n\n"

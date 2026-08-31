@@ -9,7 +9,7 @@ import sqlite3
 from collections import Counter
 from datetime import UTC, datetime, time
 from pathlib import Path
-from queue import Queue
+from queue import Empty, Queue
 from threading import Lock, Thread
 from typing import Callable
 from uuid import uuid4
@@ -70,6 +70,7 @@ ROOT = Path(__file__).resolve().parents[2]
 _PUBLIC_DEMO_BUDGET: ClaudeBudget | None = None
 # ponytail: process-local demo lock; use a shared lock before adding workers.
 _PUBLIC_DEMO_RUN_LOCK = Lock()
+_SSE_HEARTBEAT_SECONDS = 15
 _TREND_QUERIES = {
     "event": "이벤트 보상 진행 구매",
     "update": "무기 밸런스 성능 화면",
@@ -210,6 +211,20 @@ def _acquire_public_run() -> bool:
 def _release_public_run(acquired: bool) -> None:
     if acquired:
         _PUBLIC_DEMO_RUN_LOCK.release()
+
+
+def _sse_events(messages: Queue[tuple[str, dict] | None]):
+    while True:
+        try:
+            message = messages.get(timeout=_SSE_HEARTBEAT_SECONDS)
+        except Empty:
+            yield ": keepalive\n\n"
+            continue
+        if message is None:
+            yield "event: done\ndata: {}\n\n"
+            return
+        name, payload = message
+        yield f"event: {name}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 def _run_log_path(run_id: str) -> Path | None:
@@ -547,17 +562,8 @@ def stream_run(request: PipelineRunRequest) -> StreamingResponse:
         _release_public_run(acquired)
         raise
 
-    def events():
-        while True:
-            message = messages.get()
-            if message is None:
-                yield "event: done\ndata: {}\n\n"
-                return
-            name, payload = message
-            yield f"event: {name}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
-
     return StreamingResponse(
-        events(),
+        _sse_events(messages),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -649,17 +655,8 @@ def stream_update_run(request: UpdateRunRequest) -> StreamingResponse:
         _release_public_run(acquired)
         raise
 
-    def events():
-        while True:
-            message = messages.get()
-            if message is None:
-                yield "event: done\ndata: {}\n\n"
-                return
-            name, payload = message
-            yield f"event: {name}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
-
     return StreamingResponse(
-        events(),
+        _sse_events(messages),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
