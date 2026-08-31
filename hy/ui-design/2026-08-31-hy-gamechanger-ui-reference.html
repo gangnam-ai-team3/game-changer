@@ -1,0 +1,1021 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>게임체인저 — 출시 전 업데이트 점검</title>
+<link rel="stylesheet" as="style" crossorigin
+  href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<style>
+  :root{
+    --bg:#F7F8FA;
+    --card:#FFFFFF;
+    --ink:#191F28;
+    --sub:#6B7684;
+    --faint:#8B95A1;
+    --line:#E5E8EB;
+    --blue:#3182F6;
+    --blue-soft:#EBF2FE;
+    --risk:#FF5B4C;
+    --risk-soft:#FFEEEC;
+    --good:#00C2B3;
+    --good-soft:#E6FBF9;
+    --amber:#FF9F1C;
+    --amber-soft:#FFF4E3;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:'Pretendard',-apple-system,BlinkMacSystemFont,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    line-height:1.5;
+  }
+  .wrap{max-width:920px;margin:0 auto;padding:0 24px;}
+
+  /* Toss-style soft elevation on all card surfaces */
+  .form-card, .metric, .persona, .lang, .vtable, .verdict,
+  .predict-card, .evidence, .chart-card, .map-card{
+    box-shadow:0 1px 2px rgba(15,23,42,.04), 0 8px 20px rgba(15,23,42,.05);
+  }
+
+  /* ---------- HERO ---------- */
+  .hero{padding:80px 0 56px;}
+  .brand{
+    font-size:64px;font-weight:800;letter-spacing:-0.02em;
+    margin:0 0 12px;color:var(--ink);text-transform:uppercase;
+  }
+  .brand span{color:var(--blue);}
+  .hero h1{
+    font-size:16px;font-weight:600;letter-spacing:-0.01em;color:var(--sub);
+    margin:0;max-width:520px;line-height:1.6;
+    text-wrap:balance;
+  }
+
+  /* ---------- STEP SECTIONS ---------- */
+  .step{padding:44px 0;border-top:1px solid var(--line);}
+  .step-head{display:flex;align-items:baseline;gap:10px;margin-bottom:24px;}
+  .step-num{font-size:15px;font-weight:800;color:var(--blue);}
+  .step-title{font-size:20px;font-weight:800;letter-spacing:-0.02em;}
+  .step-desc{font-size:13.5px;color:var(--faint);margin:-14px 0 20px;}
+
+  /* ---------- FORM ---------- */
+  .form-card{
+    background:var(--card);border:1px solid var(--line);
+    border-radius:18px;padding:28px;margin-bottom:16px;
+  }
+  .form-card h4{
+    font-size:14.5px;font-weight:700;margin:0 0 18px;
+    display:flex;align-items:center;gap:9px;
+  }
+  .form-card h4 .ico{
+    width:26px;height:26px;border-radius:8px;
+    background:var(--blue-soft);color:var(--blue);
+    display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;
+  }
+  .form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+  .field label{
+    display:block;font-size:12.5px;color:var(--faint);font-weight:600;margin-bottom:7px;
+  }
+  .field input{
+    width:100%;height:44px;border-radius:10px;
+    border:1.5px solid var(--line);background:#FAFBFC;
+    padding:0 14px;font-size:14px;color:var(--ink);
+    font-family:'Pretendard',sans-serif;
+    transition:border-color .15s, background .15s;
+  }
+  .field input::placeholder{color:#C1C8D1;}
+  .field input:focus{outline:none;border-color:var(--blue);background:#fff;}
+
+  .chip-group{display:flex;flex-wrap:wrap;gap:8px;}
+  .chip{
+    height:38px;padding:0 16px;border-radius:19px;
+    border:1.5px solid var(--line);background:#fff;
+    font-size:13.5px;font-weight:600;color:var(--sub);
+    cursor:pointer;font-family:'Pretendard',sans-serif;transition:all .15s;
+  }
+  .chip:hover{border-color:#C7D2E0;}
+  .chip.active{background:var(--blue);border-color:var(--blue);color:#fff;}
+  .chip-note{font-size:12px;color:var(--faint);font-weight:400;margin-left:4px;}
+
+  /* CTA */
+  .cta-wrap{text-align:center;padding:8px 0 4px;}
+  .cta-btn{
+    appearance:none;border:none;cursor:pointer;background:var(--ink);color:#fff;
+    font-family:'Pretendard',sans-serif;font-size:16px;font-weight:700;
+    padding:17px 44px;border-radius:14px;transition:background .15s, transform .1s;
+    box-shadow:0 4px 14px rgba(25,31,40,.22);
+  }
+  .cta-btn:hover{background:#2E3644;}
+  .cta-btn:active{transform:scale(0.98);}
+  .cta-btn:disabled{background:#B8C4D6;cursor:default;box-shadow:none;}
+  .cta-hint{font-size:12.5px;color:var(--faint);margin-top:12px;}
+
+  .engine{
+    display:none;align-items:center;justify-content:center;gap:16px;
+    background:var(--ink);border-radius:20px;padding:22px 28px;
+    max-width:460px;margin:28px auto 0;
+  }
+  .engine.show{display:flex;}
+  .engine .dots{display:flex;gap:5px;}
+  .engine .dots span{width:6px;height:6px;border-radius:50%;background:#4C5561;animation:pulse 1.4s infinite ease-in-out;}
+  .engine .dots span:nth-child(2){animation-delay:.2s;}
+  .engine .dots span:nth-child(3){animation-delay:.4s;}
+  @keyframes pulse{0%,80%,100%{opacity:.35;}40%{opacity:1;background:#fff;}}
+  .engine-text{color:#fff;}
+  .engine-text .t1{font-size:15px;font-weight:700;}
+  .engine-text .t2{font-size:12.5px;color:#9AA4B2;margin-top:2px;}
+
+  /* ---------- RESULTS ---------- */
+  #results{display:none;}
+  #results.show{display:block;}
+
+  .verdict{
+    background:#fff;border:1px solid var(--line);border-left:4px solid var(--risk);
+    border-radius:20px;padding:28px 28px 24px;margin-bottom:16px;
+  }
+  .verdict .badge{
+    display:inline-block;font-size:13px;font-weight:700;color:var(--risk);
+    background:var(--risk-soft);padding:5px 12px;border-radius:14px;margin-bottom:14px;
+  }
+  .verdict h3{font-size:21px;font-weight:800;margin:0 0 8px;letter-spacing:-0.02em;}
+  .verdict p{font-size:14px;color:var(--sub);margin:0;max-width:520px;}
+
+  .metric-row{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:16px;}
+  .metric{
+    background:var(--card);border:1px solid var(--line);border-radius:18px;padding:22px 18px;
+    display:flex;flex-direction:column;align-items:center;text-align:center;
+  }
+  .ring-wrap{position:relative;width:80px;height:80px;margin-bottom:12px;}
+  .ring-wrap svg{width:100%;height:100%;}
+  .ring-value{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:800;letter-spacing:-0.02em;}
+  .metric .m-label{font-size:12.5px;color:var(--sub);font-weight:600;margin-bottom:4px;}
+  .metric .m-sub{font-size:11.5px;color:var(--faint);}
+
+  .predict-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .predict-card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px;}
+  .predict-head{display:flex;align-items:center;gap:9px;font-size:14.5px;font-weight:700;margin-bottom:9px;}
+  .predict-head .dot{width:8px;height:8px;border-radius:3px;flex-shrink:0;background:var(--blue-soft);}
+  .predict-card.risk .dot{background:var(--risk);}
+  .predict-card.good .dot{background:var(--good);}
+  .predict-card p{font-size:13px;color:var(--sub);line-height:1.6;margin:0 0 12px;}
+  .predict-src{font-size:11.5px;color:var(--faint);font-weight:600;}
+
+  .sub-head{font-size:16px;font-weight:800;margin:0 0 4px;display:flex;align-items:center;gap:9px;}
+  .sub-head .ico{
+    width:26px;height:26px;border-radius:8px;
+    background:var(--blue-soft);color:var(--blue);
+    display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;
+  }
+  .sub-sub{font-size:12.5px;color:var(--faint);margin:0 0 16px;}
+  .section-divider{border-top:1px solid var(--line);margin:32px 0;}
+
+  /* persona cards (expandable) */
+  .persona-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:28px;}
+  .persona{
+    background:var(--card);border:1px solid var(--line);border-radius:18px;
+    padding:18px;cursor:pointer;transition:border-color .15s;
+  }
+  .persona:hover{border-color:#C7D2E0;}
+  .persona-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;}
+  .persona-txt .persona-name{font-size:16.5px;font-weight:800;letter-spacing:-0.01em;margin-bottom:6px;}
+  .persona-txt .persona-cap{font-size:11.5px;color:var(--faint);margin-bottom:6px;}
+  .persona-txt .persona-pct{font-size:27px;font-weight:800;letter-spacing:-0.02em;}
+  .persona-txt .persona-pct.low{color:var(--risk);}
+  .persona-txt .persona-pct.mid{color:var(--amber);}
+  .persona-avatar{width:52px;height:52px;border-radius:14px;flex-shrink:0;overflow:hidden;}
+  .bar-track{height:6px;background:var(--line);border-radius:4px;overflow:hidden;margin-bottom:6px;}
+  .bar-fill{height:100%;border-radius:4px;}
+  .bar-fill.low{background:var(--risk);}
+  .bar-fill.mid{background:var(--amber);}
+  .bar-fill.ghost{background:#C7CDD6;}
+  .cmp-row{display:flex;align-items:center;gap:8px;margin-bottom:5px;}
+  .cmp-row .cmp-label{font-size:11px;color:var(--faint);width:78px;flex-shrink:0;}
+  .cmp-row .bar-track{flex:1;margin-bottom:0;}
+  .cmp-row .cmp-pct{font-size:11px;color:var(--sub);font-weight:600;width:30px;text-align:right;flex-shrink:0;}
+  .quote-row{display:flex;align-items:flex-start;gap:8px;margin-top:12px;}
+  .quote-row .chev{
+    flex-shrink:0;width:20px;height:20px;border-radius:6px;background:var(--blue-soft);color:var(--blue);
+    display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;
+    transition:transform .2s;margin-top:1px;
+  }
+  .persona.open .quote-row .chev{transform:rotate(180deg);}
+  .persona-quote{font-size:12.5px;color:var(--sub);line-height:1.55;margin:0;}
+  .persona-detail{
+    max-height:0;overflow:hidden;transition:max-height .25s ease;
+  }
+  .persona.open .persona-detail{max-height:260px;margin-top:12px;}
+  .detail-inner{border-top:1px solid var(--line);padding-top:12px;}
+  .detail-item{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-size:12.5px;}
+  .detail-item .dname{color:var(--sub);}
+  .detail-item .dpct{font-weight:700;}
+  .detail-quote{font-size:12px;color:var(--faint);font-style:normal;margin-top:8px;line-height:1.5;}
+
+  /* language section: map + list */
+  .lang-layout{display:grid;grid-template-columns:1fr 1.15fr;gap:20px;margin-bottom:28px;align-items:start;}
+  .map-card{
+    background:var(--card);border:1px solid var(--line);border-radius:18px;
+    padding:20px;position:sticky;top:20px;
+  }
+  .map-card svg{width:100%;height:auto;display:block;}
+  .map-marker{transition:opacity .15s;}
+  .map-marker:hover{opacity:0.75;}
+  .lang{
+    background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:13px 16px;margin-bottom:8px;cursor:pointer;
+  }
+  .lang-row{display:flex;align-items:center;gap:12px;}
+  .lang .flag{
+    width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;
+    font-size:11px;font-weight:800;color:var(--blue);background:var(--blue-soft);flex-shrink:0;
+  }
+  .lang-name{font-size:13.5px;font-weight:700;width:76px;flex-shrink:0;}
+  .split-bar{flex:1;height:6px;border-radius:4px;background:#E9EBEF;overflow:hidden;display:flex;}
+  .split-bar .seg{height:100%;}
+  .split-bar .seg.neg{background:var(--risk);}
+  .split-bar .seg.pos{background:var(--blue);}
+  .split-bar .seg.neu{background:#C7CDD6;}
+  .lang-pct{font-size:11.5px;color:var(--faint);font-weight:600;white-space:nowrap;flex-shrink:0;}
+  .lang-pct b{font-weight:700;}
+  .lang-pct b.neg{color:var(--risk);}
+  .lang-pct b.pos{color:var(--blue);}
+  .lang-chev{
+    flex-shrink:0;width:20px;height:20px;border-radius:6px;background:var(--blue-soft);color:var(--blue);
+    display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;
+    transition:transform .2s;
+  }
+  .lang.open .lang-chev{transform:rotate(180deg);}
+  .map-caption{font-size:11.5px;color:var(--faint);margin-top:10px;text-align:center;}
+  .lang-detail{max-height:0;overflow:hidden;transition:max-height .25s ease;}
+  .lang.open .lang-detail{max-height:140px;margin-top:12px;padding-left:42px;}
+  .lang-extra{display:none;}
+  .lang-extra.show{display:block;}
+  .lang-more{
+    display:block;width:100%;text-align:center;background:#fff;
+    border:1px solid var(--line);border-radius:12px;padding:11px;
+    font-size:13px;font-weight:700;color:var(--sub);cursor:pointer;
+    font-family:'Pretendard',sans-serif;
+  }
+  .lang-more:hover{border-color:#C7D2E0;}
+
+  /* line chart */
+  .chart-card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px 18px 14px;margin-bottom:20px;}
+  .chart-legend{display:flex;gap:16px;margin-bottom:4px;}
+  .chart-legend span{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--sub);font-weight:600;}
+  .chart-legend i{width:8px;height:8px;border-radius:50%;display:inline-block;}
+  .chart-desc{font-size:12px;color:var(--faint);margin:0 0 12px;}
+  .chart-body{display:flex;gap:8px;}
+  .y-axis{display:flex;flex-direction:column;justify-content:space-between;font-size:10px;color:var(--faint);padding:2px 0;width:24px;text-align:right;}
+  .line-chart{width:100%;height:auto;display:block;flex:1;}
+  .chart-axis{display:flex;justify-content:space-between;margin-top:6px;padding-left:32px;}
+  .chart-axis span{font-size:10.5px;color:var(--faint);}
+
+  /* evidence */
+  .evidence{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:15px 18px;margin-bottom:10px;}
+  .evidence-meta{display:flex;gap:10px;font-size:12px;color:var(--faint);margin-bottom:6px;}
+  .evidence-meta .src{font-weight:700;color:var(--sub);}
+  .evidence p{font-size:13.5px;margin:0;color:var(--ink);}
+  .ev-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px;}
+  .ev-count{font-size:12.5px;color:var(--faint);}
+  .ev-count b{color:var(--sub);font-weight:700;}
+  .ev-filters{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;}
+  .ev-chip{height:30px;padding:0 13px;border-radius:15px;border:1.5px solid var(--line);background:#fff;font-size:12px;font-weight:600;color:var(--sub);cursor:pointer;font-family:'Pretendard',sans-serif;}
+  .ev-chip.active{background:var(--ink);border-color:var(--ink);color:#fff;}
+  .ev-scroll{max-height:250px;overflow-y:auto;position:relative;margin-bottom:4px;padding-right:2px;}
+  .ev-scroll::-webkit-scrollbar{width:5px;}
+  .ev-scroll::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px;}
+  .ev-fade{height:32px;margin-top:-32px;position:relative;pointer-events:none;background:linear-gradient(180deg, rgba(255,255,255,0), #fff);}
+  .ev-more{display:block;width:100%;text-align:center;background:#fff;border:1px solid var(--line);border-radius:12px;padding:11px;font-size:13px;font-weight:700;color:var(--sub);cursor:pointer;font-family:'Pretendard',sans-serif;margin-top:8px;margin-bottom:28px;}
+
+  .vtable{background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden;margin-bottom:8px;}
+  .vtable table{width:100%;border-collapse:collapse;}
+  .vtable th{text-align:left;font-size:12.5px;color:var(--faint);font-weight:600;padding:14px 18px;border-bottom:1px solid var(--line);background:#FAFBFC;}
+  .vtable td{font-size:13.5px;padding:14px 18px;border-bottom:1px solid var(--line);}
+  .vtable tr:last-child td{border-bottom:none;}
+  .vtable td.strong{font-weight:700;}
+
+  /* pdf export */
+  .pdf-btn-wrap{text-align:right;padding:24px 0 4px;}
+  .pdf-btn{
+    appearance:none;cursor:pointer;background:var(--ink);color:#fff;
+    border:none;font-family:'Pretendard',sans-serif;
+    font-size:13px;font-weight:700;padding:10px 18px;border-radius:10px;
+    display:inline-flex;align-items:center;gap:6px;
+    box-shadow:0 4px 14px rgba(25,31,40,.18);
+  }
+  .pdf-btn:hover{background:#2E3644;}
+  .pdf-overlay{
+    display:none;position:fixed;inset:0;background:rgba(25,31,40,0.45);
+    align-items:center;justify-content:center;z-index:50;padding:20px;
+  }
+  .pdf-overlay.show{display:flex;}
+  .pdf-modal{background:#fff;border-radius:20px;padding:28px;width:100%;max-width:360px;}
+  .pdf-modal h3{font-size:17px;font-weight:800;margin:0 0 4px;}
+  .pdf-modal .pdf-sub{font-size:12.5px;color:var(--faint);margin:0 0 18px;}
+  .pdf-check{display:flex;align-items:center;gap:10px;padding:10px 0;font-size:14px;border-bottom:1px solid #F1F2F4;}
+  .pdf-check input{width:17px;height:17px;accent-color:var(--blue);}
+  .pdf-actions{display:flex;gap:8px;margin-top:20px;}
+  .pdf-actions button{
+    flex:1;height:46px;border-radius:12px;font-family:'Pretendard',sans-serif;
+    font-size:14px;font-weight:700;cursor:pointer;border:none;
+  }
+  .pdf-cancel{background:#F2F4F6;color:var(--sub);}
+  .pdf-confirm{background:var(--blue);color:#fff;}
+  .pdf-confirm:disabled{background:#B8C4D6;cursor:default;}
+
+  @media(max-width:760px){
+    .brand{font-size:42px;}
+    .hero h1{font-size:14px;}
+    .form-row{grid-template-columns:1fr;}
+    .metric-row{grid-template-columns:1fr;}
+    .predict-grid{grid-template-columns:1fr;}
+    .persona-grid{grid-template-columns:1fr;}
+    .lang-layout{grid-template-columns:1fr;}
+    .map-card{position:static;}
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap" id="pdfRoot">
+
+  <section class="hero">
+    <div class="brand">game-<span>changer</span></div>
+    <h1>게임체인저 : 업데이트의 예상 반응과 검증 조건을 출시 전 점검하여 유저의 예상 반응을 확인합니다.</h1>
+  </section>
+
+  <!-- STEP 1: INPUT FORM -->
+  <section class="step">
+    <div class="step-head">
+      <span class="step-num">1.</span>
+      <span class="step-title">업데이트 정보 입력</span>
+    </div>
+    <p class="step-desc">점검할 업데이트 내용을 입력하세요.</p>
+
+    <div class="form-card">
+      <h4><span class="ico">◎</span>업데이트 기본 정보</h4>
+      <div class="chip-group" style="margin-bottom:16px;">
+        <button type="button" class="chip active" onclick="selectOne(this)">무기 밸런스</button>
+        <button type="button" class="chip" onclick="selectOne(this)">UI·UX</button>
+        <button type="button" class="chip" onclick="selectOne(this)">시스템</button>
+      </div>
+      <div class="form-row">
+        <div class="field"><label>게임명</label><input type="text" placeholder="예: PUBG"></div>
+        <div class="field"><label>업데이트 이름</label><input type="text" placeholder="예: Dragunov 확률 피해 조정"></div>
+      </div>
+      <div class="form-row" style="margin-top:16px;">
+        <div class="field"><label>현 상태</label><input type="text" placeholder="예: 확률 피해 90%"></div>
+        <div class="field"><label>변경 내용</label><input type="text" placeholder="예: 확률 피해 70%로 하향"></div>
+      </div>
+      <div class="form-row" style="margin-top:16px;">
+        <div class="field"><label>목표</label><input type="text" placeholder="예: 무기 간 밸런스 조정"></div>
+        <div class="field"><label>타겟</label><input type="text" placeholder="예: 저격총 사용 유저 전체"></div>
+      </div>
+    </div>
+
+    <div class="form-card">
+      <h4><span class="ico">✎</span>반영 세부 조건</h4>
+      <div class="form-row">
+        <div class="field"><label>예상 효과</label><input type="text" placeholder="예: 무기 선택 다양성 증가"></div>
+        <div class="field"><label>우려</label><input type="text" placeholder="예: 저격 유저 이탈 가능성"></div>
+      </div>
+      <div class="form-row" style="margin-top:16px;">
+        <div class="field" style="grid-column:1 / -1;"><label>기타 상세 내용</label><input type="text" placeholder="예: 공지 시 로드맵 함께 안내 예정"></div>
+      </div>
+    </div>
+
+    <div class="form-card">
+      <h4><span class="ico">⇄</span>자료 출처<span class="chip-note">· 중복 선택 가능</span></h4>
+      <div class="chip-group">
+        <button type="button" class="chip active" onclick="this.classList.toggle('active')">Steam 커뮤니티</button>
+        <button type="button" class="chip active" onclick="this.classList.toggle('active')">X (구 트위터)</button>
+        <button type="button" class="chip" onclick="this.classList.toggle('active')">공식 카페</button>
+        <button type="button" class="chip" onclick="this.classList.toggle('active')">공식 CSV 연동</button>
+        <button type="button" class="chip" onclick="this.classList.toggle('active')">디스코드</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- STEP 2: RUN -->
+  <section class="step">
+    <div class="cta-wrap">
+      <button type="button" class="cta-btn" id="runBtn" onclick="runCheck()">업데이트 점검 시작</button>
+      <p class="cta-hint" id="ctaHint">입력한 내용을 기존 VOC와 대조해 예상 반응을 계산합니다.</p>
+    </div>
+    <div class="engine" id="engine">
+      <div class="dots"><span></span><span></span><span></span></div>
+      <div class="engine-text">
+        <div class="t1">기존 VOC와 유사 사례 매칭 중</div>
+        <div class="t2">언어권 · 성별 · 연령대별 반응 패턴 대조</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- STEP 3: RESULTS -->
+  <section class="step" id="results">
+    <div class="step-head">
+      <span class="step-num">2.</span>
+      <span class="step-title">점검 결과</span>
+    </div>
+
+    <div id="sec-summary">
+      <div class="verdict">
+        <span class="badge">반영 보류 권장</span>
+        <h3>Dragunov 확률 피해 제거</h3>
+        <p>설득 설명이 확보되지 않았고 공감 반응이 낮아, 출시 시 초반 불만 유입이 예상됩니다.</p>
+      </div>
+      <div class="metric-row">
+        <div class="metric">
+          <div class="ring-wrap">
+            <svg viewBox="0 0 80 80">
+              <circle cx="40" cy="40" r="34" stroke="#E5E8EB" stroke-width="8" fill="none"/>
+              <circle cx="40" cy="40" r="34" stroke="var(--risk)" stroke-width="8" fill="none" stroke-linecap="round" stroke-dasharray="213.6" stroke-dashoffset="68.4" transform="rotate(-90 40 40)"/>
+            </svg>
+            <div class="ring-value">68</div>
+          </div>
+          <div class="m-label">우려 지표</div>
+          <div class="m-sub">유사 변경 평균 대비 +22</div>
+        </div>
+        <div class="metric">
+          <div class="ring-wrap">
+            <svg viewBox="0 0 80 80">
+              <circle cx="40" cy="40" r="34" stroke="#E5E8EB" stroke-width="8" fill="none"/>
+              <circle cx="40" cy="40" r="34" stroke="var(--amber)" stroke-width="8" fill="none" stroke-linecap="round" stroke-dasharray="213.6" stroke-dashoffset="98.3" transform="rotate(-90 40 40)"/>
+            </svg>
+            <div class="ring-value">54</div>
+          </div>
+          <div class="m-label">최종 우려 지표</div>
+          <div class="m-sub">설명 보강 시 -14 예상</div>
+        </div>
+        <div class="metric">
+          <div class="ring-wrap">
+            <svg viewBox="0 0 80 80">
+              <circle cx="40" cy="40" r="34" stroke="#E5E8EB" stroke-width="8" fill="none"/>
+              <circle cx="40" cy="40" r="34" stroke="var(--blue)" stroke-width="8" fill="none" stroke-linecap="round" stroke-dasharray="213.6" stroke-dashoffset="147.4" transform="rotate(-90 40 40)"/>
+            </svg>
+            <div class="ring-value">31%</div>
+          </div>
+          <div class="m-label">공감 반응 지수</div>
+          <div class="m-sub">긍정 언급 비중</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="sec-predict">
+      <div class="sub-head"><span class="ico">◆</span>출시 전 반응 반영 예상</div>
+      <div class="sub-sub">유사 사례 근거를 바탕으로 예상되는 반응입니다.</div>
+      <div class="predict-grid" style="margin-bottom:28px;">
+        <div class="predict-card risk">
+          <div class="predict-head"><span class="dot"></span>설득 설명 없는 하향</div>
+          <p>수치만 공지될 경우 "일방적 너프"라는 반응이 반복적으로 나타날 가능성이 높습니다.</p>
+          <span class="predict-src">Steam 포럼</span>
+        </div>
+        <div class="predict-card good">
+          <div class="predict-head"><span class="dot"></span>근거 공개 시 반발 완화</div>
+          <p>밸런스 근거 수치를 함께 공개했을 때 반발이 눈에 띄게 완화된 사례가 있습니다.</p>
+          <span class="predict-src">공식 커뮤니티</span>
+        </div>
+        <div class="predict-card good">
+          <div class="predict-head"><span class="dot"></span>고정 팀 유저의 우호적 반응</div>
+          <p>협동 플레이 중심 유저는 상대적으로 우호적인 반응을 보일 가능성이 있습니다.</p>
+          <span class="predict-src">X (구 트위터)</span>
+        </div>
+        <div class="predict-card risk">
+          <div class="predict-head"><span class="dot"></span>초반 2주 집중 유입 우려</div>
+          <p>과거 유사 조정 시 출시 후 2주간 부정 언급이 집중되는 패턴이 확인됩니다.</p>
+          <span class="predict-src">커뮤니티 로그</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-divider"></div>
+
+    <div id="sec-persona">
+      <div class="sub-head"><span class="ico">◎</span>유저 유형별 반응</div>
+      <div class="persona-grid">
+
+        <div class="persona" onclick="this.classList.toggle('open')">
+          <div class="persona-head">
+            <div class="persona-txt">
+              <div class="persona-name">캐주얼 유저</div>
+              <div class="persona-cap">공감한 비율</div>
+              <div class="persona-pct low">22%</div>
+            </div>
+            <div class="persona-avatar" style="background:linear-gradient(145deg,#FFF0EC,#FFD4CC);">
+              <svg viewBox="0 0 56 56" width="52" height="52">
+                <defs>
+                  <linearGradient id="skin1" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0" stop-color="#FFE7C7"/><stop offset="1" stop-color="#FFD9B3"/>
+                  </linearGradient>
+                  <linearGradient id="hair1" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stop-color="#8A6247"/><stop offset="1" stop-color="#5A3D28"/>
+                  </linearGradient>
+                </defs>
+                <g style="filter:drop-shadow(0 3px 4px rgba(0,0,0,.16));">
+                  <path d="M-4 56C-4 44 12 39 28 39C44 39 60 44 60 56Z" fill="#E4574A"/>
+                  <path d="M-4 42C4 40 14 39 20 39" stroke="#FF8A79" stroke-width="2" fill="none" opacity=".6"/>
+                  <circle cx="28" cy="24" r="15" fill="url(#hair1)"/>
+                  <circle cx="28" cy="27" r="11.5" fill="url(#skin1)"/>
+                  <path d="M17 22Q28 9 39 22Q39 15 28 13Q17 15 17 22Z" fill="url(#hair1)"/>
+                  <ellipse cx="23" cy="22" rx="4" ry="2.4" fill="#fff" opacity=".28"/>
+                  <circle cx="23.5" cy="28" r="1.5" fill="#3A2E28"/>
+                  <circle cx="32.5" cy="28" r="1.5" fill="#3A2E28"/>
+                  <path d="M24 33Q28 36 32 33" stroke="#3A2E28" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+                </g>
+              </svg>
+            </div>
+          </div>
+          <div class="cmp-row"><span class="cmp-label">유사 사례 평균</span><div class="bar-track"><div class="bar-fill ghost" style="width:38%"></div></div><span class="cmp-pct">38%</span></div>
+          <div class="cmp-row"><span class="cmp-label">이번 예측</span><div class="bar-track"><div class="bar-fill low" style="width:22%"></div></div><span class="cmp-pct">22%</span></div>
+          <div class="quote-row"><span class="chev">⌄</span><p class="persona-quote">"안 그래도 어려운데 확률까지 낮아지면 안 하죠."</p></div>
+          <div class="persona-detail"><div class="detail-inner">
+            <div class="detail-item"><span class="dname">난이도 상승 우려</span><span class="dpct">46%</span></div>
+            <div class="detail-item"><span class="dname">학습 곡선 부담</span><span class="dpct">33%</span></div>
+            <div class="detail-item"><span class="dname">기타</span><span class="dpct">21%</span></div>
+            <p class="detail-quote">"신규 유저 입장에선 진입 장벽이 하나 더 생기는 느낌입니다."</p>
+          </div></div>
+        </div>
+
+        <div class="persona" onclick="this.classList.toggle('open')">
+          <div class="persona-head">
+            <div class="persona-txt">
+              <div class="persona-name">전략 완성 유저</div>
+              <div class="persona-cap">공감한 비율</div>
+              <div class="persona-pct low">18%</div>
+            </div>
+            <div class="persona-avatar" style="background:linear-gradient(145deg,#F3EEFC,#D9C9F5);">
+              <svg viewBox="0 0 56 56" width="52" height="52">
+                <defs>
+                  <linearGradient id="skin2" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0" stop-color="#FFE0BE"/><stop offset="1" stop-color="#F5C9A6"/>
+                  </linearGradient>
+                  <linearGradient id="hair2" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stop-color="#6B5690"/><stop offset="1" stop-color="#3A2E52"/>
+                  </linearGradient>
+                </defs>
+                <g style="filter:drop-shadow(0 3px 4px rgba(0,0,0,.16));">
+                  <path d="M-4 56C-4 44 12 39 28 39C44 39 60 44 60 56Z" fill="#B9A6E0"/>
+                  <ellipse cx="28" cy="25" rx="17" ry="18" fill="url(#hair2)"/>
+                  <circle cx="28" cy="27" r="11.5" fill="url(#skin2)"/>
+                  <path d="M16 24Q28 8 40 24Q39 15 28 12Q17 15 16 24Z" fill="url(#hair2)"/>
+                  <ellipse cx="23" cy="22" rx="4" ry="2.4" fill="#fff" opacity=".22"/>
+                  <circle cx="23.5" cy="28" r="1.5" fill="#3A2E28"/>
+                  <circle cx="32.5" cy="28" r="1.5" fill="#3A2E28"/>
+                  <path d="M24 33Q28 36 32 33" stroke="#3A2E28" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+                </g>
+              </svg>
+            </div>
+          </div>
+          <div class="cmp-row"><span class="cmp-label">유사 사례 평균</span><div class="bar-track"><div class="bar-fill ghost" style="width:30%"></div></div><span class="cmp-pct">30%</span></div>
+          <div class="cmp-row"><span class="cmp-label">이번 예측</span><div class="bar-track"><div class="bar-fill low" style="width:18%"></div></div><span class="cmp-pct">18%</span></div>
+          <div class="quote-row"><span class="chev">⌄</span><p class="persona-quote">"기존 조합 전체를 다시 짜야 할 판입니다."</p></div>
+          <div class="persona-detail"><div class="detail-inner">
+            <div class="detail-item"><span class="dname">기존 조합 붕괴</span><span class="dpct">52%</span></div>
+            <div class="detail-item"><span class="dname">대체 무기 부재</span><span class="dpct">28%</span></div>
+            <div class="detail-item"><span class="dname">기타</span><span class="dpct">20%</span></div>
+            <p class="detail-quote">"대체할 무기군에 대한 안내라도 있었으면 좋았을 것 같아요."</p>
+          </div></div>
+        </div>
+
+        <div class="persona" onclick="this.classList.toggle('open')">
+          <div class="persona-head">
+            <div class="persona-txt">
+              <div class="persona-name">고정 팀 유저</div>
+              <div class="persona-cap">공감한 비율</div>
+              <div class="persona-pct mid">41%</div>
+            </div>
+            <div class="persona-avatar" style="background:linear-gradient(145deg,#EDF2FC,#C9D6F0);">
+              <svg viewBox="0 0 56 56" width="52" height="52">
+                <defs>
+                  <linearGradient id="skin3" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0" stop-color="#FFF0D6"/><stop offset="1" stop-color="#FCE3C0"/>
+                  </linearGradient>
+                  <linearGradient id="hair3" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stop-color="#F5DFA0"/><stop offset="1" stop-color="#CBA34E"/>
+                  </linearGradient>
+                </defs>
+                <g style="filter:drop-shadow(0 3px 4px rgba(0,0,0,.16));">
+                  <path d="M-4 56C-4 44 12 39 28 39C44 39 60 44 60 56Z" fill="#3D4B66"/>
+                  <path d="M-4 42C4 40 14 39 20 39" stroke="#5A6E92" stroke-width="2" fill="none" opacity=".6"/>
+                  <circle cx="28" cy="24" r="15" fill="url(#hair3)"/>
+                  <circle cx="28" cy="27" r="11.5" fill="url(#skin3)"/>
+                  <path d="M16 21Q28 8 40 21Q40 14 28 12Q16 14 16 21Z" fill="url(#hair3)"/>
+                  <ellipse cx="23" cy="21" rx="4" ry="2.2" fill="#fff" opacity=".3"/>
+                  <circle cx="23.5" cy="28" r="4.2" fill="none" stroke="#3A2E28" stroke-width="1.1"/>
+                  <circle cx="32.5" cy="28" r="4.2" fill="none" stroke="#3A2E28" stroke-width="1.1"/>
+                  <line x1="27.7" y1="28" x2="28.3" y2="28" stroke="#3A2E28" stroke-width="1.1"/>
+                  <circle cx="23.5" cy="28" r="1.2" fill="#3A2E28"/>
+                  <circle cx="32.5" cy="28" r="1.2" fill="#3A2E28"/>
+                  <path d="M24 33Q28 36 32 33" stroke="#3A2E28" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+                </g>
+              </svg>
+            </div>
+          </div>
+          <div class="cmp-row"><span class="cmp-label">유사 사례 평균</span><div class="bar-track"><div class="bar-fill ghost" style="width:35%"></div></div><span class="cmp-pct">35%</span></div>
+          <div class="cmp-row"><span class="cmp-label">이번 예측</span><div class="bar-track"><div class="bar-fill mid" style="width:41%"></div></div><span class="cmp-pct">41%</span></div>
+          <div class="quote-row"><span class="chev">⌄</span><p class="persona-quote">"밸런스 취지는 이해하지만 근거 설명이 아쉬워요."</p></div>
+          <div class="persona-detail"><div class="detail-inner">
+            <div class="detail-item"><span class="dname">협동 전략 다변화 긍정</span><span class="dpct">44%</span></div>
+            <div class="detail-item"><span class="dname">근거 설명 부족 아쉬움</span><span class="dpct">37%</span></div>
+            <div class="detail-item"><span class="dname">기타</span><span class="dpct">19%</span></div>
+            <p class="detail-quote">"취지는 좋은데 왜 이렇게 바꿨는지 숫자로 설명해줬으면 해요."</p>
+          </div></div>
+        </div>
+
+        <div class="persona" onclick="this.classList.toggle('open')">
+          <div class="persona-head">
+            <div class="persona-txt">
+              <div class="persona-name">가성비 중시 유저</div>
+              <div class="persona-cap">공감한 비율</div>
+              <div class="persona-pct mid">29%</div>
+            </div>
+            <div class="persona-avatar" style="background:linear-gradient(145deg,#EAFAF0,#BEEBD2);">
+              <svg viewBox="0 0 56 56" width="52" height="52">
+                <defs>
+                  <linearGradient id="skin4" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0" stop-color="#FFE6C4"/><stop offset="1" stop-color="#F6D3A6"/>
+                  </linearGradient>
+                  <linearGradient id="cap4" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stop-color="#4CB47F"/><stop offset="1" stop-color="#2F7A55"/>
+                  </linearGradient>
+                </defs>
+                <g style="filter:drop-shadow(0 3px 4px rgba(0,0,0,.16));">
+                  <path d="M-4 56C-4 44 12 39 28 39C44 39 60 44 60 56Z" fill="url(#cap4)"/>
+                  <path d="M11 24Q11 8 28 8Q45 8 45 24L41 22Q28 27 15 22Z" fill="url(#cap4)"/>
+                  <ellipse cx="20" cy="14" rx="6" ry="2" fill="#fff" opacity=".22"/>
+                  <circle cx="28" cy="27" r="11.5" fill="url(#skin4)"/>
+                  <circle cx="23.5" cy="28" r="1.5" fill="#3A2E28"/>
+                  <circle cx="32.5" cy="28" r="1.5" fill="#3A2E28"/>
+                  <path d="M24 33Q28 36 32 33" stroke="#3A2E28" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+                </g>
+              </svg>
+            </div>
+          </div>
+          <div class="cmp-row"><span class="cmp-label">유사 사례 평균</span><div class="bar-track"><div class="bar-fill ghost" style="width:33%"></div></div><span class="cmp-pct">33%</span></div>
+          <div class="cmp-row"><span class="cmp-label">이번 예측</span><div class="bar-track"><div class="bar-fill mid" style="width:29%"></div></div><span class="cmp-pct">29%</span></div>
+          <div class="quote-row"><span class="chev">⌄</span><p class="persona-quote">"이 정도 조정이면 아이템 값어치가 애매해져요."</p></div>
+          <div class="persona-detail"><div class="detail-inner">
+            <div class="detail-item"><span class="dname">아이템 가치 하락 우려</span><span class="dpct">48%</span></div>
+            <div class="detail-item"><span class="dname">과금 대비 효율 저하</span><span class="dpct">31%</span></div>
+            <div class="detail-item"><span class="dname">기타</span><span class="dpct">21%</span></div>
+            <p class="detail-quote">"이미 투자한 시간이 아까워지는 조정이에요."</p>
+          </div></div>
+        </div>
+
+      </div>
+    </div>
+
+    <div id="sec-lang">
+      <div class="sub-head"><span class="ico">⌗</span>언어·지역별 반응</div>
+      <div class="lang-layout">
+        <div class="map-card">
+          <svg viewBox="0 0 300 150">
+            <rect x="0" y="0" width="300" height="150" rx="14" fill="#F7F8FA"/>
+            <g fill="#D7DCE3"><circle cx="57.7" cy="0.0" r="1.15"/><circle cx="78.7" cy="0.0" r="1.15"/><circle cx="82.2" cy="0.0" r="1.15"/><circle cx="89.2" cy="0.0" r="1.15"/><circle cx="92.7" cy="0.0" r="1.15"/><circle cx="96.2" cy="0.0" r="1.15"/><circle cx="99.7" cy="0.0" r="1.15"/><circle cx="103.2" cy="0.0" r="1.15"/><circle cx="106.7" cy="0.0" r="1.15"/><circle cx="110.2" cy="0.0" r="1.15"/><circle cx="113.7" cy="0.0" r="1.15"/><circle cx="117.2" cy="0.0" r="1.15"/><circle cx="120.7" cy="0.0" r="1.15"/><circle cx="124.2" cy="0.0" r="1.15"/><circle cx="127.7" cy="0.0" r="1.15"/><circle cx="131.2" cy="0.0" r="1.15"/><circle cx="162.7" cy="0.0" r="1.15"/><circle cx="169.7" cy="0.0" r="1.15"/><circle cx="47.2" cy="5.2" r="1.15"/><circle cx="50.7" cy="5.2" r="1.15"/><circle cx="61.2" cy="5.2" r="1.15"/><circle cx="68.2" cy="5.2" r="1.15"/><circle cx="71.7" cy="5.2" r="1.15"/><circle cx="106.7" cy="5.2" r="1.15"/><circle cx="110.2" cy="5.2" r="1.15"/><circle cx="113.7" cy="5.2" r="1.15"/><circle cx="117.2" cy="5.2" r="1.15"/><circle cx="120.7" cy="5.2" r="1.15"/><circle cx="124.2" cy="5.2" r="1.15"/><circle cx="127.7" cy="5.2" r="1.15"/><circle cx="131.2" cy="5.2" r="1.15"/><circle cx="218.7" cy="5.2" r="1.15"/><circle cx="222.2" cy="5.2" r="1.15"/><circle cx="225.7" cy="5.2" r="1.15"/><circle cx="229.2" cy="5.2" r="1.15"/><circle cx="232.7" cy="5.2" r="1.15"/><circle cx="236.2" cy="5.2" r="1.15"/><circle cx="239.7" cy="5.2" r="1.15"/><circle cx="243.2" cy="5.2" r="1.15"/><circle cx="246.7" cy="5.2" r="1.15"/><circle cx="253.7" cy="5.2" r="1.15"/><circle cx="267.7" cy="5.2" r="1.15"/><circle cx="12.2" cy="10.3" r="1.15"/><circle cx="15.7" cy="10.3" r="1.15"/><circle cx="19.2" cy="10.3" r="1.15"/><circle cx="22.7" cy="10.3" r="1.15"/><circle cx="26.2" cy="10.3" r="1.15"/><circle cx="29.7" cy="10.3" r="1.15"/><circle cx="33.2" cy="10.3" r="1.15"/><circle cx="36.7" cy="10.3" r="1.15"/><circle cx="40.2" cy="10.3" r="1.15"/><circle cx="43.7" cy="10.3" r="1.15"/><circle cx="47.2" cy="10.3" r="1.15"/><circle cx="50.7" cy="10.3" r="1.15"/><circle cx="54.2" cy="10.3" r="1.15"/><circle cx="57.7" cy="10.3" r="1.15"/><circle cx="64.7" cy="10.3" r="1.15"/><circle cx="71.7" cy="10.3" r="1.15"/><circle cx="75.2" cy="10.3" r="1.15"/><circle cx="82.2" cy="10.3" r="1.15"/><circle cx="89.2" cy="10.3" r="1.15"/><circle cx="92.7" cy="10.3" r="1.15"/><circle cx="110.2" cy="10.3" r="1.15"/><circle cx="113.7" cy="10.3" r="1.15"/><circle cx="117.2" cy="10.3" r="1.15"/><circle cx="120.7" cy="10.3" r="1.15"/><circle cx="124.2" cy="10.3" r="1.15"/><circle cx="127.7" cy="10.3" r="1.15"/><circle cx="166.2" cy="10.3" r="1.15"/><circle cx="169.7" cy="10.3" r="1.15"/><circle cx="173.2" cy="10.3" r="1.15"/><circle cx="176.7" cy="10.3" r="1.15"/><circle cx="180.2" cy="10.3" r="1.15"/><circle cx="201.2" cy="10.3" r="1.15"/><circle cx="204.7" cy="10.3" r="1.15"/><circle cx="208.2" cy="10.3" r="1.15"/><circle cx="215.2" cy="10.3" r="1.15"/><circle cx="218.7" cy="10.3" r="1.15"/><circle cx="222.2" cy="10.3" r="1.15"/><circle cx="225.7" cy="10.3" r="1.15"/><circle cx="229.2" cy="10.3" r="1.15"/><circle cx="232.7" cy="10.3" r="1.15"/><circle cx="236.2" cy="10.3" r="1.15"/><circle cx="239.7" cy="10.3" r="1.15"/><circle cx="243.2" cy="10.3" r="1.15"/><circle cx="246.7" cy="10.3" r="1.15"/><circle cx="250.2" cy="10.3" r="1.15"/><circle cx="253.7" cy="10.3" r="1.15"/><circle cx="257.2" cy="10.3" r="1.15"/><circle cx="260.7" cy="10.3" r="1.15"/><circle cx="264.2" cy="10.3" r="1.15"/><circle cx="267.7" cy="10.3" r="1.15"/><circle cx="271.2" cy="10.3" r="1.15"/><circle cx="274.7" cy="10.3" r="1.15"/><circle cx="278.2" cy="10.3" r="1.15"/><circle cx="281.7" cy="10.3" r="1.15"/><circle cx="285.2" cy="10.3" r="1.15"/><circle cx="288.7" cy="10.3" r="1.15"/><circle cx="292.2" cy="10.3" r="1.15"/><circle cx="295.7" cy="10.3" r="1.15"/><circle cx="299.2" cy="10.3" r="1.15"/><circle cx="19.2" cy="15.5" r="1.15"/><circle cx="22.7" cy="15.5" r="1.15"/><circle cx="26.2" cy="15.5" r="1.15"/><circle cx="29.7" cy="15.5" r="1.15"/><circle cx="33.2" cy="15.5" r="1.15"/><circle cx="36.7" cy="15.5" r="1.15"/><circle cx="40.2" cy="15.5" r="1.15"/><circle cx="43.7" cy="15.5" r="1.15"/><circle cx="47.2" cy="15.5" r="1.15"/><circle cx="50.7" cy="15.5" r="1.15"/><circle cx="54.2" cy="15.5" r="1.15"/><circle cx="57.7" cy="15.5" r="1.15"/><circle cx="61.2" cy="15.5" r="1.15"/><circle cx="64.7" cy="15.5" r="1.15"/><circle cx="68.2" cy="15.5" r="1.15"/><circle cx="71.7" cy="15.5" r="1.15"/><circle cx="75.2" cy="15.5" r="1.15"/><circle cx="78.7" cy="15.5" r="1.15"/><circle cx="89.2" cy="15.5" r="1.15"/><circle cx="92.7" cy="15.5" r="1.15"/><circle cx="106.7" cy="15.5" r="1.15"/><circle cx="110.2" cy="15.5" r="1.15"/><circle cx="113.7" cy="15.5" r="1.15"/><circle cx="134.7" cy="15.5" r="1.15"/><circle cx="159.2" cy="15.5" r="1.15"/><circle cx="162.7" cy="15.5" r="1.15"/><circle cx="166.2" cy="15.5" r="1.15"/><circle cx="169.7" cy="15.5" r="1.15"/><circle cx="173.2" cy="15.5" r="1.15"/><circle cx="176.7" cy="15.5" r="1.15"/><circle cx="183.7" cy="15.5" r="1.15"/><circle cx="187.2" cy="15.5" r="1.15"/><circle cx="190.7" cy="15.5" r="1.15"/><circle cx="194.2" cy="15.5" r="1.15"/><circle cx="197.7" cy="15.5" r="1.15"/><circle cx="201.2" cy="15.5" r="1.15"/><circle cx="204.7" cy="15.5" r="1.15"/><circle cx="208.2" cy="15.5" r="1.15"/><circle cx="211.7" cy="15.5" r="1.15"/><circle cx="215.2" cy="15.5" r="1.15"/><circle cx="218.7" cy="15.5" r="1.15"/><circle cx="222.2" cy="15.5" r="1.15"/><circle cx="225.7" cy="15.5" r="1.15"/><circle cx="229.2" cy="15.5" r="1.15"/><circle cx="232.7" cy="15.5" r="1.15"/><circle cx="236.2" cy="15.5" r="1.15"/><circle cx="239.7" cy="15.5" r="1.15"/><circle cx="243.2" cy="15.5" r="1.15"/><circle cx="246.7" cy="15.5" r="1.15"/><circle cx="250.2" cy="15.5" r="1.15"/><circle cx="253.7" cy="15.5" r="1.15"/><circle cx="257.2" cy="15.5" r="1.15"/><circle cx="260.7" cy="15.5" r="1.15"/><circle cx="264.2" cy="15.5" r="1.15"/><circle cx="267.7" cy="15.5" r="1.15"/><circle cx="271.2" cy="15.5" r="1.15"/><circle cx="274.7" cy="15.5" r="1.15"/><circle cx="278.2" cy="15.5" r="1.15"/><circle cx="281.7" cy="15.5" r="1.15"/><circle cx="285.2" cy="15.5" r="1.15"/><circle cx="288.7" cy="15.5" r="1.15"/><circle cx="292.2" cy="15.5" r="1.15"/><circle cx="295.7" cy="15.5" r="1.15"/><circle cx="15.7" cy="20.7" r="1.15"/><circle cx="19.2" cy="20.7" r="1.15"/><circle cx="36.7" cy="20.7" r="1.15"/><circle cx="40.2" cy="20.7" r="1.15"/><circle cx="43.7" cy="20.7" r="1.15"/><circle cx="47.2" cy="20.7" r="1.15"/><circle cx="50.7" cy="20.7" r="1.15"/><circle cx="54.2" cy="20.7" r="1.15"/><circle cx="57.7" cy="20.7" r="1.15"/><circle cx="61.2" cy="20.7" r="1.15"/><circle cx="64.7" cy="20.7" r="1.15"/><circle cx="68.2" cy="20.7" r="1.15"/><circle cx="85.7" cy="20.7" r="1.15"/><circle cx="89.2" cy="20.7" r="1.15"/><circle cx="96.2" cy="20.7" r="1.15"/><circle cx="155.7" cy="20.7" r="1.15"/><circle cx="159.2" cy="20.7" r="1.15"/><circle cx="162.7" cy="20.7" r="1.15"/><circle cx="176.7" cy="20.7" r="1.15"/><circle cx="180.2" cy="20.7" r="1.15"/><circle cx="183.7" cy="20.7" r="1.15"/><circle cx="187.2" cy="20.7" r="1.15"/><circle cx="190.7" cy="20.7" r="1.15"/><circle cx="194.2" cy="20.7" r="1.15"/><circle cx="197.7" cy="20.7" r="1.15"/><circle cx="201.2" cy="20.7" r="1.15"/><circle cx="204.7" cy="20.7" r="1.15"/><circle cx="208.2" cy="20.7" r="1.15"/><circle cx="211.7" cy="20.7" r="1.15"/><circle cx="215.2" cy="20.7" r="1.15"/><circle cx="218.7" cy="20.7" r="1.15"/><circle cx="222.2" cy="20.7" r="1.15"/><circle cx="225.7" cy="20.7" r="1.15"/><circle cx="229.2" cy="20.7" r="1.15"/><circle cx="232.7" cy="20.7" r="1.15"/><circle cx="236.2" cy="20.7" r="1.15"/><circle cx="239.7" cy="20.7" r="1.15"/><circle cx="243.2" cy="20.7" r="1.15"/><circle cx="246.7" cy="20.7" r="1.15"/><circle cx="250.2" cy="20.7" r="1.15"/><circle cx="253.7" cy="20.7" r="1.15"/><circle cx="257.2" cy="20.7" r="1.15"/><circle cx="260.7" cy="20.7" r="1.15"/><circle cx="264.2" cy="20.7" r="1.15"/><circle cx="267.7" cy="20.7" r="1.15"/><circle cx="271.2" cy="20.7" r="1.15"/><circle cx="274.7" cy="20.7" r="1.15"/><circle cx="278.2" cy="20.7" r="1.15"/><circle cx="285.2" cy="20.7" r="1.15"/><circle cx="43.7" cy="25.9" r="1.15"/><circle cx="47.2" cy="25.9" r="1.15"/><circle cx="50.7" cy="25.9" r="1.15"/><circle cx="54.2" cy="25.9" r="1.15"/><circle cx="57.7" cy="25.9" r="1.15"/><circle cx="61.2" cy="25.9" r="1.15"/><circle cx="64.7" cy="25.9" r="1.15"/><circle cx="68.2" cy="25.9" r="1.15"/><circle cx="71.7" cy="25.9" r="1.15"/><circle cx="75.2" cy="25.9" r="1.15"/><circle cx="78.7" cy="25.9" r="1.15"/><circle cx="85.7" cy="25.9" r="1.15"/><circle cx="89.2" cy="25.9" r="1.15"/><circle cx="92.7" cy="25.9" r="1.15"/><circle cx="96.2" cy="25.9" r="1.15"/><circle cx="99.7" cy="25.9" r="1.15"/><circle cx="148.7" cy="25.9" r="1.15"/><circle cx="169.7" cy="25.9" r="1.15"/><circle cx="173.2" cy="25.9" r="1.15"/><circle cx="176.7" cy="25.9" r="1.15"/><circle cx="180.2" cy="25.9" r="1.15"/><circle cx="183.7" cy="25.9" r="1.15"/><circle cx="187.2" cy="25.9" r="1.15"/><circle cx="190.7" cy="25.9" r="1.15"/><circle cx="194.2" cy="25.9" r="1.15"/><circle cx="197.7" cy="25.9" r="1.15"/><circle cx="201.2" cy="25.9" r="1.15"/><circle cx="204.7" cy="25.9" r="1.15"/><circle cx="208.2" cy="25.9" r="1.15"/><circle cx="211.7" cy="25.9" r="1.15"/><circle cx="215.2" cy="25.9" r="1.15"/><circle cx="218.7" cy="25.9" r="1.15"/><circle cx="222.2" cy="25.9" r="1.15"/><circle cx="225.7" cy="25.9" r="1.15"/><circle cx="229.2" cy="25.9" r="1.15"/><circle cx="232.7" cy="25.9" r="1.15"/><circle cx="236.2" cy="25.9" r="1.15"/><circle cx="239.7" cy="25.9" r="1.15"/><circle cx="243.2" cy="25.9" r="1.15"/><circle cx="246.7" cy="25.9" r="1.15"/><circle cx="250.2" cy="25.9" r="1.15"/><circle cx="253.7" cy="25.9" r="1.15"/><circle cx="257.2" cy="25.9" r="1.15"/><circle cx="260.7" cy="25.9" r="1.15"/><circle cx="281.7" cy="25.9" r="1.15"/><circle cx="43.7" cy="31.0" r="1.15"/><circle cx="47.2" cy="31.0" r="1.15"/><circle cx="50.7" cy="31.0" r="1.15"/><circle cx="54.2" cy="31.0" r="1.15"/><circle cx="57.7" cy="31.0" r="1.15"/><circle cx="61.2" cy="31.0" r="1.15"/><circle cx="64.7" cy="31.0" r="1.15"/><circle cx="68.2" cy="31.0" r="1.15"/><circle cx="71.7" cy="31.0" r="1.15"/><circle cx="75.2" cy="31.0" r="1.15"/><circle cx="78.7" cy="31.0" r="1.15"/><circle cx="82.2" cy="31.0" r="1.15"/><circle cx="85.7" cy="31.0" r="1.15"/><circle cx="89.2" cy="31.0" r="1.15"/><circle cx="92.7" cy="31.0" r="1.15"/><circle cx="96.2" cy="31.0" r="1.15"/><circle cx="99.7" cy="31.0" r="1.15"/><circle cx="152.2" cy="31.0" r="1.15"/><circle cx="155.7" cy="31.0" r="1.15"/><circle cx="159.2" cy="31.0" r="1.15"/><circle cx="162.7" cy="31.0" r="1.15"/><circle cx="166.2" cy="31.0" r="1.15"/><circle cx="169.7" cy="31.0" r="1.15"/><circle cx="173.2" cy="31.0" r="1.15"/><circle cx="176.7" cy="31.0" r="1.15"/><circle cx="180.2" cy="31.0" r="1.15"/><circle cx="183.7" cy="31.0" r="1.15"/><circle cx="187.2" cy="31.0" r="1.15"/><circle cx="190.7" cy="31.0" r="1.15"/><circle cx="194.2" cy="31.0" r="1.15"/><circle cx="197.7" cy="31.0" r="1.15"/><circle cx="201.2" cy="31.0" r="1.15"/><circle cx="204.7" cy="31.0" r="1.15"/><circle cx="208.2" cy="31.0" r="1.15"/><circle cx="211.7" cy="31.0" r="1.15"/><circle cx="215.2" cy="31.0" r="1.15"/><circle cx="218.7" cy="31.0" r="1.15"/><circle cx="222.2" cy="31.0" r="1.15"/><circle cx="225.7" cy="31.0" r="1.15"/><circle cx="229.2" cy="31.0" r="1.15"/><circle cx="232.7" cy="31.0" r="1.15"/><circle cx="236.2" cy="31.0" r="1.15"/><circle cx="239.7" cy="31.0" r="1.15"/><circle cx="243.2" cy="31.0" r="1.15"/><circle cx="246.7" cy="31.0" r="1.15"/><circle cx="250.2" cy="31.0" r="1.15"/><circle cx="253.7" cy="31.0" r="1.15"/><circle cx="257.2" cy="31.0" r="1.15"/><circle cx="260.7" cy="31.0" r="1.15"/><circle cx="264.2" cy="31.0" r="1.15"/><circle cx="47.2" cy="36.2" r="1.15"/><circle cx="50.7" cy="36.2" r="1.15"/><circle cx="54.2" cy="36.2" r="1.15"/><circle cx="57.7" cy="36.2" r="1.15"/><circle cx="61.2" cy="36.2" r="1.15"/><circle cx="64.7" cy="36.2" r="1.15"/><circle cx="68.2" cy="36.2" r="1.15"/><circle cx="71.7" cy="36.2" r="1.15"/><circle cx="75.2" cy="36.2" r="1.15"/><circle cx="78.7" cy="36.2" r="1.15"/><circle cx="82.2" cy="36.2" r="1.15"/><circle cx="85.7" cy="36.2" r="1.15"/><circle cx="89.2" cy="36.2" r="1.15"/><circle cx="92.7" cy="36.2" r="1.15"/><circle cx="96.2" cy="36.2" r="1.15"/><circle cx="99.7" cy="36.2" r="1.15"/><circle cx="152.2" cy="36.2" r="1.15"/><circle cx="155.7" cy="36.2" r="1.15"/><circle cx="159.2" cy="36.2" r="1.15"/><circle cx="162.7" cy="36.2" r="1.15"/><circle cx="166.2" cy="36.2" r="1.15"/><circle cx="169.7" cy="36.2" r="1.15"/><circle cx="173.2" cy="36.2" r="1.15"/><circle cx="183.7" cy="36.2" r="1.15"/><circle cx="187.2" cy="36.2" r="1.15"/><circle cx="197.7" cy="36.2" r="1.15"/><circle cx="201.2" cy="36.2" r="1.15"/><circle cx="204.7" cy="36.2" r="1.15"/><circle cx="208.2" cy="36.2" r="1.15"/><circle cx="211.7" cy="36.2" r="1.15"/><circle cx="215.2" cy="36.2" r="1.15"/><circle cx="218.7" cy="36.2" r="1.15"/><circle cx="222.2" cy="36.2" r="1.15"/><circle cx="225.7" cy="36.2" r="1.15"/><circle cx="229.2" cy="36.2" r="1.15"/><circle cx="232.7" cy="36.2" r="1.15"/><circle cx="236.2" cy="36.2" r="1.15"/><circle cx="239.7" cy="36.2" r="1.15"/><circle cx="243.2" cy="36.2" r="1.15"/><circle cx="246.7" cy="36.2" r="1.15"/><circle cx="250.2" cy="36.2" r="1.15"/><circle cx="253.7" cy="36.2" r="1.15"/><circle cx="257.2" cy="36.2" r="1.15"/><circle cx="260.7" cy="36.2" r="1.15"/><circle cx="264.2" cy="36.2" r="1.15"/><circle cx="47.2" cy="41.4" r="1.15"/><circle cx="50.7" cy="41.4" r="1.15"/><circle cx="54.2" cy="41.4" r="1.15"/><circle cx="57.7" cy="41.4" r="1.15"/><circle cx="61.2" cy="41.4" r="1.15"/><circle cx="64.7" cy="41.4" r="1.15"/><circle cx="68.2" cy="41.4" r="1.15"/><circle cx="71.7" cy="41.4" r="1.15"/><circle cx="75.2" cy="41.4" r="1.15"/><circle cx="78.7" cy="41.4" r="1.15"/><circle cx="82.2" cy="41.4" r="1.15"/><circle cx="85.7" cy="41.4" r="1.15"/><circle cx="89.2" cy="41.4" r="1.15"/><circle cx="145.2" cy="41.4" r="1.15"/><circle cx="148.7" cy="41.4" r="1.15"/><circle cx="162.7" cy="41.4" r="1.15"/><circle cx="166.2" cy="41.4" r="1.15"/><circle cx="169.7" cy="41.4" r="1.15"/><circle cx="173.2" cy="41.4" r="1.15"/><circle cx="176.7" cy="41.4" r="1.15"/><circle cx="180.2" cy="41.4" r="1.15"/><circle cx="187.2" cy="41.4" r="1.15"/><circle cx="190.7" cy="41.4" r="1.15"/><circle cx="197.7" cy="41.4" r="1.15"/><circle cx="201.2" cy="41.4" r="1.15"/><circle cx="204.7" cy="41.4" r="1.15"/><circle cx="208.2" cy="41.4" r="1.15"/><circle cx="211.7" cy="41.4" r="1.15"/><circle cx="215.2" cy="41.4" r="1.15"/><circle cx="218.7" cy="41.4" r="1.15"/><circle cx="222.2" cy="41.4" r="1.15"/><circle cx="225.7" cy="41.4" r="1.15"/><circle cx="229.2" cy="41.4" r="1.15"/><circle cx="232.7" cy="41.4" r="1.15"/><circle cx="236.2" cy="41.4" r="1.15"/><circle cx="239.7" cy="41.4" r="1.15"/><circle cx="243.2" cy="41.4" r="1.15"/><circle cx="246.7" cy="41.4" r="1.15"/><circle cx="250.2" cy="41.4" r="1.15"/><circle cx="253.7" cy="41.4" r="1.15"/><circle cx="257.2" cy="41.4" r="1.15"/><circle cx="267.7" cy="41.4" r="1.15"/><circle cx="50.7" cy="46.6" r="1.15"/><circle cx="54.2" cy="46.6" r="1.15"/><circle cx="57.7" cy="46.6" r="1.15"/><circle cx="61.2" cy="46.6" r="1.15"/><circle cx="64.7" cy="46.6" r="1.15"/><circle cx="68.2" cy="46.6" r="1.15"/><circle cx="71.7" cy="46.6" r="1.15"/><circle cx="75.2" cy="46.6" r="1.15"/><circle cx="78.7" cy="46.6" r="1.15"/><circle cx="82.2" cy="46.6" r="1.15"/><circle cx="85.7" cy="46.6" r="1.15"/><circle cx="145.2" cy="46.6" r="1.15"/><circle cx="152.2" cy="46.6" r="1.15"/><circle cx="155.7" cy="46.6" r="1.15"/><circle cx="176.7" cy="46.6" r="1.15"/><circle cx="180.2" cy="46.6" r="1.15"/><circle cx="183.7" cy="46.6" r="1.15"/><circle cx="187.2" cy="46.6" r="1.15"/><circle cx="190.7" cy="46.6" r="1.15"/><circle cx="194.2" cy="46.6" r="1.15"/><circle cx="197.7" cy="46.6" r="1.15"/><circle cx="201.2" cy="46.6" r="1.15"/><circle cx="204.7" cy="46.6" r="1.15"/><circle cx="208.2" cy="46.6" r="1.15"/><circle cx="211.7" cy="46.6" r="1.15"/><circle cx="215.2" cy="46.6" r="1.15"/><circle cx="218.7" cy="46.6" r="1.15"/><circle cx="222.2" cy="46.6" r="1.15"/><circle cx="225.7" cy="46.6" r="1.15"/><circle cx="229.2" cy="46.6" r="1.15"/><circle cx="232.7" cy="46.6" r="1.15"/><circle cx="236.2" cy="46.6" r="1.15"/><circle cx="239.7" cy="46.6" r="1.15"/><circle cx="243.2" cy="46.6" r="1.15"/><circle cx="246.7" cy="46.6" r="1.15"/><circle cx="250.2" cy="46.6" r="1.15"/><circle cx="257.2" cy="46.6" r="1.15"/><circle cx="264.2" cy="46.6" r="1.15"/><circle cx="54.2" cy="51.7" r="1.15"/><circle cx="57.7" cy="51.7" r="1.15"/><circle cx="61.2" cy="51.7" r="1.15"/><circle cx="64.7" cy="51.7" r="1.15"/><circle cx="68.2" cy="51.7" r="1.15"/><circle cx="71.7" cy="51.7" r="1.15"/><circle cx="75.2" cy="51.7" r="1.15"/><circle cx="78.7" cy="51.7" r="1.15"/><circle cx="82.2" cy="51.7" r="1.15"/><circle cx="145.2" cy="51.7" r="1.15"/><circle cx="148.7" cy="51.7" r="1.15"/><circle cx="152.2" cy="51.7" r="1.15"/><circle cx="155.7" cy="51.7" r="1.15"/><circle cx="159.2" cy="51.7" r="1.15"/><circle cx="162.7" cy="51.7" r="1.15"/><circle cx="169.7" cy="51.7" r="1.15"/><circle cx="180.2" cy="51.7" r="1.15"/><circle cx="183.7" cy="51.7" r="1.15"/><circle cx="187.2" cy="51.7" r="1.15"/><circle cx="190.7" cy="51.7" r="1.15"/><circle cx="194.2" cy="51.7" r="1.15"/><circle cx="197.7" cy="51.7" r="1.15"/><circle cx="201.2" cy="51.7" r="1.15"/><circle cx="204.7" cy="51.7" r="1.15"/><circle cx="208.2" cy="51.7" r="1.15"/><circle cx="211.7" cy="51.7" r="1.15"/><circle cx="215.2" cy="51.7" r="1.15"/><circle cx="218.7" cy="51.7" r="1.15"/><circle cx="222.2" cy="51.7" r="1.15"/><circle cx="225.7" cy="51.7" r="1.15"/><circle cx="229.2" cy="51.7" r="1.15"/><circle cx="232.7" cy="51.7" r="1.15"/><circle cx="236.2" cy="51.7" r="1.15"/><circle cx="239.7" cy="51.7" r="1.15"/><circle cx="243.2" cy="51.7" r="1.15"/><circle cx="246.7" cy="51.7" r="1.15"/><circle cx="250.2" cy="51.7" r="1.15"/><circle cx="61.2" cy="56.9" r="1.15"/><circle cx="64.7" cy="56.9" r="1.15"/><circle cx="68.2" cy="56.9" r="1.15"/><circle cx="82.2" cy="56.9" r="1.15"/><circle cx="141.7" cy="56.9" r="1.15"/><circle cx="145.2" cy="56.9" r="1.15"/><circle cx="148.7" cy="56.9" r="1.15"/><circle cx="152.2" cy="56.9" r="1.15"/><circle cx="155.7" cy="56.9" r="1.15"/><circle cx="159.2" cy="56.9" r="1.15"/><circle cx="162.7" cy="56.9" r="1.15"/><circle cx="166.2" cy="56.9" r="1.15"/><circle cx="169.7" cy="56.9" r="1.15"/><circle cx="173.2" cy="56.9" r="1.15"/><circle cx="176.7" cy="56.9" r="1.15"/><circle cx="180.2" cy="56.9" r="1.15"/><circle cx="183.7" cy="56.9" r="1.15"/><circle cx="187.2" cy="56.9" r="1.15"/><circle cx="190.7" cy="56.9" r="1.15"/><circle cx="194.2" cy="56.9" r="1.15"/><circle cx="197.7" cy="56.9" r="1.15"/><circle cx="201.2" cy="56.9" r="1.15"/><circle cx="204.7" cy="56.9" r="1.15"/><circle cx="208.2" cy="56.9" r="1.15"/><circle cx="211.7" cy="56.9" r="1.15"/><circle cx="215.2" cy="56.9" r="1.15"/><circle cx="218.7" cy="56.9" r="1.15"/><circle cx="222.2" cy="56.9" r="1.15"/><circle cx="225.7" cy="56.9" r="1.15"/><circle cx="229.2" cy="56.9" r="1.15"/><circle cx="232.7" cy="56.9" r="1.15"/><circle cx="236.2" cy="56.9" r="1.15"/><circle cx="239.7" cy="56.9" r="1.15"/><circle cx="243.2" cy="56.9" r="1.15"/><circle cx="246.7" cy="56.9" r="1.15"/><circle cx="250.2" cy="56.9" r="1.15"/><circle cx="64.7" cy="62.1" r="1.15"/><circle cx="68.2" cy="62.1" r="1.15"/><circle cx="82.2" cy="62.1" r="1.15"/><circle cx="138.2" cy="62.1" r="1.15"/><circle cx="141.7" cy="62.1" r="1.15"/><circle cx="145.2" cy="62.1" r="1.15"/><circle cx="148.7" cy="62.1" r="1.15"/><circle cx="152.2" cy="62.1" r="1.15"/><circle cx="155.7" cy="62.1" r="1.15"/><circle cx="159.2" cy="62.1" r="1.15"/><circle cx="162.7" cy="62.1" r="1.15"/><circle cx="166.2" cy="62.1" r="1.15"/><circle cx="169.7" cy="62.1" r="1.15"/><circle cx="173.2" cy="62.1" r="1.15"/><circle cx="176.7" cy="62.1" r="1.15"/><circle cx="183.7" cy="62.1" r="1.15"/><circle cx="187.2" cy="62.1" r="1.15"/><circle cx="190.7" cy="62.1" r="1.15"/><circle cx="194.2" cy="62.1" r="1.15"/><circle cx="197.7" cy="62.1" r="1.15"/><circle cx="208.2" cy="62.1" r="1.15"/><circle cx="211.7" cy="62.1" r="1.15"/><circle cx="215.2" cy="62.1" r="1.15"/><circle cx="218.7" cy="62.1" r="1.15"/><circle cx="222.2" cy="62.1" r="1.15"/><circle cx="225.7" cy="62.1" r="1.15"/><circle cx="229.2" cy="62.1" r="1.15"/><circle cx="232.7" cy="62.1" r="1.15"/><circle cx="236.2" cy="62.1" r="1.15"/><circle cx="239.7" cy="62.1" r="1.15"/><circle cx="243.2" cy="62.1" r="1.15"/><circle cx="64.7" cy="67.2" r="1.15"/><circle cx="68.2" cy="67.2" r="1.15"/><circle cx="71.7" cy="67.2" r="1.15"/><circle cx="75.2" cy="67.2" r="1.15"/><circle cx="85.7" cy="67.2" r="1.15"/><circle cx="89.2" cy="67.2" r="1.15"/><circle cx="138.2" cy="67.2" r="1.15"/><circle cx="141.7" cy="67.2" r="1.15"/><circle cx="145.2" cy="67.2" r="1.15"/><circle cx="148.7" cy="67.2" r="1.15"/><circle cx="152.2" cy="67.2" r="1.15"/><circle cx="155.7" cy="67.2" r="1.15"/><circle cx="159.2" cy="67.2" r="1.15"/><circle cx="162.7" cy="67.2" r="1.15"/><circle cx="166.2" cy="67.2" r="1.15"/><circle cx="169.7" cy="67.2" r="1.15"/><circle cx="173.2" cy="67.2" r="1.15"/><circle cx="176.7" cy="67.2" r="1.15"/><circle cx="180.2" cy="67.2" r="1.15"/><circle cx="187.2" cy="67.2" r="1.15"/><circle cx="190.7" cy="67.2" r="1.15"/><circle cx="194.2" cy="67.2" r="1.15"/><circle cx="211.7" cy="67.2" r="1.15"/><circle cx="215.2" cy="67.2" r="1.15"/><circle cx="218.7" cy="67.2" r="1.15"/><circle cx="229.2" cy="67.2" r="1.15"/><circle cx="232.7" cy="67.2" r="1.15"/><circle cx="236.2" cy="67.2" r="1.15"/><circle cx="75.2" cy="72.4" r="1.15"/><circle cx="78.7" cy="72.4" r="1.15"/><circle cx="138.2" cy="72.4" r="1.15"/><circle cx="141.7" cy="72.4" r="1.15"/><circle cx="145.2" cy="72.4" r="1.15"/><circle cx="148.7" cy="72.4" r="1.15"/><circle cx="152.2" cy="72.4" r="1.15"/><circle cx="155.7" cy="72.4" r="1.15"/><circle cx="159.2" cy="72.4" r="1.15"/><circle cx="162.7" cy="72.4" r="1.15"/><circle cx="166.2" cy="72.4" r="1.15"/><circle cx="169.7" cy="72.4" r="1.15"/><circle cx="173.2" cy="72.4" r="1.15"/><circle cx="176.7" cy="72.4" r="1.15"/><circle cx="180.2" cy="72.4" r="1.15"/><circle cx="183.7" cy="72.4" r="1.15"/><circle cx="187.2" cy="72.4" r="1.15"/><circle cx="215.2" cy="72.4" r="1.15"/><circle cx="232.7" cy="72.4" r="1.15"/><circle cx="236.2" cy="72.4" r="1.15"/><circle cx="239.7" cy="72.4" r="1.15"/><circle cx="89.2" cy="77.6" r="1.15"/><circle cx="92.7" cy="77.6" r="1.15"/><circle cx="96.2" cy="77.6" r="1.15"/><circle cx="141.7" cy="77.6" r="1.15"/><circle cx="145.2" cy="77.6" r="1.15"/><circle cx="148.7" cy="77.6" r="1.15"/><circle cx="152.2" cy="77.6" r="1.15"/><circle cx="155.7" cy="77.6" r="1.15"/><circle cx="159.2" cy="77.6" r="1.15"/><circle cx="162.7" cy="77.6" r="1.15"/><circle cx="166.2" cy="77.6" r="1.15"/><circle cx="169.7" cy="77.6" r="1.15"/><circle cx="173.2" cy="77.6" r="1.15"/><circle cx="176.7" cy="77.6" r="1.15"/><circle cx="180.2" cy="77.6" r="1.15"/><circle cx="183.7" cy="77.6" r="1.15"/><circle cx="187.2" cy="77.6" r="1.15"/><circle cx="190.7" cy="77.6" r="1.15"/><circle cx="215.2" cy="77.6" r="1.15"/><circle cx="232.7" cy="77.6" r="1.15"/><circle cx="85.7" cy="82.8" r="1.15"/><circle cx="89.2" cy="82.8" r="1.15"/><circle cx="92.7" cy="82.8" r="1.15"/><circle cx="96.2" cy="82.8" r="1.15"/><circle cx="99.7" cy="82.8" r="1.15"/><circle cx="103.2" cy="82.8" r="1.15"/><circle cx="106.7" cy="82.8" r="1.15"/><circle cx="155.7" cy="82.8" r="1.15"/><circle cx="159.2" cy="82.8" r="1.15"/><circle cx="162.7" cy="82.8" r="1.15"/><circle cx="166.2" cy="82.8" r="1.15"/><circle cx="169.7" cy="82.8" r="1.15"/><circle cx="173.2" cy="82.8" r="1.15"/><circle cx="176.7" cy="82.8" r="1.15"/><circle cx="180.2" cy="82.8" r="1.15"/><circle cx="183.7" cy="82.8" r="1.15"/><circle cx="187.2" cy="82.8" r="1.15"/><circle cx="236.2" cy="82.8" r="1.15"/><circle cx="246.7" cy="82.8" r="1.15"/><circle cx="85.7" cy="87.9" r="1.15"/><circle cx="89.2" cy="87.9" r="1.15"/><circle cx="92.7" cy="87.9" r="1.15"/><circle cx="96.2" cy="87.9" r="1.15"/><circle cx="99.7" cy="87.9" r="1.15"/><circle cx="103.2" cy="87.9" r="1.15"/><circle cx="106.7" cy="87.9" r="1.15"/><circle cx="159.2" cy="87.9" r="1.15"/><circle cx="162.7" cy="87.9" r="1.15"/><circle cx="166.2" cy="87.9" r="1.15"/><circle cx="169.7" cy="87.9" r="1.15"/><circle cx="173.2" cy="87.9" r="1.15"/><circle cx="176.7" cy="87.9" r="1.15"/><circle cx="180.2" cy="87.9" r="1.15"/><circle cx="183.7" cy="87.9" r="1.15"/><circle cx="236.2" cy="87.9" r="1.15"/><circle cx="243.2" cy="87.9" r="1.15"/><circle cx="246.7" cy="87.9" r="1.15"/><circle cx="85.7" cy="93.1" r="1.15"/><circle cx="89.2" cy="93.1" r="1.15"/><circle cx="92.7" cy="93.1" r="1.15"/><circle cx="96.2" cy="93.1" r="1.15"/><circle cx="99.7" cy="93.1" r="1.15"/><circle cx="103.2" cy="93.1" r="1.15"/><circle cx="106.7" cy="93.1" r="1.15"/><circle cx="110.2" cy="93.1" r="1.15"/><circle cx="113.7" cy="93.1" r="1.15"/><circle cx="117.2" cy="93.1" r="1.15"/><circle cx="162.7" cy="93.1" r="1.15"/><circle cx="166.2" cy="93.1" r="1.15"/><circle cx="169.7" cy="93.1" r="1.15"/><circle cx="173.2" cy="93.1" r="1.15"/><circle cx="176.7" cy="93.1" r="1.15"/><circle cx="180.2" cy="93.1" r="1.15"/><circle cx="250.2" cy="93.1" r="1.15"/><circle cx="264.2" cy="93.1" r="1.15"/><circle cx="267.7" cy="93.1" r="1.15"/><circle cx="271.2" cy="93.1" r="1.15"/><circle cx="85.7" cy="98.3" r="1.15"/><circle cx="89.2" cy="98.3" r="1.15"/><circle cx="92.7" cy="98.3" r="1.15"/><circle cx="96.2" cy="98.3" r="1.15"/><circle cx="99.7" cy="98.3" r="1.15"/><circle cx="103.2" cy="98.3" r="1.15"/><circle cx="106.7" cy="98.3" r="1.15"/><circle cx="110.2" cy="98.3" r="1.15"/><circle cx="113.7" cy="98.3" r="1.15"/><circle cx="117.2" cy="98.3" r="1.15"/><circle cx="162.7" cy="98.3" r="1.15"/><circle cx="166.2" cy="98.3" r="1.15"/><circle cx="169.7" cy="98.3" r="1.15"/><circle cx="173.2" cy="98.3" r="1.15"/><circle cx="176.7" cy="98.3" r="1.15"/><circle cx="180.2" cy="98.3" r="1.15"/><circle cx="253.7" cy="98.3" r="1.15"/><circle cx="89.2" cy="103.4" r="1.15"/><circle cx="92.7" cy="103.4" r="1.15"/><circle cx="96.2" cy="103.4" r="1.15"/><circle cx="99.7" cy="103.4" r="1.15"/><circle cx="103.2" cy="103.4" r="1.15"/><circle cx="106.7" cy="103.4" r="1.15"/><circle cx="110.2" cy="103.4" r="1.15"/><circle cx="113.7" cy="103.4" r="1.15"/><circle cx="117.2" cy="103.4" r="1.15"/><circle cx="162.7" cy="103.4" r="1.15"/><circle cx="166.2" cy="103.4" r="1.15"/><circle cx="169.7" cy="103.4" r="1.15"/><circle cx="173.2" cy="103.4" r="1.15"/><circle cx="176.7" cy="103.4" r="1.15"/><circle cx="180.2" cy="103.4" r="1.15"/><circle cx="183.7" cy="103.4" r="1.15"/><circle cx="190.7" cy="103.4" r="1.15"/><circle cx="260.7" cy="103.4" r="1.15"/><circle cx="92.7" cy="108.6" r="1.15"/><circle cx="96.2" cy="108.6" r="1.15"/><circle cx="99.7" cy="108.6" r="1.15"/><circle cx="103.2" cy="108.6" r="1.15"/><circle cx="106.7" cy="108.6" r="1.15"/><circle cx="110.2" cy="108.6" r="1.15"/><circle cx="113.7" cy="108.6" r="1.15"/><circle cx="162.7" cy="108.6" r="1.15"/><circle cx="166.2" cy="108.6" r="1.15"/><circle cx="169.7" cy="108.6" r="1.15"/><circle cx="173.2" cy="108.6" r="1.15"/><circle cx="176.7" cy="108.6" r="1.15"/><circle cx="180.2" cy="108.6" r="1.15"/><circle cx="187.2" cy="108.6" r="1.15"/><circle cx="190.7" cy="108.6" r="1.15"/><circle cx="253.7" cy="108.6" r="1.15"/><circle cx="257.2" cy="108.6" r="1.15"/><circle cx="260.7" cy="108.6" r="1.15"/><circle cx="264.2" cy="108.6" r="1.15"/><circle cx="267.7" cy="108.6" r="1.15"/><circle cx="271.2" cy="108.6" r="1.15"/><circle cx="92.7" cy="113.8" r="1.15"/><circle cx="96.2" cy="113.8" r="1.15"/><circle cx="99.7" cy="113.8" r="1.15"/><circle cx="103.2" cy="113.8" r="1.15"/><circle cx="106.7" cy="113.8" r="1.15"/><circle cx="110.2" cy="113.8" r="1.15"/><circle cx="162.7" cy="113.8" r="1.15"/><circle cx="166.2" cy="113.8" r="1.15"/><circle cx="169.7" cy="113.8" r="1.15"/><circle cx="173.2" cy="113.8" r="1.15"/><circle cx="176.7" cy="113.8" r="1.15"/><circle cx="187.2" cy="113.8" r="1.15"/><circle cx="246.7" cy="113.8" r="1.15"/><circle cx="250.2" cy="113.8" r="1.15"/><circle cx="253.7" cy="113.8" r="1.15"/><circle cx="257.2" cy="113.8" r="1.15"/><circle cx="260.7" cy="113.8" r="1.15"/><circle cx="264.2" cy="113.8" r="1.15"/><circle cx="267.7" cy="113.8" r="1.15"/><circle cx="271.2" cy="113.8" r="1.15"/><circle cx="274.7" cy="113.8" r="1.15"/><circle cx="92.7" cy="119.0" r="1.15"/><circle cx="96.2" cy="119.0" r="1.15"/><circle cx="99.7" cy="119.0" r="1.15"/><circle cx="103.2" cy="119.0" r="1.15"/><circle cx="106.7" cy="119.0" r="1.15"/><circle cx="166.2" cy="119.0" r="1.15"/><circle cx="169.7" cy="119.0" r="1.15"/><circle cx="173.2" cy="119.0" r="1.15"/><circle cx="176.7" cy="119.0" r="1.15"/><circle cx="246.7" cy="119.0" r="1.15"/><circle cx="250.2" cy="119.0" r="1.15"/><circle cx="253.7" cy="119.0" r="1.15"/><circle cx="257.2" cy="119.0" r="1.15"/><circle cx="260.7" cy="119.0" r="1.15"/><circle cx="264.2" cy="119.0" r="1.15"/><circle cx="267.7" cy="119.0" r="1.15"/><circle cx="271.2" cy="119.0" r="1.15"/><circle cx="274.7" cy="119.0" r="1.15"/><circle cx="92.7" cy="124.1" r="1.15"/><circle cx="96.2" cy="124.1" r="1.15"/><circle cx="99.7" cy="124.1" r="1.15"/><circle cx="103.2" cy="124.1" r="1.15"/><circle cx="166.2" cy="124.1" r="1.15"/><circle cx="169.7" cy="124.1" r="1.15"/><circle cx="173.2" cy="124.1" r="1.15"/><circle cx="246.7" cy="124.1" r="1.15"/><circle cx="250.2" cy="124.1" r="1.15"/><circle cx="253.7" cy="124.1" r="1.15"/><circle cx="264.2" cy="124.1" r="1.15"/><circle cx="267.7" cy="124.1" r="1.15"/><circle cx="271.2" cy="124.1" r="1.15"/><circle cx="274.7" cy="124.1" r="1.15"/><circle cx="89.2" cy="129.3" r="1.15"/><circle cx="92.7" cy="129.3" r="1.15"/><circle cx="96.2" cy="129.3" r="1.15"/><circle cx="99.7" cy="129.3" r="1.15"/><circle cx="267.7" cy="129.3" r="1.15"/><circle cx="271.2" cy="129.3" r="1.15"/><circle cx="274.7" cy="129.3" r="1.15"/><circle cx="295.7" cy="129.3" r="1.15"/><circle cx="89.2" cy="134.5" r="1.15"/><circle cx="92.7" cy="134.5" r="1.15"/><circle cx="271.2" cy="134.5" r="1.15"/><circle cx="89.2" cy="139.7" r="1.15"/><circle cx="92.7" cy="139.7" r="1.15"/><circle cx="89.2" cy="144.8" r="1.15"/><circle cx="92.7" cy="150.0" r="1.15"/></g>
+
+            <!-- markers sized/colored by 부정 반응 비율 (진함=빨강, 낮음=회색) · 클릭 시 우측 항목 펼침 -->
+            <g class="map-marker" onclick="toggleLang('lang-en')" style="cursor:pointer;">
+              <circle cx="69" cy="44" r="13" fill="var(--risk)" opacity="0.85"/>
+              <text x="69" y="48" font-size="9.5" fill="#fff" text-anchor="middle" font-weight="700">41%</text>
+            </g>
+
+            <g class="map-marker" onclick="toggleLang('lang-kr')" style="cursor:pointer;">
+              <circle cx="256" cy="47" r="16" fill="var(--risk)" opacity="0.92"/>
+              <text x="256" y="51" font-size="10" fill="#fff" text-anchor="middle" font-weight="700">53%</text>
+            </g>
+
+            <g class="map-marker" onclick="toggleLang('lang-cn')" style="cursor:pointer;">
+              <circle cx="237" cy="48" r="9" fill="#B7BEC9" opacity="0.9"/>
+              <text x="237" y="51" font-size="8.5" fill="#fff" text-anchor="middle" font-weight="700">18%</text>
+            </g>
+
+            <g class="map-marker" onclick="toggleLang('lang-es')" style="cursor:pointer;">
+              <circle cx="148" cy="43" r="11" fill="#B7BEC9" opacity="0.9"/>
+              <text x="148" y="46" font-size="9" fill="#fff" text-anchor="middle" font-weight="700">30%</text>
+            </g>
+
+            <g class="map-marker" onclick="toggleLang('lang-pt')" style="cursor:pointer;">
+              <circle cx="104" cy="99" r="14" fill="var(--risk)" opacity="0.85"/>
+              <text x="104" y="103" font-size="9.5" fill="#fff" text-anchor="middle" font-weight="700">44%</text>
+            </g>
+
+            <g class="map-marker" onclick="toggleLang('lang-jp')" style="cursor:pointer;">
+              <circle cx="265" cy="47" r="8" fill="#B7BEC9" opacity="0.9"/>
+              <text x="265" y="50" font-size="8" fill="#fff" text-anchor="middle" font-weight="700">22%</text>
+            </g>
+
+            <g class="map-marker" onclick="toggleLang('lang-th')" style="cursor:pointer;">
+              <circle cx="233" cy="71" r="9" fill="#B7BEC9" opacity="0.9"/>
+              <text x="233" y="74" font-size="8.5" fill="#fff" text-anchor="middle" font-weight="700">27%</text>
+            </g>
+          </svg>
+          <p class="map-caption">원 크기·색이 짙을수록 부정 반응 비율이 높은 지역 · 클릭하면 해당 언어권으로 이동</p>
+        </div>
+
+        <div>
+          <div class="lang" id="lang-en" onclick="this.classList.toggle('open')">
+            <div class="lang-row">
+              <div class="flag">EN</div>
+              <span class="lang-name">영어권</span>
+              <div class="split-bar"><div class="seg neg" style="width:41%"></div><div class="seg pos" style="width:29%"></div><div class="seg neu" style="width:30%"></div></div>
+              <span class="lang-pct"><b class="neg">부정 41%</b> · <b class="pos">긍정 29%</b></span>
+              <span class="lang-chev">⌄</span>
+            </div>
+            <div class="lang-detail"><div class="detail-inner">
+              <div class="detail-item"><span class="dname">형평성 문제 제기</span><span class="dpct">41%</span></div>
+              <div class="detail-item"><span class="dname">경쟁 게임과 비교</span><span class="dpct">29%</span></div>
+              <p class="detail-quote">"Other games handled this kind of nerf with a explanation post."</p>
+            </div></div>
+          </div>
+
+          <div class="lang" id="lang-kr" onclick="this.classList.toggle('open')">
+            <div class="lang-row">
+              <div class="flag">KR</div>
+              <span class="lang-name">한국어권</span>
+              <div class="split-bar"><div class="seg neg" style="width:53%"></div><div class="seg pos" style="width:19%"></div><div class="seg neu" style="width:28%"></div></div>
+              <span class="lang-pct"><b class="neg">부정 53%</b> · <b class="pos">긍정 19%</b></span>
+              <span class="lang-chev">⌄</span>
+            </div>
+            <div class="lang-detail"><div class="detail-inner">
+              <div class="detail-item"><span class="dname">일방적 하향 반발</span><span class="dpct">53%</span></div>
+              <div class="detail-item"><span class="dname">근거 설명 요구</span><span class="dpct">19%</span></div>
+              <p class="detail-quote">"근거 수치 공개 없이 그냥 낮추는 건 너무한 것 같아요."</p>
+            </div></div>
+          </div>
+
+          <div class="lang" id="lang-cn" onclick="this.classList.toggle('open')">
+            <div class="lang-row">
+              <div class="flag">CN</div>
+              <span class="lang-name">중국어권</span>
+              <div class="split-bar"><div class="seg neg" style="width:18%"></div><div class="seg pos" style="width:58%"></div><div class="seg neu" style="width:24%"></div></div>
+              <span class="lang-pct"><b class="neg">부정 18%</b> · <b class="pos">긍정 58%</b></span>
+              <span class="lang-chev">⌄</span>
+            </div>
+            <div class="lang-detail"><div class="detail-inner">
+              <div class="detail-item"><span class="dname">밸런스 취지 공감</span><span class="dpct">58%</span></div>
+              <div class="detail-item"><span class="dname">기타 부정 의견</span><span class="dpct">18%</span></div>
+              <p class="detail-quote">"저격총 의존도가 줄어드는 건 나쁘지 않다고 봅니다."</p>
+            </div></div>
+          </div>
+
+          <div class="lang" id="lang-es" onclick="this.classList.toggle('open')">
+            <div class="lang-row">
+              <div class="flag">ES</div>
+              <span class="lang-name">스페인어권</span>
+              <div class="split-bar"><div class="seg neg" style="width:30%"></div><div class="seg pos" style="width:34%"></div><div class="seg neu" style="width:36%"></div></div>
+              <span class="lang-pct"><b class="neg">부정 30%</b> · <b class="pos">긍정 34%</b></span>
+              <span class="lang-chev">⌄</span>
+            </div>
+            <div class="lang-detail"><div class="detail-inner">
+              <div class="detail-item"><span class="dname">긍정·부정 혼재</span><span class="dpct">64%</span></div>
+              <div class="detail-item"><span class="dname">중립 의견</span><span class="dpct">36%</span></div>
+              <p class="detail-quote">"Aún no sé si esto afecta mucho mi forma de jugar."</p>
+            </div></div>
+          </div>
+
+          <div class="lang-extra" id="langExtra">
+            <div class="lang" id="lang-pt" onclick="this.classList.toggle('open')">
+              <div class="lang-row">
+                <div class="flag">PT</div>
+                <span class="lang-name">포르투갈어권</span>
+                <div class="split-bar"><div class="seg neg" style="width:44%"></div><div class="seg pos" style="width:24%"></div><div class="seg neu" style="width:32%"></div></div>
+                <span class="lang-pct"><b class="neg">부정 44%</b> · <b class="pos">긍정 24%</b></span>
+                <span class="lang-chev">⌄</span>
+              </div>
+              <div class="lang-detail"><div class="detail-inner">
+                <div class="detail-item"><span class="dname">저격 무기 이탈 우려</span><span class="dpct">44%</span></div>
+                <div class="detail-item"><span class="dname">빌드 다양화 기대</span><span class="dpct">24%</span></div>
+                <p class="detail-quote">"Isso vai mudar muito minha build atual."</p>
+              </div></div>
+            </div>
+
+            <div class="lang" id="lang-jp" onclick="this.classList.toggle('open')">
+              <div class="lang-row">
+                <div class="flag">JP</div>
+                <span class="lang-name">일본어권</span>
+                <div class="split-bar"><div class="seg neg" style="width:22%"></div><div class="seg pos" style="width:46%"></div><div class="seg neu" style="width:32%"></div></div>
+                <span class="lang-pct"><b class="neg">부정 22%</b> · <b class="pos">긍정 46%</b></span>
+                <span class="lang-chev">⌄</span>
+              </div>
+              <div class="lang-detail"><div class="detail-inner">
+                <div class="detail-item"><span class="dname">무기 다양성 확대 긍정</span><span class="dpct">46%</span></div>
+                <div class="detail-item"><span class="dname">기존 조합 재설계 부담</span><span class="dpct">22%</span></div>
+                <p class="detail-quote">"サブ武器の使い分けが増えて面白くなりそう。"</p>
+              </div></div>
+            </div>
+
+            <div class="lang" id="lang-th" onclick="this.classList.toggle('open')">
+              <div class="lang-row">
+                <div class="flag">TH</div>
+                <span class="lang-name">태국어권</span>
+                <div class="split-bar"><div class="seg neg" style="width:27%"></div><div class="seg pos" style="width:38%"></div><div class="seg neu" style="width:35%"></div></div>
+                <span class="lang-pct"><b class="neg">부정 27%</b> · <b class="pos">긍정 38%</b></span>
+                <span class="lang-chev">⌄</span>
+              </div>
+              <div class="lang-detail"><div class="detail-inner">
+                <div class="detail-item"><span class="dname">중립·지켜보자는 반응</span><span class="dpct">38%</span></div>
+                <div class="detail-item"><span class="dname">저격 유저 이탈 우려</span><span class="dpct">27%</span></div>
+                <p class="detail-quote">"ยังไม่แน่ใจว่าจะกระทบการเล่นมากแค่ไหน"</p>
+              </div></div>
+            </div>
+          </div>
+
+          <button type="button" class="lang-more" id="langMoreBtn" onclick="toggleLangMore()">더보기 · 3개 언어권 더 보기</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-divider"></div>
+
+    <div id="sec-evidence">
+      <div class="sub-head"><span class="ico">✎</span>근거와 검증 지표</div>
+      <div class="sub-sub">왜 이런 예측이 나왔을까</div>
+
+      <div class="chart-card">
+        <div class="chart-legend">
+          <span><i style="background:#C7CDD6;"></i>유사 사례 평균</span>
+          <span><i style="background:var(--risk);"></i>이번 업데이트 예측</span>
+        </div>
+        <p class="chart-desc">출시 시점 전후 커뮤니티의 부정 언급 비율 추이 비교</p>
+        <div class="chart-body">
+          <div class="y-axis"><span>30%</span><span>15%</span><span>0%</span></div>
+          <svg viewBox="0 0 400 160" class="line-chart">
+            <line x1="0" y1="30" x2="400" y2="30" stroke="#EEF0F3" stroke-width="1"/>
+            <line x1="0" y1="80" x2="400" y2="80" stroke="#EEF0F3" stroke-width="1"/>
+            <line x1="0" y1="130" x2="400" y2="130" stroke="#EEF0F3" stroke-width="1"/>
+            <polyline points="10,100 84,92 158,88 232,85 306,82 390,80" fill="none" stroke="#C7CDD6" stroke-width="2.5"/>
+            <polyline points="10,110 84,60 158,40 232,35 306,55 390,48" fill="none" stroke="var(--risk)" stroke-width="2.5"/>
+            <g fill="var(--risk)">
+              <circle cx="10" cy="110" r="3"/><circle cx="84" cy="60" r="3"/><circle cx="158" cy="40" r="3"/>
+              <circle cx="232" cy="35" r="3"/><circle cx="306" cy="55" r="3"/><circle cx="390" cy="48" r="3"/>
+            </g>
+          </svg>
+        </div>
+        <div class="chart-axis">
+          <span>D-14</span><span>D-7</span><span>출시일</span><span>D+7</span><span>D+14</span><span>D+30</span>
+        </div>
+      </div>
+
+      <div class="ev-head">
+        <span class="sub-head" style="margin:0;"><span class="ico">▤</span>근거 원문</span>
+        <span class="ev-count">총 <b>128건</b> · 관련도 높은 순</span>
+      </div>
+      <div class="ev-filters">
+        <button type="button" class="ev-chip active">전체</button>
+        <button type="button" class="ev-chip">Steam</button>
+        <button type="button" class="ev-chip">X</button>
+        <button type="button" class="ev-chip">공식 커뮤니티</button>
+        <button type="button" class="ev-chip">디스코드</button>
+      </div>
+      <div class="ev-scroll">
+        <div class="evidence"><div class="evidence-meta"><span class="src">Steam 포럼</span><span>2026.08.14</span></div><p>과거 유사 무기 확률 조정 시 초반 2주간 부정 언급이 3배 증가한 사례.</p></div>
+        <div class="evidence"><div class="evidence-meta"><span class="src">X (구 트위터)</span><span>2026.08.15</span></div><p>설명 없이 수치만 공지했을 때 "일방적 너프"라는 반응이 반복적으로 확인됨.</p></div>
+        <div class="evidence"><div class="evidence-meta"><span class="src">공식 커뮤니티</span><span>2026.08.16</span></div><p>동일 무기군 이전 패치 노트에서 밸런스 근거 수치를 함께 공개했을 때 반발이 완화됨.</p></div>
+        <div class="evidence"><div class="evidence-meta"><span class="src">Steam 포럼</span><span>2026.08.16</span></div><p>확률 조정 폭이 클수록 초반 재구매·재과금 의사가 낮아지는 경향이 관찰됨.</p></div>
+        <div class="evidence"><div class="evidence-meta"><span class="src">디스코드</span><span>2026.08.17</span></div><p>고정 팀 채널에서는 협동 전략 다변화 측면에서 긍정적으로 언급되는 빈도가 높음.</p></div>
+        <div class="evidence"><div class="evidence-meta"><span class="src">X (구 트위터)</span><span>2026.08.18</span></div><p>경쟁 게임의 유사 조정 사례와 비교하며 형평성 문제를 제기하는 글이 다수 확인됨.</p></div>
+        <div class="evidence"><div class="evidence-meta"><span class="src">공식 커뮤니티</span><span>2026.08.19</span></div><p>공지 시점에 로드맵을 함께 안내한 사례에서는 문의 티켓 수가 절반 이하로 감소함.</p></div>
+      </div>
+      <div class="ev-fade"></div>
+      <button type="button" class="ev-more">근거 121건 더 보기</button>
+    </div>
+
+    <div class="section-divider"></div>
+
+    <div id="sec-validate">
+      <div class="sub-head"><span class="ico">✓</span>출시 후 검증할 지표</div>
+      <div class="sub-sub">실제 출시 후 이 지표들로 예측을 검증합니다.</div>
+      <div class="vtable">
+        <table>
+          <tr><th>지표</th><th>목표치</th><th>측정 방법</th></tr>
+          <tr><td class="strong">부정 언급 비율</td><td>15% 이하</td><td>커뮤니티 크롤링</td></tr>
+          <tr><td class="strong">해당 무기 사용률</td><td>-10%p 이내</td><td>매치 로그 집계</td></tr>
+          <tr><td class="strong">재문의 티켓 수</td><td>주간 50건 이하</td><td>고객센터 연동</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="pdf-btn-wrap">
+      <button type="button" class="pdf-btn" onclick="openPdfModal()">⬇ PDF로 저장하기</button>
+    </div>
+  </section>
+
+</div>
+
+<!-- PDF 항목 선택 모달 -->
+<div class="pdf-overlay" id="pdfOverlay">
+  <div class="pdf-modal">
+    <h3>PDF로 내보낼 항목</h3>
+    <p class="pdf-sub">보고서에 포함할 항목을 선택하세요.</p>
+    <label class="pdf-check"><input type="checkbox" checked data-sec="sec-summary">요약 결과</label>
+    <label class="pdf-check"><input type="checkbox" checked data-sec="sec-predict">반응 예상 카드</label>
+    <label class="pdf-check"><input type="checkbox" checked data-sec="sec-persona">유저 유형별 반응</label>
+    <label class="pdf-check"><input type="checkbox" checked data-sec="sec-lang">언어·지역별 반응</label>
+    <label class="pdf-check"><input type="checkbox" checked data-sec="sec-evidence">근거와 검증 지표</label>
+    <label class="pdf-check"><input type="checkbox" checked data-sec="sec-validate">출시 후 검증 지표</label>
+    <div class="pdf-actions">
+      <button type="button" class="pdf-cancel" onclick="closePdfModal()">취소</button>
+      <button type="button" class="pdf-confirm" id="pdfConfirmBtn" onclick="exportPdf()">PDF 내보내기</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function selectOne(el){
+  const siblings = el.parentElement.querySelectorAll('.chip');
+  siblings.forEach(function(c){ c.classList.remove('active'); });
+  el.classList.add('active');
+}
+
+function toggleLang(id){
+  const el = document.getElementById(id);
+  if(el){
+    // if the target is inside the collapsed extra group, reveal the group first
+    const extra = document.getElementById('langExtra');
+    if(extra && extra.contains(el) && !extra.classList.contains('show')){
+      extra.classList.add('show');
+      document.getElementById('langMoreBtn').textContent = '접기';
+    }
+    el.classList.toggle('open');
+    el.scrollIntoView({behavior:'smooth', block:'nearest'});
+  }
+}
+
+function toggleLangMore(){
+  const extra = document.getElementById('langExtra');
+  const btn = document.getElementById('langMoreBtn');
+  const showing = extra.classList.toggle('show');
+  btn.textContent = showing ? '접기' : '더보기 · 3개 언어권 더 보기';
+}
+
+function runCheck(){
+  const btn = document.getElementById('runBtn');
+  const engine = document.getElementById('engine');
+  const hint = document.getElementById('ctaHint');
+  const results = document.getElementById('results');
+
+  btn.disabled = true;
+  btn.textContent = '점검 중...';
+  hint.textContent = '';
+  engine.classList.add('show');
+
+  setTimeout(function(){
+    engine.classList.remove('show');
+    btn.textContent = '다시 점검하기';
+    btn.disabled = false;
+    results.classList.add('show');
+    results.scrollIntoView({behavior:'smooth', block:'start'});
+  }, 1600);
+}
+
+function openPdfModal(){
+  document.getElementById('pdfOverlay').classList.add('show');
+}
+function closePdfModal(){
+  document.getElementById('pdfOverlay').classList.remove('show');
+}
+
+function exportPdf(){
+  const checks = document.querySelectorAll('#pdfOverlay input[type=checkbox]');
+  const hidden = [];
+  checks.forEach(function(chk){
+    const el = document.getElementById(chk.dataset.sec);
+    if(el){
+      if(!chk.checked){
+        el.style.display = 'none';
+        hidden.push(el);
+      }
+    }
+  });
+
+  const btn = document.getElementById('pdfConfirmBtn');
+  btn.disabled = true;
+  btn.textContent = '생성 중...';
+
+  const root = document.getElementById('results');
+  const opt = {
+    margin: 10,
+    filename: '게임체인저_점검결과.pdf',
+    image: { type: 'jpeg', quality: 0.95 },
+    html2canvas: { scale: 2, backgroundColor: '#ffffff' },
+    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+    pagebreak: { mode: ['avoid-all'] }
+  };
+
+  html2pdf().set(opt).from(root).save().then(function(){
+    hidden.forEach(function(el){ el.style.display = ''; });
+    btn.disabled = false;
+    btn.textContent = 'PDF 내보내기';
+    closePdfModal();
+  }).catch(function(){
+    hidden.forEach(function(el){ el.style.display = ''; });
+    btn.disabled = false;
+    btn.textContent = 'PDF 내보내기';
+  });
+}
+</script>
+
+</body>
+</html>
