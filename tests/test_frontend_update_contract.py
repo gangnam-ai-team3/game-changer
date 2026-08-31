@@ -103,13 +103,27 @@ def test_event_uses_shared_collectible_audience_cards():
     assert "PersonaGameCard" in event_source
     assert "LanguageGameCard" in event_source
     assert "final-pipeline" not in event_source
-    assert "이용자 예상 카드" in cards
+    assert '<summary className="persona-card-summary">' in cards
     assert "언어권 예상 카드" in cards
     assert "예상 대표 의견" in cards
     assert "예상 행동" in cards
     assert "실제 인용이 아닙니다" in cards
     assert "<blockquote>" not in cards
     assert 'role="img"' in cards
+
+
+def test_hy_ui_reference_is_applied_without_synthetic_visuals():
+    page = (ROOT / "page.tsx").read_text(encoding="utf-8")
+    cards = (ROOT / "components" / "AudienceCards.tsx").read_text(encoding="utf-8")
+    styles = (ROOT / "globals.css").read_text(encoding="utf-8")
+
+    assert '<h1 className="brand-wordmark">GAME-<span>CHANGER</span></h1>' in page
+    assert '<details className={`audience-card persona-card' in cards
+    assert "card-foil" not in cards
+    assert ".brand-wordmark span { color:var(--accent); }" in styles
+    assert "--negative:#ff5b4c" in styles
+    assert ".persona-card[open] .persona-toggle" in styles
+    assert "conic-gradient" not in styles
 
 
 def test_trend_view_removes_unavailable_source_choices():

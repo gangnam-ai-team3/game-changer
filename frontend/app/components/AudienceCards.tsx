@@ -45,41 +45,40 @@ export function PersonaGameCard({
   const theme = personaThemes[persona] ?? { mark: "●", code: "이용자" };
   const { opinion, action } = splitReaction(reaction);
   return (
-    <article className={`audience-card persona-card persona-${persona}`} aria-label={`${label} 예상 반응 카드`}>
-      <i className="card-foil" aria-hidden="true" />
-      <header className="audience-card-head">
-        <span>이용자 예상 카드</span>
-        <b>{theme.code}</b>
-      </header>
-      <div className="persona-character">
+    <details className={`audience-card persona-card persona-${persona}`} aria-label={`${label} 예상 반응 카드`}>
+      <summary className="persona-card-summary">
         <span className="persona-mark" aria-hidden="true">{theme.mark}</span>
-        <div>
+        <span className="persona-summary-copy">
           <small>이용자 유형</small>
-          <h3>{label}</h3>
+          <strong>{label}</strong>
+          <em>{theme.code}</em>
+        </span>
+        <span className="persona-toggle" aria-hidden="true">⌄</span>
+      </summary>
+      <div className="persona-card-detail">
+        {opinionVisible ? (
+          <div className="audience-opinion">
+            <span>예상 대표 의견</span>
+            <p>{opinion || "직접 연결된 예상 의견이 없습니다."}</p>
+            <small>AI가 근거를 바탕으로 구성한 예상이며 실제 인용이 아닙니다.</small>
+          </div>
+        ) : (
+          <div className="audience-opinion is-repeated">
+            <span>예상 대표 의견</span>
+            <p>대표 의견은 관련 이용자 유형 카드에 함께 표시했습니다.</p>
+          </div>
+        )}
+        <div className="audience-action">
+          <span>예상 행동</span>
+          <p>{action || "현재 이용 방식을 유지할 가능성이 있습니다."}</p>
         </div>
+        <p className="audience-context">{context}</p>
+        <footer className="audience-stats">
+          <span><small>근거</small><strong>{evidenceCount ? `${evidenceCount}건` : "확인 필요"}</strong></span>
+          <span><small>근거 일치도</small><strong>{evidenceCount ? `${Math.round(confidence * 100)}%` : "산정 전"}</strong></span>
+        </footer>
       </div>
-      {opinionVisible ? (
-        <div className="audience-opinion">
-          <span>예상 대표 의견</span>
-          <p>{opinion || "직접 연결된 예상 의견이 없습니다."}</p>
-          <small>AI가 근거를 바탕으로 구성한 예상이며 실제 인용이 아닙니다.</small>
-        </div>
-      ) : (
-        <div className="audience-opinion is-repeated">
-          <span>예상 대표 의견</span>
-          <p>대표 의견은 관련 이용자 유형 카드에 함께 표시했습니다.</p>
-        </div>
-      )}
-      <div className="audience-action">
-        <span>예상 행동</span>
-        <p>{action || "현재 이용 방식을 유지할 가능성이 있습니다."}</p>
-      </div>
-      <p className="audience-context">{context}</p>
-      <footer className="audience-stats">
-        <span><small>근거</small><strong>{evidenceCount ? `${evidenceCount}건` : "확인 필요"}</strong></span>
-        <span><small>근거 일치도</small><strong>{evidenceCount ? `${Math.round(confidence * 100)}%` : "산정 전"}</strong></span>
-      </footer>
-    </article>
+    </details>
   );
 }
 
@@ -104,7 +103,6 @@ export function LanguageGameCard({
   const sentimentTotal = Object.values(counts).reduce((sum, count) => sum + count, 0);
   return (
     <article className={`audience-card language-game-card ${conclusion ? "" : "is-locked"}`} aria-label={`${label} 예상 반응 카드`}>
-      <i className="card-foil" aria-hidden="true" />
       <header className="audience-card-head">
         <span>언어권 예상 카드</span>
         <b>{label}</b>

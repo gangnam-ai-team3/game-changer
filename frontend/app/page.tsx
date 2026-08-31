@@ -665,15 +665,14 @@ export default function Home() {
 
   return (
     <main className="shell">
-      <p className="eyebrow">
-        <i /> {reviewMode === "trend" ? "게임체인저 / 이용자 동향 분석" : "게임체인저 / 출시 전 시나리오 점검"}
-      </p>
-      <h1>게임체인저</h1>
-      <p className="lead">
-        {reviewMode === "trend"
-          ? "저장된 이용자 의견에서 현재 반응 분포와 주요 주제를 찾습니다."
-          : "출시 예정 콘텐츠의 예상 반응, 위험, 출시 조건을 근거와 함께 점검합니다."}
-      </p>
+      <header className="site-hero">
+        <h1 className="brand-wordmark">GAME-<span>CHANGER</span></h1>
+        <p className="lead">
+          {reviewMode === "trend"
+            ? "저장된 이용자 의견에서 현재 반응 분포와 주요 주제를 찾습니다."
+            : "출시 예정 콘텐츠의 예상 반응, 위험, 출시 조건을 근거와 함께 점검합니다."}
+        </p>
+      </header>
       <div className="mode-switch workspace-switch" role="group" aria-label="분석 기능">
         <button
           type="button"
